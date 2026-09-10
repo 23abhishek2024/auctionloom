@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node verify_phases.mjs",
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "dev": "nodemon src/app.js",
+    "cluster": "node src/index.js",
     "worker": "node src/workers/jobWorker.js",
     "scheduler": "node src/workers/scheduler.js"
   },
