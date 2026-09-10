@@ -57,4 +57,8 @@ export const bidApi = {
   placeBid: (bidData) => api.post('/bids', bidData),
 };
 
+export const aiApi = {
+  generate: (data) => api.post('/ai/generate', data),
+};
+
 export default api;

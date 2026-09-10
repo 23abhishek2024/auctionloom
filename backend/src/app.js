@@ -11,6 +11,7 @@ const { rateLimiterMiddleware } = require('./middlewares/rateLimiter');
 const authRoutes = require('./routes/authRoutes');
 const auctionRoutes = require('./routes/auctionRoutes');
 const bidRoutes = require('./routes/bidRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 
 // Services
 const { initSocket } = require('./services/socketService');
@@ -31,6 +32,7 @@ app.use(rateLimiterMiddleware);
 app.use('/api/auth', authRoutes);
 app.use('/api/auctions', auctionRoutes);
 app.use('/api/bids', bidRoutes);
+app.use('/api/ai', aiRoutes);
 
 // ── Root & Health Check ───────────────────────────────────────
 app.get('/', (req, res) => {
@@ -44,6 +46,7 @@ app.get('/', (req, res) => {
       auctions: '/api/auctions',
       auth: '/api/auth',
       bids: '/api/bids',
+      ai: '/api/ai/generate',
     },
   });
 });

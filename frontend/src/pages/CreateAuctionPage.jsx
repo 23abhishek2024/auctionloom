@@ -1,8 +1,19 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { auctionApi } from '../api/client';
+import { auctionApi, aiApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { PlusCircle, ArrowLeft, Calendar, DollarSign, FileText, Tag, AlertCircle } from 'lucide-react';
+import {
+  PlusCircle,
+  ArrowLeft,
+  Calendar,
+  DollarSign,
+  FileText,
+  Tag,
+  AlertCircle,
+  Sparkles,
+  Wand2,
+  CheckCircle2,
+} from 'lucide-react';
 
 export const CreateAuctionPage = () => {
   const navigate = useNavigate();
@@ -24,10 +35,50 @@ export const CreateAuctionPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
+  // AI Assistant States
+  const [aiKeywords, setAiKeywords] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiMessage, setAiMessage] = useState(null);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
     setError(null);
+  };
+
+  // ── AI Copywriting Handler ──────────────────────────────────
+  const handleGenerateAI = async () => {
+    if (!aiKeywords.trim()) {
+      setError('Please enter a few keywords (e.g. "Rolex Submariner 1968 mint") to generate.');
+      return;
+    }
+
+    try {
+      setAiLoading(true);
+      setError(null);
+      setAiMessage(null);
+
+      const res = await aiApi.generate({
+        keywords: aiKeywords.trim(),
+      });
+
+      const { title, description, suggested_starting_price } = res.data;
+
+      setFormData((prev) => ({
+        ...prev,
+        title: title || prev.title,
+        description: description || prev.description,
+        starting_price: prev.starting_price || (suggested_starting_price ? suggested_starting_price.toString() : ''),
+      }));
+
+      setAiMessage('✨ Listing copy generated successfully! You can review and edit below.');
+      setTimeout(() => setAiMessage(null), 5000);
+    } catch (err) {
+      console.error('AI Generator Error:', err);
+      setError(err.response?.data?.error || 'Failed to generate copy. Try again.');
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -84,10 +135,10 @@ export const CreateAuctionPage = () => {
       </Link>
 
       {/* Main Form Card */}
-      <div className="glass-panel border border-slate-800/80 rounded-3xl p-6 sm:p-10 shadow-2xl">
+      <div className="glass-panel border border-slate-800/80 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8">
         
         {/* Header */}
-        <div className="flex items-center gap-3 mb-6 pb-6 border-b border-slate-800/80">
+        <div className="flex items-center gap-3 pb-6 border-b border-slate-800/80">
           <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
             <PlusCircle className="w-6 h-6" />
           </div>
@@ -101,9 +152,53 @@ export const CreateAuctionPage = () => {
           </div>
         </div>
 
+        {/* ── AI Assistant Feature Box (Phase 8) ──────────────────── */}
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-slate-900/50 border border-indigo-500/30 shadow-lg relative overflow-hidden">
+          <div className="absolute right-0 top-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider font-mono text-indigo-300 mb-2">
+            <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
+            <span>AI Auction Assistant</span>
+            <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30">
+              Phase 8
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-300 mb-4 leading-relaxed">
+            Enter brief keywords about your item. Our prompt-engineered AI will automatically write an
+            appraisal-grade title and compelling auction description.
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-2.5">
+            <input
+              type="text"
+              value={aiKeywords}
+              onChange={(e) => setAiKeywords(e.target.value)}
+              placeholder="e.g. 1968 Rolex Submariner Ref 5513 black dial excellent condition"
+              className="flex-1 px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-400 transition-colors"
+            />
+            <button
+              type="button"
+              onClick={handleGenerateAI}
+              disabled={aiLoading}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 shadow-md shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer whitespace-nowrap active:scale-95"
+            >
+              <Wand2 className={`w-3.5 h-3.5 ${aiLoading ? 'animate-spin' : ''}`} />
+              <span>{aiLoading ? 'Generating...' : 'Generate with AI'}</span>
+            </button>
+          </div>
+
+          {aiMessage && (
+            <div className="mt-3 text-xs text-emerald-400 flex items-center gap-1.5 font-medium animate-fade-in">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>{aiMessage}</span>
+            </div>
+          )}
+        </div>
+
         {/* Error Banner */}
         {error && (
-          <div className="mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-start gap-2.5">
+          <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-start gap-2.5">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
@@ -138,11 +233,11 @@ export const CreateAuctionPage = () => {
             <div className="relative">
               <textarea
                 name="description"
-                rows={4}
+                rows={5}
                 value={formData.description}
                 onChange={handleChange}
-                placeholder="Provide details about condition, provenance, provenance certificates, and shipping..."
-                className="w-full p-4 rounded-xl bg-slate-900/80 border border-slate-800 focus:border-indigo-500 focus:outline-none text-white text-sm placeholder:text-slate-500 transition-colors"
+                placeholder="Provide details about condition, provenance, certificates, and shipping..."
+                className="w-full p-4 rounded-xl bg-slate-900/80 border border-slate-800 focus:border-indigo-500 focus:outline-none text-white text-sm placeholder:text-slate-500 transition-colors leading-relaxed"
               />
             </div>
           </div>

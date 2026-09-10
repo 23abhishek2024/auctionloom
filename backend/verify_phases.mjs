@@ -392,8 +392,39 @@ async function runVerification() {
   assert('Phase 7', 'Vite frontend dev server responds with 200 OK on port 5173', viteResponse.status === 200);
   assert('Phase 7', 'Vite serves HTML with root element and React module entry', viteResponse.body.includes('<div id="root">') && viteResponse.body.includes('main.jsx'));
 
+  // ============================================================
+  // PHASE 8: AI Assistant & Copywriter
+  // ============================================================
+  console.log('\n--- Checking Phase 8: AI Auction Assistant ---');
+
+  assert('Phase 8', 'aiService.js exists', fs.existsSync(`${backendSrc}/services/aiService.js`));
+  assert('Phase 8', 'aiController.js exists', fs.existsSync(`${backendSrc}/controllers/aiController.js`));
+  assert('Phase 8', 'aiRoutes.js exists', fs.existsSync(`${backendSrc}/routes/aiRoutes.js`));
+
+  // 1. RBAC Check: Bidder forbidden from accessing /api/ai/generate
+  const aiBidderRes = await request('POST', '/api/ai/generate', {
+    keywords: 'Vintage Rolex',
+  }, bidderToken);
+  assert('Phase 8', 'RBAC: bidder forbidden from generating AI copy (403 Forbidden)', aiBidderRes.status === 403);
+
+  // 2. Validation Check: Missing keywords returns 400 Bad Request
+  const aiEmptyRes = await request('POST', '/api/ai/generate', {
+    keywords: '   ',
+  }, sellerToken);
+  assert('Phase 8', 'Validation: empty keywords rejected with 400 Bad Request', aiEmptyRes.status === 400);
+
+  // 3. Generation Check: Auctioneer successfully generates copy
+  const aiSuccessRes = await request('POST', '/api/ai/generate', {
+    keywords: '1968 Rolex Submariner Ref 5513 black dial mint',
+    category: 'Watches',
+  }, sellerToken);
+  assert('Phase 8', 'Auctioneer receives 200 OK from AI Assistant', aiSuccessRes.status === 200);
+  assert('Phase 8', 'AI response contains generated title', !!aiSuccessRes.data.title && aiSuccessRes.data.title.includes('Rolex'));
+  assert('Phase 8', 'AI response contains detailed description', !!aiSuccessRes.data.description && aiSuccessRes.data.description.length > 50);
+  assert('Phase 8', 'AI response provides suggested starting price', typeof aiSuccessRes.data.suggested_starting_price === 'number');
+
   console.log('\n===========================================================');
-  console.log('   🎉 ALL PHASES (1 TO 7) ARE 100% VERIFIED AND PASSING!   ');
+  console.log('   🎉 ALL PHASES (1 TO 8) ARE 100% VERIFIED AND PASSING!   ');
   console.log('===========================================================');
   console.log(`Total assertions passed: ${results.length}/${results.length}`);
 }
