@@ -32,7 +32,22 @@ app.use('/api/auth', authRoutes);
 app.use('/api/auctions', auctionRoutes);
 app.use('/api/bids', bidRoutes);
 
-// ── Health Check ──────────────────────────────────────────────
+// ── Root & Health Check ───────────────────────────────────────
+app.get('/', (req, res) => {
+  res.json({
+    message: '🚀 Prime Bid Backend API & Real-Time WebSocket Server',
+    status: 'online',
+    version: '1.0.0',
+    frontend: process.env.FRONTEND_URL || 'http://localhost:5173',
+    endpoints: {
+      health: '/health',
+      auctions: '/api/auctions',
+      auth: '/api/auth',
+      bids: '/api/bids',
+    },
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', pid: process.pid, time: new Date().toISOString() });
 });
