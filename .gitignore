@@ -1,0 +1,5 @@
+# Prime Bid - Git Ignore
+node_modules/
+.env
+dist/
+*.log
