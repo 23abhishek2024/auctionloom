@@ -59,6 +59,7 @@ const callGemini = async (apiKey, keywords, category) => {
     headers: {
       'Content-Type': 'application/json',
     },
+    signal: AbortSignal.timeout(18000), // 18s timeout before fallback
     body: JSON.stringify({
       contents: [
         {
@@ -68,6 +69,7 @@ const callGemini = async (apiKey, keywords, category) => {
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.7,
+        maxOutputTokens: 500,
       },
     }),
   });

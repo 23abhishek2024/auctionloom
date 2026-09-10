@@ -75,7 +75,12 @@ export const CreateAuctionPage = () => {
       setTimeout(() => setAiMessage(null), 5000);
     } catch (err) {
       console.error('AI Generator Error:', err);
-      setError(err.response?.data?.error || 'Failed to generate copy. Try again.');
+      setError(
+        err.response?.data?.error ||
+        (err.code === 'ECONNABORTED'
+          ? 'AI generation request timed out. Please try again.'
+          : err.message || 'Failed to generate copy. Try again.')
+      );
     } finally {
       setAiLoading(false);
     }

@@ -7,7 +7,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 10000,
+  timeout: 30000,
 });
 
 // Request Interceptor: Attach JWT token if available
@@ -58,7 +58,7 @@ export const bidApi = {
 };
 
 export const aiApi = {
-  generate: (data) => api.post('/ai/generate', data),
+  generate: (data) => api.post('/ai/generate', data, { timeout: 35000 }),
 };
 
 export default api;
