@@ -1,0 +1,46 @@
+import React from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+export const ProtectedRoute = ({ children, allowedRoles }) => {
+  const { user, isAuthenticated, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-slate-400 font-mono">Authenticating...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (allowedRoles && !allowedRoles.includes(user?.role)) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center p-4">
+        <div className="max-w-md w-full glass-card p-8 rounded-2xl border border-rose-500/20 text-center">
+          <h2 className="text-xl font-bold text-rose-400 mb-2">Access Restricted</h2>
+          <p className="text-sm text-slate-400 mb-6">
+            Your role (<span className="font-mono text-slate-200">{user?.role}</span>) does not have permission to access this page.
+          </p>
+          <a
+            href="/"
+            className="inline-flex items-center px-4 py-2 rounded-xl text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 transition-colors"
+          >
+            Return to Dashboard
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return children;
+};
+
+export default ProtectedRoute;
