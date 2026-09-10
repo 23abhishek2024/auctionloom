@@ -1,0 +1,91 @@
+databases:
+  - name: primebid-db
+    databaseName: primebid
+    user: postgres
+    plan: free
+    region: oregon
+
+services:
+  # ==========================================
+  # Prime Bid Backend Web Service (API + Sockets)
+  # ==========================================
+  - type: web
+    name: primebid-backend
+    env: node
+    region: oregon
+    plan: free
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: primebid-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        value: https://primebid-frontend.onrender.com
+
+  # ==========================================
+  # Prime Bid Background Worker (Job Queue)
+  # ==========================================
+  - type: worker
+    name: primebid-worker
+    env: node
+    region: oregon
+    plan: free
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    dockerCommand: npm run worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: primebid-db
+          property: connectionString
+
+  # ==========================================
+  # Prime Bid Job Scheduler
+  # ==========================================
+  - type: worker
+    name: primebid-scheduler
+    env: node
+    region: oregon
+    plan: free
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    dockerCommand: npm run scheduler
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: primebid-db
+          property: connectionString
+
+  # ==========================================
+  # Prime Bid React SPA Static Site
+  # ==========================================
+  - type: web
+    name: primebid-frontend
+    env: static
+    region: oregon
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://primebid-backend.onrender.com/api
+      - key: VITE_SOCKET_URL
+        value: https://primebid-backend.onrender.com

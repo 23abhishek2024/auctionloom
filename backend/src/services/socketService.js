@@ -2,6 +2,17 @@ const { Server } = require('socket.io');
 
 let io;
 
+const parseAllowedOrigins = () => {
+  const envUrl = process.env.FRONTEND_URL;
+  if (!envUrl || envUrl === '*') {
+    return '*';
+  }
+  const origins = envUrl.split(',').map((o) => o.trim()).filter(Boolean);
+  if (!origins.includes('http://localhost:5173')) origins.push('http://localhost:5173');
+  if (!origins.includes('http://localhost:3000')) origins.push('http://localhost:3000');
+  return origins;
+};
+
 /**
  * Initialize Socket.IO and attach to the HTTP server.
  * Called once from app.js on startup.
@@ -9,8 +20,9 @@ let io;
 const initSocket = (server) => {
   io = new Server(server, {
     cors: {
-      origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+      origin: parseAllowedOrigins(),
       methods: ['GET', 'POST'],
+      credentials: true,
     },
   });
 

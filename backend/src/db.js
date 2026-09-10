@@ -6,19 +6,36 @@ require('dotenv').config();
  * Using a pool instead of a single client is the best practice for
  * a web server — it handles multiple concurrent requests efficiently.
  */
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT, 10),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  // Max connections in the pool. Match this to your DB plan limits.
-  max: 10,
-  // Close idle clients after 30 seconds
-  idleTimeoutMillis: 30000,
-  // Fail fast if a connection takes longer than 5 seconds
-  connectionTimeoutMillis: 5000,
-});
+const isProduction = process.env.NODE_ENV === 'production';
+const hasCloudUrl = !!process.env.DATABASE_URL;
+
+// Cloud providers (AWS RDS, Supabase, Neon, Render) require SSL encryption
+const sslConfig =
+  (isProduction || hasCloudUrl) && process.env.DISABLE_DB_SSL !== 'true'
+    ? { rejectUnauthorized: false }
+    : false;
+
+const poolConfig = process.env.DATABASE_URL
+  ? {
+      connectionString: process.env.DATABASE_URL,
+      ssl: sslConfig,
+      max: parseInt(process.env.DB_POOL_MAX, 10) || 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    }
+  : {
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT, 10) || 5432,
+      database: process.env.DB_NAME || 'primebid',
+      user: process.env.DB_USER || 'postgres',
+      password: process.env.DB_PASSWORD,
+      ssl: sslConfig,
+      max: parseInt(process.env.DB_POOL_MAX, 10) || 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    };
+
+const pool = new Pool(poolConfig);
 
 /**
  * Test the connection on startup.
