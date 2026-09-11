@@ -58,7 +58,7 @@ export const RegisterPage = () => {
             Create an Account
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Join Prime Bid for real-time high-concurrency auctions.
+            Join AuctionLoom for real-time high-concurrency auctions.
           </p>
         </div>
 

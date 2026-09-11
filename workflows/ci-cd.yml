@@ -1,4 +1,4 @@
-name: Prime Bid CI/CD Pipeline
+name: AuctionLoom CI/CD Pipeline
 
 on:
   push:

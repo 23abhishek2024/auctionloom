@@ -37,7 +37,7 @@ app.use('/api/ai', aiRoutes);
 // ── Root & Health Check ───────────────────────────────────────
 app.get('/', (req, res) => {
   res.json({
-    message: '🚀 Prime Bid Backend API & Real-Time WebSocket Server',
+    message: '🚀 AuctionLoom Backend API & Real-Time WebSocket Server',
     status: 'online',
     version: '1.0.0',
     frontend: process.env.FRONTEND_URL || 'http://localhost:5173',

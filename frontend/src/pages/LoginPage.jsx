@@ -125,19 +125,19 @@ export const LoginPage = () => {
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => handleQuickFill('bidder@primebid.com', 'password123')}
+              onClick={() => handleQuickFill('bidder@auctionloom.com', 'password123')}
               className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-left text-[11px] font-mono text-slate-300 transition-colors"
             >
               <div className="text-indigo-400 font-bold">Demo Bidder</div>
-              <div className="text-[10px] text-slate-400">bidder@primebid.com</div>
+              <div className="text-[10px] text-slate-400">bidder@auctionloom.com</div>
             </button>
             <button
               type="button"
-              onClick={() => handleQuickFill('seller@primebid.com', 'password123')}
+              onClick={() => handleQuickFill('seller@auctionloom.com', 'password123')}
               className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-left text-[11px] font-mono text-slate-300 transition-colors"
             >
               <div className="text-amber-400 font-bold">Demo Auctioneer</div>
-              <div className="text-[10px] text-slate-400">seller@primebid.com</div>
+              <div className="text-[10px] text-slate-400">seller@auctionloom.com</div>
             </button>
           </div>
         </div>

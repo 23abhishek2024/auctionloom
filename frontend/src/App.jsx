@@ -48,7 +48,7 @@ function App() {
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400 font-mono">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                  <span className="text-slate-300 font-semibold">Prime Bid Architecture</span>
+                  <span className="text-slate-300 font-semibold">AuctionLoom Architecture</span>
                   <span>— Node.js Cluster • PostgreSQL Pessimistic Locks • Socket.IO</span>
                 </div>
                 <div>

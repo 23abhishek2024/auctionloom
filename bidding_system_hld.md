@@ -1,7 +1,7 @@
-# Prime Bid: Detailed High-Level (HLD) & Low-Level Design (LLD)
+# AuctionLoom: Detailed High-Level (HLD) & Low-Level Design (LLD)
 
 ## 1. Project Overview & Detailed Description
-**Prime Bid** is a highly scalable, real-time auction platform designed to handle high concurrency, prevent race conditions (double-winning), and reliably process auction conclusions. 
+**AuctionLoom** is a highly scalable, real-time auction platform designed to handle high concurrency, prevent race conditions (double-winning), and reliably process auction conclusions. 
 
 The architecture is explicitly designed to demonstrate mastery over modern backend engineering, distributed systems, and generative AI. It strictly follows the **MVC (Model-View-Controller)** pattern, utilizes **Express Middlewares** for cross-cutting concerns (Logging, Auth, Rate Limiting), leverages the **Node.js Cluster module** for high availability, handles distributed background jobs safely using **PostgreSQL**, and optionally features an isolated **AI Assistant** (using basic LLM prompt engineering) to help users generate highly engaging auction descriptions.
 

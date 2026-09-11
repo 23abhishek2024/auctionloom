@@ -38,7 +38,7 @@ export const Navbar = () => {
               </div>
               <div>
                 <span className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
-                  Prime<span className="text-indigo-400">Bid</span>
+                  Auction<span className="text-indigo-400">Loom</span>
                 </span>
                 <span className="hidden sm:block text-[10px] uppercase font-mono tracking-widest text-slate-400 -mt-1">
                   High-Concurrency

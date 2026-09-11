@@ -61,7 +61,7 @@ function assert(phase, testName, condition, details = '') {
 
 async function runVerification() {
   console.log('===========================================================');
-  console.log('   PRIME BID: DETAILED 1 TO 7 PHASE VERIFICATION SUITE    ');
+  console.log('   AUCTIONLOOM: DETAILED 1 TO 7 PHASE VERIFICATION SUITE   ');
   console.log('===========================================================\n');
 
   // ============================================================

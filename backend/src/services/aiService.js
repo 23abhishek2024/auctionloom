@@ -7,7 +7,7 @@
  */
 
 const formatPrompt = (keywords, category = 'General') => {
-  return `You are an expert luxury auction appraiser and copywriter for Prime Bid.
+  return `You are an expert luxury auction appraiser and copywriter for AuctionLoom.
 Given the following item details:
 - Keywords: "${keywords}"
 - Category: "${category}"
@@ -37,7 +37,7 @@ const generateFallbackCopy = (keywords, category = 'General') => {
 
 The item exhibits remarkable preservation with all original markings, finishes, and structural integrity fully intact. Inspected and verified by certified appraisers, it stands as a testament to historical importance and refined design, making it an invaluable addition to any premier collection.
 
-Offered exclusively through Prime Bid with full documentation, tamper-evident security seal, and expedited insured freight. Bidders are advised to submit early bids as competitive interest is anticipated.`;
+Offered exclusively through AuctionLoom with full documentation, tamper-evident security seal, and expedited insured freight. Bidders are advised to submit early bids as competitive interest is anticipated.`;
 
   return {
     title,

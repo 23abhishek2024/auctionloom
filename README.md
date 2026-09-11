@@ -1,4 +1,4 @@
-# Prime Bid ⚡ Real-Time Auction & Distributed Bidding Engine
+# AuctionLoom ⚡ Real-Time Auction & Distributed Bidding Engine
 
 [![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Express.js](https://img.shields.io/badge/Express-5.x-000000?logo=express&logoColor=white)](https://expressjs.com/)
@@ -15,7 +15,7 @@
 > ⚡ **Live Backend API**: [https://primebid-backend-e971.onrender.com/](https://primebid-backend-e971.onrender.com/)  
 > 🗄️ **Managed Database**: PostgreSQL on Supabase (Mumbai Cluster)
 
-**Prime Bid** is a production-grade, distributed real-time auction platform engineered to handle high concurrency, eliminate race conditions (preventing double-bids), and process auction conclusions asynchronously. 
+**AuctionLoom** is a production-grade, distributed real-time auction platform engineered to handle high concurrency, eliminate race conditions (preventing double-bids), and process auction conclusions asynchronously. 
 
 Built strictly following the **MVC (Model-View-Controller)** pattern, **PostgreSQL Pessimistic Row Locking (`SELECT FOR UPDATE`)**, **Distributed Job Queues (`FOR UPDATE SKIP LOCKED`)**, **Bi-directional WebSockets (Socket.IO)**, and an **Isolated AI Appraisal Assistant (Google Gemini 3.6 Flash)**.
 
@@ -65,7 +65,7 @@ graph TD
 
 ### 1. Zero Race Conditions with Pessimistic Row Locking
 In high-frequency auctions, two bidders often submit identical or split-second competing bids. Traditional applications suffer from dirty writes and double-winners. 
-- Prime Bid initiates an atomic **ACID Transaction** (`BEGIN`) and locks the target auction row exclusively using **`SELECT * FROM auctions WHERE id = $1 FOR UPDATE`**.
+- AuctionLoom initiates an atomic **ACID Transaction** (`BEGIN`) and locks the target auction row exclusively using **`SELECT * FROM auctions WHERE id = $1 FOR UPDATE`**.
 - Concurrent transactions are queued at the database engine level until the current transaction commits (`COMMIT`) or rolls back (`ROLLBACK`), guaranteeing absolute price consistency.
 
 ### 2. Instant WebSockets (Socket.IO)
@@ -176,7 +176,7 @@ npm run dev        # Starts Vite dev server on http://localhost:5173
 
 ## 🧪 Automated Testing Suite
 
-Prime Bid includes a comprehensive 61-assertion integration and concurrency verification suite:
+AuctionLoom includes a comprehensive 61-assertion integration and concurrency verification suite:
 
 ```bash
 cd backend
@@ -185,7 +185,7 @@ npm test
 
 ```text
 ===========================================================
-   PRIME BID: DETAILED 1 TO 7 PHASE VERIFICATION SUITE    
+   AUCTIONLOOM: DETAILED 1 TO 7 PHASE VERIFICATION SUITE   
 ===========================================================
 [Phase 1] ✅ PASS - MVC structure & folders verified
 [Phase 2] ✅ PASS - PostgreSQL schema & constraints verified
@@ -206,7 +206,7 @@ Total assertions passed: 61/61
 
 ## 🌐 Production Cloud Architecture
 
-Prime Bid is engineered for decoupled cloud deployment:
+AuctionLoom is engineered for decoupled cloud deployment:
 
 | Layer | Provider | Configuration |
 |---|---|---|
