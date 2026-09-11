@@ -1,5 +1,5 @@
 -- ============================================================
---  Prime Bid - PostgreSQL Database Schema
+--  AuctionLoom - PostgreSQL Database Schema
 -- ============================================================
 
 -- Enable UUID generation

@@ -1,13 +1,13 @@
 {
-  "family": "primebid-backend-task",
+  "family": "auctionloom-backend-task",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
   "containerDefinitions": [
     {
-      "name": "primebid-api",
-      "image": "<AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/primebid-backend:latest",
+      "name": "auctionloom-api",
+      "image": "<AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/auctionloom-backend:latest",
       "essential": true,
       "portMappings": [
         {
@@ -19,17 +19,17 @@
       "environment": [
         { "name": "NODE_ENV", "value": "production" },
         { "name": "PORT", "value": "5000" },
-        { "name": "FRONTEND_URL", "value": "https://primebid.vercel.app" }
+        { "name": "FRONTEND_URL", "value": "https://auctionloom.vercel.app" }
       ],
       "secrets": [
-        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:primebid/DATABASE_URL" },
-        { "name": "JWT_SECRET", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:primebid/JWT_SECRET" },
-        { "name": "GEMINI_API_KEY", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:primebid/GEMINI_API_KEY" }
+        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:auctionloom/DATABASE_URL" },
+        { "name": "JWT_SECRET", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:auctionloom/JWT_SECRET" },
+        { "name": "GEMINI_API_KEY", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:auctionloom/GEMINI_API_KEY" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/primebid-backend",
+          "awslogs-group": "/ecs/auctionloom-backend",
           "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "ecs"
         }

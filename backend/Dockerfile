@@ -1,5 +1,5 @@
 # ==========================================
-# Prime Bid Backend - Production Dockerfile
+# AuctionLoom Backend - Production Dockerfile
 # ==========================================
 FROM node:20-alpine
 

@@ -1,5 +1,5 @@
 # ==========================================
-# Prime Bid Frontend - Multi-Stage Dockerfile
+# AuctionLoom Frontend - Multi-Stage Dockerfile
 # ==========================================
 
 # Stage 1: Build the React Application
