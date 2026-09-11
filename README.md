@@ -8,6 +8,13 @@
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Google Gemini](https://img.shields.io/badge/Gemini_AI-3.6_Flash-8E75B2?logo=google&logoColor=white)](https://deepmind.google/technologies/gemini/)
 
+[![Live Website](https://img.shields.io/badge/Live_Demo-biding--app--indol.vercel.app-00C7B7?logo=vercel&logoColor=white)](https://biding-app-indol.vercel.app/)
+[![API Status](https://img.shields.io/badge/API_Status-Online-brightgreen?logo=render&logoColor=white)](https://primebid-backend-e971.onrender.com/health)
+
+> 🚀 **Live Production Demo**: [https://biding-app-indol.vercel.app/](https://biding-app-indol.vercel.app/)  
+> ⚡ **Live Backend API**: [https://primebid-backend-e971.onrender.com/](https://primebid-backend-e971.onrender.com/)  
+> 🗄️ **Managed Database**: PostgreSQL on Supabase (Mumbai Cluster)
+
 **Prime Bid** is a production-grade, distributed real-time auction platform engineered to handle high concurrency, eliminate race conditions (preventing double-bids), and process auction conclusions asynchronously. 
 
 Built strictly following the **MVC (Model-View-Controller)** pattern, **PostgreSQL Pessimistic Row Locking (`SELECT FOR UPDATE`)**, **Distributed Job Queues (`FOR UPDATE SKIP LOCKED`)**, **Bi-directional WebSockets (Socket.IO)**, and an **Isolated AI Appraisal Assistant (Google Gemini 3.6 Flash)**.
