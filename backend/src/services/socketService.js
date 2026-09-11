@@ -10,6 +10,8 @@ const parseAllowedOrigins = () => {
   const origins = envUrl.split(',').map((o) => o.trim()).filter(Boolean);
   if (!origins.includes('http://localhost:5173')) origins.push('http://localhost:5173');
   if (!origins.includes('http://localhost:3000')) origins.push('http://localhost:3000');
+  if (!origins.includes('https://auctionloom.vercel.app')) origins.push('https://auctionloom.vercel.app');
+  if (!origins.includes('https://biding-app-indol.vercel.app')) origins.push('https://biding-app-indol.vercel.app');
   return origins;
 };
 

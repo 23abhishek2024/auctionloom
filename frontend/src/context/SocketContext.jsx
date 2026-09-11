@@ -1,7 +1,11 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = 
+  import.meta.env.VITE_SOCKET_URL || 
+  (import.meta.env.PROD 
+    ? 'https://primebid-backend-e971.onrender.com' 
+    : 'http://localhost:5000');
 
 const SocketContext = createContext(null);
 
