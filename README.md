@@ -135,8 +135,8 @@ Make sure [Docker Desktop](https://www.docker.com/) is running, then run:
 
 ```bash
 # Clone the repository
-git clone https://github.com/23abhishek2024/biding-app.git
-cd biding-app
+git clone https://github.com/23abhishek2024/auctionloom.git
+cd auctionloom
 
 # Copy environment variables
 cp .env.example .env
