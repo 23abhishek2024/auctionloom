@@ -8,10 +8,10 @@
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Google Gemini](https://img.shields.io/badge/Gemini_AI-3.6_Flash-8E75B2?logo=google&logoColor=white)](https://deepmind.google/technologies/gemini/)
 
-[![Live Website](https://img.shields.io/badge/Live_Demo-biding--app--indol.vercel.app-00C7B7?logo=vercel&logoColor=white)](https://biding-app-indol.vercel.app/)
+[![Live Website](https://img.shields.io/badge/Live_Demo-auctionloom.vercel.app-00C7B7?logo=vercel&logoColor=white)](https://auctionloom.vercel.app/)
 [![API Status](https://img.shields.io/badge/API_Status-Online-brightgreen?logo=render&logoColor=white)](https://primebid-backend-e971.onrender.com/health)
 
-> 🚀 **Live Production Demo**: [https://biding-app-indol.vercel.app/](https://biding-app-indol.vercel.app/)  
+> 🚀 **Live Production Demo**: [https://auctionloom.vercel.app/](https://auctionloom.vercel.app/)  
 > ⚡ **Live Backend API**: [https://primebid-backend-e971.onrender.com/](https://primebid-backend-e971.onrender.com/)  
 > 🗄️ **Managed Database**: PostgreSQL on Supabase (Mumbai Cluster)
 
