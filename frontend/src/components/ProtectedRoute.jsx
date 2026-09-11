@@ -31,7 +31,7 @@ export const ProtectedRoute = ({ children, allowedRoles }) => {
           </p>
           <a
             href="/"
-            className="inline-flex items-center px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 transition-colors shadow-sm"
+            className="inline-flex items-center px-5 py-2.5 rounded-xl text-xs font-semibold text-white btn-primary shadow-sm"
           >
             Return to Dashboard
           </a>
