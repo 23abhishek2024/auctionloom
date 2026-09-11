@@ -49,17 +49,17 @@ export const RegisterPage = () => {
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
-      <div className="max-w-md w-full glass-panel border border-slate-800/80 rounded-3xl p-8 sm:p-10 shadow-2xl">
+      <div className="max-w-md w-full glass-panel border border-white/[0.08] rounded-3xl p-8 sm:p-10 shadow-2xl bg-[#090A12]/90 backdrop-blur-xl">
         
         {/* Brand Header */}
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center mx-auto mb-3 text-indigo-400">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-600/20 to-fuchsia-600/20 border border-violet-500/30 flex items-center justify-center mx-auto mb-3 text-violet-400 shadow-[0_0_20px_rgba(139,92,246,0.2)]">
             <Gavel className="w-6 h-6" />
           </div>
-          <h2 className="text-2xl font-extrabold text-white tracking-tight">
+          <h2 className="text-2xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-zinc-100 to-zinc-400">
             Create an Account
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-zinc-400 mt-1">
             Join AuctionLoom for real-time high-concurrency auctions.
           </p>
         </div>
@@ -76,17 +76,17 @@ export const RegisterPage = () => {
           
           {/* Email */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-300 mb-1.5">
+            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300 mb-1.5">
               Email Address *
             </label>
             <div className="relative">
-              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@example.com"
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0B0D16] border border-white/[0.1] text-white text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-colors placeholder:text-zinc-600"
                 required
               />
             </div>
@@ -94,23 +94,23 @@ export const RegisterPage = () => {
 
           {/* Password */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-300 mb-1.5">
+            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300 mb-1.5">
               Password (min 6 chars) *
             </label>
             <div className="relative">
-              <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-10 pr-11 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                className="w-full pl-10 pr-11 py-2.5 rounded-xl bg-[#0B0D16] border border-white/[0.1] text-white text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-colors placeholder:text-zinc-600"
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((prev) => !prev)}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors p-1 cursor-pointer"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 transition-colors p-1 cursor-pointer"
                 title={showPassword ? 'Hide password' : 'Show password'}
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
@@ -125,23 +125,23 @@ export const RegisterPage = () => {
 
           {/* Confirm Password */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-300 mb-1.5">
+            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300 mb-1.5">
               Confirm Password *
             </label>
             <div className="relative">
-              <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
               <input
                 type={showConfirmPassword ? 'text' : 'password'}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-10 pr-11 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                className="w-full pl-10 pr-11 py-2.5 rounded-xl bg-[#0B0D16] border border-white/[0.1] text-white text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-colors placeholder:text-zinc-600"
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowConfirmPassword((prev) => !prev)}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors p-1 cursor-pointer"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 transition-colors p-1 cursor-pointer"
                 title={showConfirmPassword ? 'Hide password' : 'Show password'}
                 aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
               >
@@ -156,40 +156,40 @@ export const RegisterPage = () => {
 
           {/* Role Selection */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-300 mb-2">
+            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300 mb-2">
               Select Account Role
             </label>
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setRole('bidder')}
-                className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all cursor-pointer ${
                   role === 'bidder'
-                    ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-sm'
-                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                    ? 'bg-violet-600/20 border-violet-500 text-white shadow-sm shadow-violet-500/20'
+                    : 'bg-[#0B0D16] border-white/[0.08] text-zinc-400 hover:border-white/[0.2]'
                 }`}
               >
                 <div className="flex items-center gap-1.5 font-bold text-xs">
-                  <User className="w-3.5 h-3.5 text-indigo-400" />
+                  <User className="w-3.5 h-3.5 text-violet-400" />
                   <span>Bidder</span>
                 </div>
-                <span className="text-[10px] text-slate-400">Place live bids</span>
+                <span className="text-[10px] text-zinc-500">Place live bids</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setRole('auctioneer')}
-                className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all cursor-pointer ${
                   role === 'auctioneer'
-                    ? 'bg-amber-600/20 border-amber-500 text-white shadow-sm'
-                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                    ? 'bg-amber-500/20 border-amber-500 text-white shadow-sm shadow-amber-500/20'
+                    : 'bg-[#0B0D16] border-white/[0.08] text-zinc-400 hover:border-white/[0.2]'
                 }`}
               >
                 <div className="flex items-center gap-1.5 font-bold text-xs">
                   <Store className="w-3.5 h-3.5 text-amber-400" />
                   <span>Auctioneer</span>
                 </div>
-                <span className="text-[10px] text-slate-400">Create & sell auctions</span>
+                <span className="text-[10px] text-zinc-500">Create & sell auctions</span>
               </button>
             </div>
           </div>
@@ -198,7 +198,7 @@ export const RegisterPage = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 px-4 rounded-xl font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer mt-4"
+            className="w-full py-3 px-4 rounded-xl font-bold text-sm text-white btn-primary transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer shadow-lg shadow-violet-600/25 active:scale-[0.99] mt-4"
           >
             <UserPlus className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             <span>{loading ? 'Creating Account...' : 'Register'}</span>
@@ -207,9 +207,9 @@ export const RegisterPage = () => {
         </form>
 
         {/* Footer link */}
-        <div className="mt-6 text-center text-xs text-slate-400">
+        <div className="mt-6 text-center text-xs text-zinc-400">
           Already have an account?{' '}
-          <Link to="/login" className="text-indigo-400 hover:text-indigo-300 font-semibold underline underline-offset-4">
+          <Link to="/login" className="text-violet-400 hover:text-violet-300 font-semibold underline underline-offset-4">
             Sign in
           </Link>
         </div>

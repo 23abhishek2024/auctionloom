@@ -218,43 +218,43 @@ export const CreateAuctionPage = () => {
       {/* Back Link */}
       <Link
         to="/"
-        className="inline-flex items-center gap-2 text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors mb-6"
+        className="inline-flex items-center gap-2 text-xs font-medium text-zinc-400 hover:text-white transition-colors mb-6"
       >
         <ArrowLeft className="w-4 h-4" />
         Back to Auctions
       </Link>
 
       {/* Main Form Card */}
-      <div className="glass-panel border border-slate-800/80 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8">
+      <div className="glass-panel border border-white/[0.08] rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8">
         
         {/* Header */}
-        <div className="flex items-center gap-3 pb-6 border-b border-slate-800/80">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+        <div className="flex items-center gap-3 pb-6 border-b border-white/[0.08]">
+          <div className="w-12 h-12 rounded-2xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center text-violet-400 shadow-inner">
             <PlusCircle className="w-6 h-6" />
           </div>
           <div>
             <h1 className="text-2xl font-extrabold text-white tracking-tight">
               Create New Auction
             </h1>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-zinc-400">
               List an item for real-time competitive bidding with photo and live room chat.
             </p>
           </div>
         </div>
 
         {/* ── AI Assistant Feature Box (Phase 8) ──────────────────── */}
-        <div className="p-5 rounded-2xl bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-slate-900/50 border border-indigo-500/30 shadow-lg relative overflow-hidden">
-          <div className="absolute right-0 top-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-violet-950/40 via-[#121020] to-[#0A0C14] border border-violet-500/30 shadow-lg relative overflow-hidden">
+          <div className="absolute right-0 top-0 w-32 h-32 bg-violet-500/10 rounded-full blur-2xl pointer-events-none" />
 
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider font-mono text-indigo-300 mb-2">
-            <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider font-mono text-violet-300 mb-2">
+            <Sparkles className="w-4 h-4 text-violet-400 animate-pulse" />
             <span>AI Auction Assistant</span>
-            <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30">
+            <span className="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-0.5 rounded-full border border-violet-500/30">
               Phase 8
             </span>
           </div>
 
-          <p className="text-xs text-slate-300 mb-4 leading-relaxed">
+          <p className="text-xs text-zinc-300 mb-4 leading-relaxed">
             Enter brief keywords about your item. Our prompt-engineered AI will automatically write an
             appraisal-grade title and compelling auction description.
           </p>
@@ -265,13 +265,13 @@ export const CreateAuctionPage = () => {
               value={aiKeywords}
               onChange={(e) => setAiKeywords(e.target.value)}
               placeholder="e.g. 1968 Rolex Submariner Ref 5513 black dial excellent condition"
-              className="flex-1 px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-400 transition-colors"
+              className="flex-1 px-4 py-2.5 rounded-xl bg-[#080910] border border-white/[0.08] text-white text-xs placeholder:text-zinc-500 focus:outline-none focus:border-violet-400 transition-colors"
             />
             <button
               type="button"
               onClick={handleGenerateAI}
               disabled={aiLoading}
-              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 shadow-md shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer whitespace-nowrap active:scale-95"
+              className="btn-primary px-5 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-violet-600/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer whitespace-nowrap active:scale-95"
             >
               <Wand2 className={`w-3.5 h-3.5 ${aiLoading ? 'animate-spin' : ''}`} />
               <span>{aiLoading ? 'Generating...' : 'Generate with AI'}</span>
@@ -297,17 +297,17 @@ export const CreateAuctionPage = () => {
         <form onSubmit={handleSubmit} className="space-y-6">
 
           {/* ── 1. Multer Image Upload & Gallery Picker (Node.js Video 28) ── */}
-          <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/90 space-y-4">
+          <div className="p-5 rounded-2xl bg-[#080911] border border-white/[0.08] space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-200">
+                <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-zinc-200">
                   Item Photography *
                 </label>
-                <p className="text-[11px] text-slate-400 mt-0.5">
+                <p className="text-[11px] text-zinc-400 mt-0.5">
                   Upload high-res photo via Multer (JPEG, PNG, WEBP max 5MB) or select a showcase item.
                 </p>
               </div>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+              <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/30">
                 Multer Upload
               </span>
             </div>
@@ -315,7 +315,7 @@ export const CreateAuctionPage = () => {
             {/* Preview & Dropzone Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
               {/* Image Preview Box */}
-              <div className="relative h-44 rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
+              <div className="relative h-44 rounded-xl overflow-hidden bg-black/80 border border-white/[0.08] flex items-center justify-center">
                 {imagePreview ? (
                   <>
                     <img
@@ -323,13 +323,13 @@ export const CreateAuctionPage = () => {
                       alt="Item preview"
                       className="w-full h-full object-cover"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                    <span className="absolute bottom-2 left-2 text-[10px] font-mono text-white/90 bg-black/60 px-2 py-0.5 rounded backdrop-blur-sm">
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                    <span className="absolute bottom-2 left-2 text-[10px] font-mono text-white/90 bg-black/70 px-2 py-0.5 rounded backdrop-blur-sm">
                       Live Preview
                     </span>
                   </>
                 ) : (
-                  <div className="text-center p-4 text-slate-500">
+                  <div className="text-center p-4 text-zinc-500">
                     <ImageIcon className="w-8 h-8 mx-auto mb-1 opacity-50" />
                     <span className="text-xs">No image selected</span>
                   </div>
@@ -338,12 +338,12 @@ export const CreateAuctionPage = () => {
 
               {/* Upload Input & Dropzone */}
               <div className="md:col-span-2 space-y-3">
-                <label className="border-2 border-dashed border-slate-700/80 hover:border-indigo-500/60 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors bg-slate-950/40 text-center group">
-                  <UploadCloud className="w-7 h-7 text-indigo-400 group-hover:scale-110 transition-transform mb-1" />
-                  <span className="text-xs font-semibold text-slate-200">
+                <label className="border-2 border-dashed border-white/[0.12] hover:border-violet-500/60 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors bg-[#0C0E18]/60 text-center group">
+                  <UploadCloud className="w-7 h-7 text-violet-400 group-hover:scale-110 transition-transform mb-1" />
+                  <span className="text-xs font-semibold text-zinc-200">
                     {uploadingImage ? 'Uploading via Multer...' : 'Click to upload custom photo'}
                   </span>
-                  <span className="text-[10px] text-slate-500 mt-0.5">
+                  <span className="text-[10px] text-zinc-500 mt-0.5">
                     Supports JPG, PNG, WEBP, GIF up to 5MB
                   </span>
                   <input
@@ -364,7 +364,7 @@ export const CreateAuctionPage = () => {
 
                 {/* Preset Showcase Selector */}
                 <div>
-                  <span className="text-[11px] font-mono text-slate-400 block mb-1.5">
+                  <span className="text-[11px] font-mono text-zinc-400 block mb-1.5">
                     Or select a curated showcase preset:
                   </span>
                   <div className="flex flex-wrap gap-1.5">
@@ -375,8 +375,8 @@ export const CreateAuctionPage = () => {
                         onClick={() => handleSelectPreset(preset.url)}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
                           imageUrl === preset.url
-                            ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400'
-                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
+                            ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-600/30 ring-1 ring-white/20 font-semibold'
+                            : 'bg-[#131520] text-zinc-300 hover:bg-[#1C1F30] hover:text-white border border-white/[0.06]'
                         }`}
                       >
                         {preset.name}
@@ -390,18 +390,18 @@ export const CreateAuctionPage = () => {
 
           {/* Title */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-300 mb-2">
+            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300 mb-2">
               Auction Title *
             </label>
             <div className="relative">
-              <Tag className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Tag className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
               <input
                 type="text"
                 name="title"
                 value={formData.title}
                 onChange={handleChange}
                 placeholder="e.g. 1968 Vintage Rolex Submariner Ref. 5513"
-                className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-900/80 border border-slate-800 focus:border-indigo-500 focus:outline-none text-white text-sm placeholder:text-slate-500 transition-colors"
+                className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#090A11] border border-white/[0.08] focus:border-violet-500 focus:outline-none text-white text-sm placeholder:text-zinc-500 transition-colors"
                 required
               />
             </div>
@@ -409,7 +409,7 @@ export const CreateAuctionPage = () => {
 
           {/* Description */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-300 mb-2">
+            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300 mb-2">
               Description
             </label>
             <div className="relative">
@@ -419,7 +419,7 @@ export const CreateAuctionPage = () => {
                 value={formData.description}
                 onChange={handleChange}
                 placeholder="Provide details about condition, provenance, certificates, and shipping..."
-                className="w-full p-4 rounded-xl bg-slate-900/80 border border-slate-800 focus:border-indigo-500 focus:outline-none text-white text-sm placeholder:text-slate-500 transition-colors leading-relaxed"
+                className="w-full p-4 rounded-xl bg-[#090A11] border border-white/[0.08] focus:border-violet-500 focus:outline-none text-white text-sm placeholder:text-zinc-500 transition-colors leading-relaxed"
               />
             </div>
           </div>
@@ -429,11 +429,11 @@ export const CreateAuctionPage = () => {
             
             {/* Starting Price */}
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-300 mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300 mb-2">
                 Starting Price ($) *
               </label>
               <div className="relative">
-                <DollarSign className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <DollarSign className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-400 font-bold" />
                 <input
                   type="number"
                   step="0.01"
@@ -442,7 +442,7 @@ export const CreateAuctionPage = () => {
                   value={formData.starting_price}
                   onChange={handleChange}
                   placeholder="500.00"
-                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-900/80 border border-slate-800 focus:border-indigo-500 focus:outline-none text-white font-mono text-sm placeholder:text-slate-500 transition-colors"
+                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#090A11] border border-white/[0.08] focus:border-violet-500 focus:outline-none text-white font-mono text-sm placeholder:text-zinc-500 transition-colors"
                   required
                 />
               </div>
@@ -450,7 +450,7 @@ export const CreateAuctionPage = () => {
 
             {/* End Time */}
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-300 mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300 mb-2">
                 End Date & Time *
               </label>
               <div className="relative">
@@ -459,7 +459,7 @@ export const CreateAuctionPage = () => {
                   name="end_time"
                   value={formData.end_time}
                   onChange={handleChange}
-                  className="w-full px-4 py-3 rounded-xl bg-slate-900/80 border border-slate-800 focus:border-indigo-500 focus:outline-none text-white font-mono text-sm transition-colors"
+                  className="w-full px-4 py-3 rounded-xl bg-[#090A11] border border-white/[0.08] focus:border-violet-500 focus:outline-none text-white font-mono text-sm transition-colors"
                   required
                 />
               </div>
@@ -468,7 +468,7 @@ export const CreateAuctionPage = () => {
           </div>
 
           {/* Notice */}
-          <div className="p-4 rounded-2xl bg-indigo-950/20 border border-indigo-500/20 text-xs text-slate-400">
+          <div className="p-4 rounded-2xl bg-violet-950/20 border border-violet-500/20 text-xs text-zinc-400">
             Once launched, the auction will be active immediately. Bidders will receive live WebSocket
             updates whenever a new bid is placed.
           </div>
@@ -477,7 +477,7 @@ export const CreateAuctionPage = () => {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full py-3.5 px-6 rounded-xl font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-500 shadow-xl shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            className="btn-primary w-full py-3.5 px-6 rounded-xl font-bold text-sm shadow-xl shadow-violet-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             <PlusCircle className={`w-4 h-4 ${submitting ? 'animate-spin' : ''}`} />
             <span>{submitting ? 'Launching Auction...' : 'Publish Auction'}</span>
