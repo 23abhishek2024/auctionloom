@@ -11,7 +11,7 @@ const SOCKET_URL = `http://localhost:${API_PORT}`;
 const DB_CONFIG = {
   host: 'localhost',
   port: 5432,
-  database: 'primebid',
+  database: process.env.DB_NAME || 'primebid',
   user: 'postgres',
   password: 'postgresql@82521',
 };
