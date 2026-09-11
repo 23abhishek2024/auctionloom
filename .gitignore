@@ -1,5 +1,9 @@
-# Prime Bid - Git Ignore
+# AuctionLoom - Git Ignore
 node_modules/
 .env
+.env.*
+!.env.example
 dist/
 *.log
+backend/public/uploads/*
+!backend/public/uploads/.gitkeep

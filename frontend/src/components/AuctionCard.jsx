@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, DollarSign, ArrowUpRight, User, CheckCircle2 } from 'lucide-react';
+import { Clock, DollarSign, ArrowUpRight, User, CheckCircle2, Image as ImageIcon } from 'lucide-react';
+import { resolveImageUrl } from '../api/client';
 
 export const AuctionCard = ({ auction }) => {
   const [timeLeft, setTimeLeft] = useState('');
   const [isEnded, setIsEnded] = useState(false);
   const [isUrgent, setIsUrgent] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  const fallbackImage = 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&q=80';
+  const displayImage = imgError ? fallbackImage : resolveImageUrl(auction.image_url);
 
   useEffect(() => {
     const calculateTime = () => {
@@ -41,44 +46,56 @@ export const AuctionCard = ({ auction }) => {
   }, [auction.end_time, auction.status]);
 
   return (
-    <div className="group relative rounded-2xl glass-card border border-slate-800/80 hover:border-indigo-500/40 p-5 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-500/10">
+    <div className="group relative rounded-2xl glass-card border border-slate-800/80 hover:border-indigo-500/40 p-4 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-500/10">
       
-      {/* Card Header & Status */}
-      <div>
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <div className="flex items-center gap-1.5">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isEnded
-                  ? 'bg-slate-600'
-                  : isUrgent
-                  ? 'bg-amber-400 animate-ping'
-                  : 'bg-emerald-400 animate-pulse'
-              }`}
-            />
-            <span
-              className={`text-xs font-mono font-medium px-2 py-0.5 rounded-full border ${
-                isEnded
-                  ? 'bg-slate-800 text-slate-400 border-slate-700'
-                  : isUrgent
-                  ? 'bg-amber-950/60 text-amber-300 border-amber-500/30'
-                  : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
-              }`}
-            >
-              {isEnded ? 'CLOSED' : isUrgent ? 'ENDING SOON' : 'ACTIVE'}
-            </span>
-          </div>
+      {/* Item Image with status chips */}
+      <div className="relative w-full h-44 rounded-xl overflow-hidden mb-3.5 bg-slate-900 border border-slate-800/60">
+        <img
+          src={displayImage}
+          alt={auction.title}
+          onError={() => setImgError(true)}
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          loading="lazy"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-black/30" />
 
-          <div className="flex items-center gap-1 text-xs text-slate-400 font-mono">
-            <Clock className="w-3.5 h-3.5 text-slate-400" />
-            <span className={isUrgent && !isEnded ? 'text-amber-400 font-semibold' : ''}>
-              {timeLeft}
-            </span>
-          </div>
+        {/* Status Badge */}
+        <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-medium backdrop-blur-md border border-white/10 shadow-lg bg-slate-950/70">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              isEnded
+                ? 'bg-slate-500'
+                : isUrgent
+                ? 'bg-amber-400 animate-ping'
+                : 'bg-emerald-400 animate-pulse'
+            }`}
+          />
+          <span
+            className={
+              isEnded
+                ? 'text-slate-400'
+                : isUrgent
+                ? 'text-amber-300'
+                : 'text-emerald-300'
+            }
+          >
+            {isEnded ? 'CLOSED' : isUrgent ? 'ENDING SOON' : 'LIVE'}
+          </span>
         </div>
 
+        {/* Timer Chip */}
+        <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono backdrop-blur-md bg-slate-950/80 border border-slate-800 text-slate-300">
+          <Clock className="w-3 h-3 text-indigo-400" />
+          <span className={isUrgent && !isEnded ? 'text-amber-400 font-semibold' : ''}>
+            {timeLeft}
+          </span>
+        </div>
+      </div>
+
+      {/* Card Info */}
+      <div>
         {/* Title */}
-        <h3 className="text-lg font-bold text-slate-100 group-hover:text-indigo-300 transition-colors line-clamp-1 mb-1.5">
+        <h3 className="text-base font-bold text-slate-100 group-hover:text-indigo-300 transition-colors line-clamp-1 mb-1">
           {auction.title}
         </h3>
 

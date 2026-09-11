@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS auctions (
     end_time        TIMESTAMP WITH TIME ZONE NOT NULL,
     status          VARCHAR(50) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'CLOSED')),
     winner_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+    image_url       TEXT,
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

@@ -31,7 +31,7 @@ const initSocket = (server) => {
   io.on('connection', (socket) => {
     console.log(`[Socket] Client connected: ${socket.id}`);
 
-    // Client joins an auction room to receive live price updates
+    // Client joins an auction room to receive live price updates and chat
     socket.on('JOIN_AUCTION', (auctionId) => {
       socket.join(auctionId);
       console.log(`[Socket] ${socket.id} joined auction room: ${auctionId}`);
@@ -40,6 +40,50 @@ const initSocket = (server) => {
     socket.on('LEAVE_AUCTION', (auctionId) => {
       socket.leave(auctionId);
       console.log(`[Socket] ${socket.id} left auction room: ${auctionId}`);
+    });
+
+    // Real-Time Chat Message (Video 33 - Socket.IO Chat)
+    socket.on('SEND_MESSAGE', (data) => {
+      try {
+        if (!data || !data.auctionId || !data.text) return;
+        const text = String(data.text).trim().slice(0, 500);
+        if (!text) return;
+
+        const messagePayload = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+          auctionId: data.auctionId,
+          text,
+          senderEmail: data.senderEmail || 'Anonymous Bidder',
+          role: data.role || 'bidder',
+          timestamp: new Date().toISOString(),
+        };
+
+        io.to(data.auctionId).emit('CHAT_MESSAGE', messagePayload);
+        console.log(`[Socket] Chat message broadcasted in room ${data.auctionId} from ${messagePayload.senderEmail}`);
+      } catch (err) {
+        console.error('[Socket] SEND_MESSAGE error:', err.message);
+      }
+    });
+
+    // Real-Time Reaction (Floating Emojis)
+    socket.on('SEND_REACTION', (data) => {
+      try {
+        if (!data || !data.auctionId || !data.emoji) return;
+        const allowed = ['🔥', '🚀', '💎', '👏', '❤️', '⚡', '🎉'];
+        const emoji = allowed.includes(data.emoji) ? data.emoji : '🔥';
+
+        const reactionPayload = {
+          id: `react-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+          auctionId: data.auctionId,
+          emoji,
+          senderEmail: data.senderEmail || 'Bidder',
+          timestamp: new Date().toISOString(),
+        };
+
+        io.to(data.auctionId).emit('REACTION', reactionPayload);
+      } catch (err) {
+        console.error('[Socket] SEND_REACTION error:', err.message);
+      }
     });
 
     socket.on('disconnect', () => {

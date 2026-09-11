@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { auctionApi, bidApi } from '../api/client';
+import { auctionApi, bidApi, resolveImageUrl } from '../api/client';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -15,12 +15,18 @@ import {
   Gavel,
   Trophy,
   Zap,
+  MessageSquare,
+  Send,
+  Flame,
+  Sparkles,
+  Layers,
+  Image as ImageIcon,
 } from 'lucide-react';
 
 export const AuctionDetailPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { socket, isConnected, joinAuction, leaveAuction } = useSocket();
+  const { socket, isConnected, joinAuction, leaveAuction, sendMessage, sendReaction } = useSocket();
   const { user, isAuthenticated } = useAuth();
 
   const [auction, setAuction] = useState(null);
@@ -33,6 +39,22 @@ export const AuctionDetailPage = () => {
   const [isPriceFlashing, setIsPriceFlashing] = useState(false);
   const [timeLeft, setTimeLeft] = useState('');
   const [isEnded, setIsEnded] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  // Tabs: 'bids' or 'chat' (Socket.IO Video 33)
+  const [activeTab, setActiveTab] = useState('bids');
+  const [chatMessages, setChatMessages] = useState([
+    {
+      id: 'welcome-1',
+      text: '👋 Welcome to the live auction room! Ask questions or share thoughts here in real time.',
+      senderEmail: 'System Bot',
+      role: 'system',
+      timestamp: new Date().toISOString(),
+    },
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [activeReactions, setActiveReactions] = useState([]);
+  const chatBottomRef = useRef(null);
 
   // ── 1. Fetch initial auction & bid history ───────────────────
   useEffect(() => {
@@ -61,7 +83,7 @@ export const AuctionDetailPage = () => {
     fetchData();
   }, [id]);
 
-  // ── 2. Real-time WebSocket Room & Price Update Listener ─────
+  // ── 2. Real-time WebSocket Room, Bids, Chat & Reactions (Node.js Video 33) ──
   useEffect(() => {
     if (!id) return;
 
@@ -72,10 +94,8 @@ export const AuctionDetailPage = () => {
     const handlePriceUpdate = (data) => {
       console.log('[Socket] Live PRICE_UPDATE received:', data);
       if (data.auction_id === id) {
-        // Update auction state
         setAuction((prev) => (prev ? { ...prev, current_price: data.new_price } : prev));
 
-        // Append or prepend new bid to list
         const newBidEntry = {
           id: data.bid_id || Math.random().toString(),
           amount: data.new_price,
@@ -85,11 +105,9 @@ export const AuctionDetailPage = () => {
 
         setBids((prev) => [newBidEntry, ...prev.filter((b) => b.id !== newBidEntry.id)]);
 
-        // Trigger flash animation
         setIsPriceFlashing(true);
         setTimeout(() => setIsPriceFlashing(false), 1200);
 
-        // Update suggested bid input if user hasn't manually entered a higher amount
         const nextMin = parseFloat(data.new_price) + 10;
         setBidAmount((prev) => {
           const prevNum = parseFloat(prev);
@@ -100,17 +118,51 @@ export const AuctionDetailPage = () => {
       }
     };
 
+    // Socket event handler for CHAT_MESSAGE
+    const handleChatMessage = (msg) => {
+      console.log('[Socket] Live CHAT_MESSAGE received:', msg);
+      if (msg.auctionId === id) {
+        setChatMessages((prev) => [...prev, msg]);
+      }
+    };
+
+    // Socket event handler for REACTION (Floating emojis)
+    const handleReaction = (reaction) => {
+      console.log('[Socket] Live REACTION received:', reaction);
+      if (reaction.auctionId === id) {
+        const reactionObj = {
+          ...reaction,
+          left: Math.floor(Math.random() * 75) + 10,
+        };
+        setActiveReactions((prev) => [...prev, reactionObj]);
+        setTimeout(() => {
+          setActiveReactions((prev) => prev.filter((r) => r.id !== reaction.id));
+        }, 2200);
+      }
+    };
+
     if (socket) {
       socket.on('PRICE_UPDATE', handlePriceUpdate);
+      socket.on('CHAT_MESSAGE', handleChatMessage);
+      socket.on('REACTION', handleReaction);
     }
 
     return () => {
       if (socket) {
         socket.off('PRICE_UPDATE', handlePriceUpdate);
+        socket.off('CHAT_MESSAGE', handleChatMessage);
+        socket.off('REACTION', handleReaction);
       }
       leaveAuction(id);
     };
   }, [id, socket]);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    if (activeTab === 'chat' && chatBottomRef.current) {
+      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, activeTab]);
 
   // ── 3. Live Countdown Timer ──────────────────────────────────
   useEffect(() => {
@@ -138,7 +190,7 @@ export const AuctionDetailPage = () => {
     return () => clearInterval(interval);
   }, [auction?.end_time, auction?.status]);
 
-  // ── 4. Place Bid Handler ─────────────────────────────────────
+  // ── 4. Place Bid Handlers (Standard + 1-Click Quick Bids) ────
   const handlePlaceBid = async (e) => {
     e.preventDefault();
     if (!isAuthenticated) {
@@ -157,7 +209,7 @@ export const AuctionDetailPage = () => {
       setError(null);
       setSuccessMsg(null);
 
-      const res = await bidApi.placeBid({
+      await bidApi.placeBid({
         auction_id: id,
         amount: numAmount,
       });
@@ -172,10 +224,63 @@ export const AuctionDetailPage = () => {
     }
   };
 
+  // 1-Click Instant Quick Bid (Bidzy-style)
+  const handleInstantBid = async (inc) => {
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: `/auctions/${id}` } });
+      return;
+    }
+
+    const current = parseFloat(auction?.current_price || 0);
+    const targetAmount = parseFloat((current + inc).toFixed(2));
+
+    try {
+      setSubmitting(true);
+      setError(null);
+      setSuccessMsg(null);
+
+      await bidApi.placeBid({
+        auction_id: id,
+        amount: targetAmount,
+      });
+
+      setSuccessMsg(`⚡ 1-Click Bid of $${targetAmount.toFixed(2)} placed!`);
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err) {
+      console.error('Instant bid error:', err);
+      setError(err.response?.data?.error || 'Failed to place instant bid.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleQuickIncrement = (inc) => {
     const current = parseFloat(auction?.current_price || 0);
     setBidAmount((current + inc).toFixed(2));
     setError(null);
+  };
+
+  // ── 5. Live Room Chat & Reactions Handlers (Video 33) ────────
+  const handleSendChatMessage = (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+
+    sendMessage({
+      auctionId: id,
+      text: chatInput.trim(),
+      senderEmail: user?.email || 'Anonymous Bidder',
+      role: user?.role || 'bidder',
+    });
+
+    setChatInput('');
+  };
+
+  const handleTriggerReaction = (emoji) => {
+    sendReaction({
+      auctionId: id,
+      emoji,
+      senderEmail: user?.email || 'Bidder',
+    });
   };
 
   if (loading) {
@@ -257,6 +362,54 @@ export const AuctionDetailPage = () => {
               </div>
             </div>
 
+            {/* ── Hero Item Photography (Node.js Video 28 - Multer Asset) ── */}
+            <div className="relative w-full h-80 sm:h-96 rounded-2xl overflow-hidden mb-6 bg-slate-950 border border-slate-800 shadow-inner group">
+              <img
+                src={imgError ? 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&q=80' : resolveImageUrl(auction.image_url)}
+                alt={auction.title}
+                onError={() => setImgError(true)}
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/20 to-transparent" />
+
+              {/* Floating Real-Time Reaction Particles */}
+              <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                {activeReactions.map((r) => (
+                  <div
+                    key={r.id}
+                    style={{ left: `${r.left}%` }}
+                    className="absolute bottom-12 text-3xl animate-bounce filter drop-shadow-md select-none transition-all duration-1000"
+                  >
+                    {r.emoji}
+                  </div>
+                ))}
+              </div>
+
+              {/* Real-time Emoji Reaction Trigger Bar */}
+              <div className="absolute bottom-4 right-4 flex items-center gap-1.5 p-1.5 rounded-2xl bg-slate-950/80 backdrop-blur-md border border-slate-700/80 shadow-2xl">
+                <span className="text-[10px] font-mono text-slate-400 pl-1.5 pr-1 flex items-center gap-1">
+                  <Flame className="w-3 h-3 text-amber-400" /> React:
+                </span>
+                {['🔥', '🚀', '💎', '👏', '❤️', '⚡'].map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => handleTriggerReaction(emoji)}
+                    className="w-8 h-8 rounded-xl bg-slate-900/90 hover:bg-indigo-600/40 hover:scale-125 transition-all text-base flex items-center justify-center cursor-pointer active:scale-95"
+                    title={`Send ${emoji} reaction`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+
+              {/* Status Chip overlay on image */}
+              <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1 rounded-full bg-slate-950/80 backdrop-blur-md border border-slate-800 text-xs font-mono text-slate-300">
+                <span className={`w-2 h-2 rounded-full ${isEnded ? 'bg-slate-500' : 'bg-emerald-400 animate-pulse'}`} />
+                <span>{isEnded ? 'CLOSED' : 'LIVE AUCTION'}</span>
+              </div>
+            </div>
+
             {/* Title */}
             <h1 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight mb-4">
               {auction.title}
@@ -330,60 +483,141 @@ export const AuctionDetailPage = () => {
                 SELECT * FROM auctions WHERE id = X FOR UPDATE
               </code>
               . This exclusively locks the auction row, queuing any concurrent bids. Once committed,
-              the row is unlocked and Socket.IO broadcasts the new price instantly to all connected viewers.
+              the row is unlocked and Socket.IO broadcasts the new price and chat messages instantly to all connected viewers.
             </p>
           </div>
 
-          {/* Bid History Table */}
+          {/* ── Dual Tabs: Live Bids History vs Live Room Chat (Video 33) ── */}
           <div className="glass-card border border-slate-800/80 rounded-3xl p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-5 border-b border-slate-800/80 pb-3">
               <div className="flex items-center gap-2">
-                <History className="w-4 h-4 text-slate-400" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
-                  Live Bid History ({bids.length})
-                </h3>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('bids')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                    activeTab === 'bids'
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>Bids History ({bids.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('chat')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                    activeTab === 'chat'
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  }`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Live Room Chat ({Math.max(0, chatMessages.length - 1)})</span>
+                </button>
               </div>
-              <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+
+              <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                Live Feed
+                WebSocket Active
               </span>
             </div>
 
-            {bids.length === 0 ? (
-              <div className="text-center py-8 text-xs text-slate-400 font-mono">
-                No bids placed yet. Be the first to place a bid!
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs font-mono">
-                  <thead>
-                    <tr className="border-b border-slate-800 text-slate-400">
-                      <th className="pb-2.5 font-normal">Bidder</th>
-                      <th className="pb-2.5 font-normal">Amount</th>
-                      <th className="pb-2.5 font-normal text-right">Time</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/50">
-                    {bids.map((b, idx) => (
-                      <tr key={b.id || idx} className={idx === 0 ? 'bg-indigo-500/5' : ''}>
-                        <td className="py-3 text-slate-300 font-medium">
-                          {b.bidder_email || 'Anonymous Bidder'}
-                          {idx === 0 && (
-                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
-                              HIGHEST
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 text-slate-100 font-bold text-sm">
-                          ${parseFloat(b.amount).toFixed(2)}
-                        </td>
-                        <td className="py-3 text-slate-400 text-right">
-                          {new Date(b.created_at).toLocaleTimeString()}
-                        </td>
+            {activeTab === 'bids' ? (
+              /* Bid History Table */
+              bids.length === 0 ? (
+                <div className="text-center py-8 text-xs text-slate-400 font-mono">
+                  No bids placed yet. Be the first to place a bid!
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400">
+                        <th className="pb-2.5 font-normal">Bidder</th>
+                        <th className="pb-2.5 font-normal">Amount</th>
+                        <th className="pb-2.5 font-normal text-right">Time</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50">
+                      {bids.map((b, idx) => (
+                        <tr key={b.id || idx} className={idx === 0 ? 'bg-indigo-500/5' : ''}>
+                          <td className="py-3 text-slate-300 font-medium">
+                            {b.bidder_email || 'Anonymous Bidder'}
+                            {idx === 0 && (
+                              <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
+                                HIGHEST
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 text-slate-100 font-bold text-sm">
+                            ${parseFloat(b.amount).toFixed(2)}
+                          </td>
+                          <td className="py-3 text-slate-400 text-right">
+                            {new Date(b.created_at).toLocaleTimeString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            ) : (
+              /* Live Chat Stream (Video 33 - Socket.IO Chat) */
+              <div className="space-y-4">
+                <div className="h-64 overflow-y-auto space-y-2.5 pr-2">
+                  {chatMessages.map((msg) => {
+                    const isMe = user?.email && msg.senderEmail === user.email;
+                    const isSys = msg.role === 'system';
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`p-3 rounded-xl text-xs ${
+                          isSys
+                            ? 'bg-indigo-950/30 border border-indigo-500/20 text-indigo-300'
+                            : isMe
+                            ? 'bg-indigo-600/20 border border-indigo-500/40 text-slate-100 ml-6'
+                            : 'bg-slate-900/80 border border-slate-800 text-slate-200 mr-6'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="font-mono font-bold text-[11px] text-indigo-300 flex items-center gap-1.5">
+                            {msg.senderEmail}
+                            {msg.role === 'admin' && (
+                              <span className="text-[9px] bg-purple-500/20 text-purple-300 px-1.5 py-0.2 rounded font-sans">
+                                Admin
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-500">
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p className="leading-relaxed break-words">{msg.text}</p>
+                      </div>
+                    );
+                  })}
+                  <div ref={chatBottomRef} />
+                </div>
+
+                {/* Chat input form */}
+                <form onSubmit={handleSendChatMessage} className="flex gap-2 pt-2 border-t border-slate-800">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Chat with live bidders in room..."
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-400"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 flex items-center gap-1.5 shadow-md shadow-indigo-600/20 cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Send</span>
+                  </button>
+                </form>
               </div>
             )}
           </div>
@@ -452,10 +686,39 @@ export const AuctionDetailPage = () => {
             ) : (
               <form onSubmit={handlePlaceBid} className="space-y-4">
                 
-                {/* Quick Increment Buttons */}
-                <div>
-                  <span className="text-[11px] font-mono text-slate-400 block mb-2">
-                    Quick Bid Increments
+                {/* ── 1-Click Instant Bidding (Bidzy Style) ── */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono text-slate-300 font-semibold flex items-center gap-1">
+                      <Zap className="w-3.5 h-3.5 text-amber-400" />
+                      1-Click Instant Bidding
+                    </span>
+                    <span className="text-[10px] font-mono text-indigo-400 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-500/30">
+                      Bidzy Style
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[10, 25, 50, 100].map((inc) => (
+                      <button
+                        key={inc}
+                        type="button"
+                        disabled={submitting || isEnded}
+                        onClick={() => handleInstantBid(inc)}
+                        className="py-2.5 px-1 rounded-xl text-xs font-mono font-bold bg-gradient-to-b from-slate-900 to-slate-950 hover:from-indigo-950 hover:to-indigo-900 border border-slate-700 hover:border-indigo-400 text-slate-100 transition-all active:scale-95 flex flex-col items-center justify-center cursor-pointer shadow-sm hover:shadow-indigo-500/20 disabled:opacity-50"
+                        title={`Place 1-Click Bid for $${(parseFloat(auction.current_price) + inc).toFixed(2)}`}
+                      >
+                        <span className="text-amber-400 text-[9px] uppercase tracking-wider">1-Click</span>
+                        <span>+${inc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom Bid Increment Selector */}
+                <div className="pt-2 border-t border-slate-800/80">
+                  <span className="text-[11px] font-mono text-slate-400 block mb-1.5">
+                    Or select increment for custom bid:
                   </span>
                   <div className="grid grid-cols-4 gap-1.5">
                     {[10, 25, 50, 100].map((inc) => (
@@ -463,7 +726,7 @@ export const AuctionDetailPage = () => {
                         key={inc}
                         type="button"
                         onClick={() => handleQuickIncrement(inc)}
-                        className="py-2 px-1 rounded-xl text-xs font-mono font-semibold bg-slate-900 hover:bg-indigo-950/60 border border-slate-800 hover:border-indigo-500/50 text-slate-200 transition-all active:scale-95"
+                        className="py-1.5 px-1 rounded-lg text-[11px] font-mono font-semibold bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 transition-colors"
                       >
                         +${inc}
                       </button>

@@ -45,12 +45,12 @@ const auctionModel = {
   /**
    * Create a new auction
    */
-  create: async (sellerId, title, description, startingPrice, endTime) => {
+  create: async (sellerId, title, description, startingPrice, endTime, imageUrl = null) => {
     const result = await pool.query(
-      `INSERT INTO auctions (seller_id, title, description, starting_price, current_price, end_time)
-       VALUES ($1, $2, $3, $4, $4, $5)
+      `INSERT INTO auctions (seller_id, title, description, starting_price, current_price, end_time, image_url)
+       VALUES ($1, $2, $3, $4, $4, $5, $6)
        RETURNING *`,
-      [sellerId, title, description, startingPrice, endTime]
+      [sellerId, title, description, startingPrice, endTime, imageUrl]
     );
     return result.rows[0];
   },

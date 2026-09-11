@@ -63,6 +63,18 @@ export const SocketProvider = ({ children }) => {
     }
   };
 
+  const sendMessage = (data) => {
+    if (socket && socket.connected) {
+      socket.emit('SEND_MESSAGE', data);
+    }
+  };
+
+  const sendReaction = (data) => {
+    if (socket && socket.connected) {
+      socket.emit('SEND_REACTION', data);
+    }
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -70,6 +82,8 @@ export const SocketProvider = ({ children }) => {
         isConnected,
         joinAuction,
         leaveAuction,
+        sendMessage,
+        sendReaction,
       }}
     >
       {children}

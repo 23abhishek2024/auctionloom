@@ -31,6 +31,7 @@ const getAuctionById = async (req, res, next) => {
 const createAuction = async (req, res, next) => {
   try {
     const { title, description, starting_price, end_time } = req.body;
+    const imageUrl = req.body.image_url || req.body.imageUrl || null;
 
     if (!title || !starting_price || !end_time) {
       return res.status(400).json({ error: 'Title, starting_price, and end_time are required.' });
@@ -44,7 +45,8 @@ const createAuction = async (req, res, next) => {
       title,
       description,
       starting_price,
-      end_time
+      end_time,
+      imageUrl
     );
 
     res.status(201).json({ auction });

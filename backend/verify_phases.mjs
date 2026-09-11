@@ -47,6 +47,47 @@ function request(method, path, body = null, token = null) {
   });
 }
 
+function uploadMultipart(filePathOrBuffer, filename, token = null) {
+  return new Promise((resolve, reject) => {
+    const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+    const crlf = '\r\n';
+
+    const postDataStart = Buffer.from(
+      `--${boundary}${crlf}` +
+      `Content-Disposition: form-data; name="image"; filename="${filename}"${crlf}` +
+      `Content-Type: image/png${crlf}${crlf}`
+    );
+    const postDataEnd = Buffer.from(`${crlf}--${boundary}--${crlf}`);
+    const fileBuffer = Buffer.isBuffer(filePathOrBuffer) ? filePathOrBuffer : Buffer.from(filePathOrBuffer);
+
+    const bodyBuffer = Buffer.concat([postDataStart, fileBuffer, postDataEnd]);
+
+    const req = http.request({
+      hostname: 'localhost',
+      port: API_PORT,
+      path: '/api/upload',
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': bodyBuffer.length,
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+    }, (res) => {
+      let resData = '';
+      res.on('data', chunk => resData += chunk);
+      res.on('end', () => {
+        let parsed = null;
+        try { parsed = JSON.parse(resData); } catch { parsed = resData; }
+        resolve({ status: res.statusCode, headers: res.headers, data: parsed });
+      });
+    });
+
+    req.on('error', reject);
+    req.write(bodyBuffer);
+    req.end();
+  });
+}
+
 const results = [];
 
 function assert(phase, testName, condition, details = '') {
@@ -423,8 +464,90 @@ async function runVerification() {
   assert('Phase 8', 'AI response contains detailed description', !!aiSuccessRes.data.description && aiSuccessRes.data.description.length > 50);
   assert('Phase 8', 'AI response provides suggested starting price', typeof aiSuccessRes.data.suggested_starting_price === 'number');
 
+  // ============================================================
+  // PHASE 9: Multer Uploads (Video 28) & Socket.IO Chat (Video 33)
+  // ============================================================
+  console.log('\n--- Checking Phase 9: Multer Image Upload & Socket.IO Live Room Chat ---');
+
+  assert('Phase 9', 'Multer upload middleware exists', fs.existsSync(`${backendSrc}/middlewares/upload.js`));
+  assert('Phase 9', 'Upload routes exist', fs.existsSync(`${backendSrc}/routes/uploadRoutes.js`));
+  assert('Phase 9', 'Public uploads directory exists', fs.existsSync('./public/uploads'));
+
+  // 1. Upload an image via Multer (1x1 PNG buffer)
+  const dummyPngBuffer = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64'
+  );
+
+  const uploadRes = await uploadMultipart(dummyPngBuffer, 'test-item.png', sellerToken);
+  assert('Phase 9', 'Multer upload endpoint responds with 200 OK', uploadRes.status === 200);
+  assert('Phase 9', 'Multer response contains valid /uploads/ URL', typeof uploadRes.data.url === 'string' && uploadRes.data.url.startsWith('/uploads/'));
+  assert('Phase 9', 'Uploaded image file persisted on server disk', fs.existsSync(`./public${uploadRes.data.url}`));
+
+  // 2. Static serving check
+  const staticFileRes = await new Promise((resolve) => {
+    http.get(`http://localhost:${API_PORT}${uploadRes.data.url}`, (res) => {
+      resolve({ status: res.statusCode, contentType: res.headers['content-type'] });
+    }).on('error', (err) => resolve({ status: 500, error: err.message }));
+  });
+  assert('Phase 9', 'Express statically serves uploaded image at /uploads/*', staticFileRes.status === 200);
+
+  // 3. Create Auction with image_url
+  const auctionWithImgRes = await request('POST', '/api/auctions', {
+    title: 'Multer Verified Luxury Watch',
+    description: 'Rare horological timepiece uploaded via Multer with live room chat integration.',
+    starting_price: 1500.00,
+    end_time: new Date(Date.now() + 3600000).toISOString(),
+    image_url: uploadRes.data.url,
+  }, sellerToken);
+  assert('Phase 9', 'Auction created with image_url returned in API response', auctionWithImgRes.status === 201 && auctionWithImgRes.data.auction.image_url === uploadRes.data.url);
+
+  // 4. Verify PostgreSQL persistence of image_url
+  const dbAuctionImg = await pool.query('SELECT image_url FROM auctions WHERE id = $1', [auctionWithImgRes.data.auction.id]);
+  assert('Phase 9', 'PostgreSQL database stores image_url column', dbAuctionImg.rows[0].image_url === uploadRes.data.url);
+
+  // 5. Socket.IO Live Room Chat (Video 33)
+  const chatSocket = io(SOCKET_URL, { transports: ['websocket'] });
+  await new Promise((resolve) => chatSocket.on('connect', resolve));
+  chatSocket.emit('JOIN_AUCTION', auctionWithImgRes.data.auction.id);
+
+  const chatPromise = new Promise((resolve) => {
+    chatSocket.on('CHAT_MESSAGE', (msg) => {
+      resolve(msg);
+    });
+  });
+
+  chatSocket.emit('SEND_MESSAGE', {
+    auctionId: auctionWithImgRes.data.auction.id,
+    text: 'Is the original warranty card included with this watch?',
+    senderEmail: 'verified_bidder@auctionloom.com',
+    role: 'bidder',
+  });
+
+  const receivedChatMsg = await chatPromise;
+  assert('Phase 9', 'Socket.IO CHAT_MESSAGE broadcast received in real time', receivedChatMsg.text === 'Is the original warranty card included with this watch?');
+  assert('Phase 9', 'Chat message includes senderEmail and ISO timestamp', receivedChatMsg.senderEmail === 'verified_bidder@auctionloom.com' && !!receivedChatMsg.timestamp);
+
+  // 6. Socket.IO Live Floating Reaction
+  const reactionPromise = new Promise((resolve) => {
+    chatSocket.on('REACTION', (reaction) => {
+      resolve(reaction);
+    });
+  });
+
+  chatSocket.emit('SEND_REACTION', {
+    auctionId: auctionWithImgRes.data.auction.id,
+    emoji: '🔥',
+    senderEmail: 'verified_bidder@auctionloom.com',
+  });
+
+  const receivedReaction = await reactionPromise;
+  assert('Phase 9', 'Socket.IO REACTION broadcast received in real time', receivedReaction.emoji === '🔥');
+
+  chatSocket.disconnect();
+
   console.log('\n===========================================================');
-  console.log('   🎉 ALL PHASES (1 TO 8) ARE 100% VERIFIED AND PASSING!   ');
+  console.log('   🎉 ALL PHASES (1 TO 9) ARE 100% VERIFIED AND PASSING!   ');
   console.log('===========================================================');
   console.log(`Total assertions passed: ${results.length}/${results.length}`);
 }

@@ -74,4 +74,33 @@ export const aiApi = {
   generate: (data) => api.post('/ai/generate', data, { timeout: 35000 }),
 };
 
+export const uploadApi = {
+  uploadImage: (file) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post('/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+};
+
+export const getBackendHost = () => {
+  return API_BASE_URL.replace(/\/api\/?$/, '');
+};
+
+export const resolveImageUrl = (url) => {
+  if (!url) {
+    return 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&q=80'; // Sleek luxury watch
+  }
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  if (url.startsWith('/uploads/')) {
+    return `${getBackendHost()}${url}`;
+  }
+  return url;
+};
+
 export default api;

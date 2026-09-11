@@ -12,6 +12,8 @@ const authRoutes = require('./routes/authRoutes');
 const auctionRoutes = require('./routes/auctionRoutes');
 const bidRoutes = require('./routes/bidRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
+const path = require('path');
 
 // Services
 const { initSocket } = require('./services/socketService');
@@ -28,11 +30,15 @@ app.use(express.json());
 app.use(loggerMiddleware);
 app.use(rateLimiterMiddleware);
 
+// Serve static uploaded files (Node.js Video 28 - Multer)
+app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+
 // ── Routes ────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/auctions', auctionRoutes);
 app.use('/api/bids', bidRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // ── Root & Health Check ───────────────────────────────────────
 app.get('/', (req, res) => {

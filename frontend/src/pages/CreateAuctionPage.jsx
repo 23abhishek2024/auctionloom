@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { auctionApi, aiApi } from '../api/client';
+import { auctionApi, aiApi, uploadApi, resolveImageUrl } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import {
   PlusCircle,
@@ -13,7 +13,44 @@ import {
   Sparkles,
   Wand2,
   CheckCircle2,
+  UploadCloud,
+  Image as ImageIcon,
+  Check,
+  X,
 } from 'lucide-react';
+
+const PRESET_GALLERY = [
+  {
+    name: 'Luxury Watch',
+    url: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&q=80',
+    category: 'Horology',
+  },
+  {
+    name: 'Vintage Porsche',
+    url: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800&q=80',
+    category: 'Automotive',
+  },
+  {
+    name: 'Retro Sneaker',
+    url: 'https://images.unsplash.com/photo-1552346154-21d32810aba3?w=800&q=80',
+    category: 'Collectibles',
+  },
+  {
+    name: 'Contemporary Art',
+    url: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=800&q=80',
+    category: 'Fine Art',
+  },
+  {
+    name: 'Vintage Camera',
+    url: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=800&q=80',
+    category: 'Antiques',
+  },
+  {
+    name: 'Diamond Ring',
+    url: 'https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=800&q=80',
+    category: 'Jewelry',
+  },
+];
 
 export const CreateAuctionPage = () => {
   const navigate = useNavigate();
@@ -35,10 +72,57 @@ export const CreateAuctionPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
+  // Image Upload States (Node.js Video 28 - Multer)
+  const [imageUrl, setImageUrl] = useState(PRESET_GALLERY[0].url);
+  const [imagePreview, setImagePreview] = useState(PRESET_GALLERY[0].url);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState(null);
+
   // AI Assistant States
   const [aiKeywords, setAiKeywords] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMessage, setAiMessage] = useState(null);
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose a valid image file (JPEG, PNG, WEBP, or GIF).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('File size exceeds 5MB limit.');
+      return;
+    }
+
+    try {
+      setUploadingImage(true);
+      setError(null);
+      setUploadSuccess(null);
+
+      // Local preview immediately
+      const objectUrl = URL.createObjectURL(file);
+      setImagePreview(objectUrl);
+
+      // Multer API Upload
+      const res = await uploadApi.uploadImage(file);
+      setImageUrl(res.data.url);
+      setUploadSuccess(`Photo uploaded successfully via Multer (${(file.size / 1024).toFixed(1)} KB)`);
+    } catch (err) {
+      console.error('Upload Error:', err);
+      setError(err.response?.data?.error || 'Failed to upload image. Please try again.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleSelectPreset = (presetUrl) => {
+    setImageUrl(presetUrl);
+    setImagePreview(presetUrl);
+    setUploadSuccess('Selected curated showcase photo.');
+    setError(null);
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -115,6 +199,7 @@ export const CreateAuctionPage = () => {
         description: formData.description.trim(),
         starting_price: price,
         end_time: endDate.toISOString(),
+        image_url: imageUrl || PRESET_GALLERY[0].url,
       });
 
       const newAuction = res.data.auction;
@@ -152,7 +237,7 @@ export const CreateAuctionPage = () => {
               Create New Auction
             </h1>
             <p className="text-xs text-slate-400">
-              List an item for real-time competitive bidding.
+              List an item for real-time competitive bidding with photo and live room chat.
             </p>
           </div>
         </div>
@@ -210,7 +295,99 @@ export const CreateAuctionPage = () => {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          
+
+          {/* ── 1. Multer Image Upload & Gallery Picker (Node.js Video 28) ── */}
+          <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/90 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-200">
+                  Item Photography *
+                </label>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Upload high-res photo via Multer (JPEG, PNG, WEBP max 5MB) or select a showcase item.
+                </p>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                Multer Upload
+              </span>
+            </div>
+
+            {/* Preview & Dropzone Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+              {/* Image Preview Box */}
+              <div className="relative h-44 rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
+                {imagePreview ? (
+                  <>
+                    <img
+                      src={imagePreview.startsWith('/uploads/') ? resolveImageUrl(imagePreview) : imagePreview}
+                      alt="Item preview"
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                    <span className="absolute bottom-2 left-2 text-[10px] font-mono text-white/90 bg-black/60 px-2 py-0.5 rounded backdrop-blur-sm">
+                      Live Preview
+                    </span>
+                  </>
+                ) : (
+                  <div className="text-center p-4 text-slate-500">
+                    <ImageIcon className="w-8 h-8 mx-auto mb-1 opacity-50" />
+                    <span className="text-xs">No image selected</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Upload Input & Dropzone */}
+              <div className="md:col-span-2 space-y-3">
+                <label className="border-2 border-dashed border-slate-700/80 hover:border-indigo-500/60 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors bg-slate-950/40 text-center group">
+                  <UploadCloud className="w-7 h-7 text-indigo-400 group-hover:scale-110 transition-transform mb-1" />
+                  <span className="text-xs font-semibold text-slate-200">
+                    {uploadingImage ? 'Uploading via Multer...' : 'Click to upload custom photo'}
+                  </span>
+                  <span className="text-[10px] text-slate-500 mt-0.5">
+                    Supports JPG, PNG, WEBP, GIF up to 5MB
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    onChange={handleFileChange}
+                    disabled={uploadingImage}
+                    className="hidden"
+                  />
+                </label>
+
+                {uploadSuccess && (
+                  <div className="text-[11px] text-emerald-400 flex items-center gap-1.5 font-mono">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{uploadSuccess}</span>
+                  </div>
+                )}
+
+                {/* Preset Showcase Selector */}
+                <div>
+                  <span className="text-[11px] font-mono text-slate-400 block mb-1.5">
+                    Or select a curated showcase preset:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PRESET_GALLERY.map((preset) => (
+                      <button
+                        type="button"
+                        key={preset.name}
+                        onClick={() => handleSelectPreset(preset.url)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                          imageUrl === preset.url
+                            ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
+                        }`}
+                      >
+                        {preset.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Title */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-300 mb-2">
