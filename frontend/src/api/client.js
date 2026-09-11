@@ -1,10 +1,19 @@
 import axios from 'axios';
 
-const API_BASE_URL = 
+const formatBaseUrl = (raw) => {
+  if (!raw || typeof raw !== 'string') return 'http://localhost:5000/api';
+  const match = raw.match(/https?:\/\/[^\s\r\n]+/);
+  if (match) return match[0].replace(/\/+$/, '');
+  return 'http://localhost:5000/api';
+};
+
+const rawApiUrl = 
   import.meta.env.VITE_API_URL || 
   (import.meta.env.PROD 
     ? 'https://primebid-backend-e971.onrender.com/api' 
     : 'http://localhost:5000/api');
+
+const API_BASE_URL = formatBaseUrl(rawApiUrl);
 
 const api = axios.create({
   baseURL: API_BASE_URL,
