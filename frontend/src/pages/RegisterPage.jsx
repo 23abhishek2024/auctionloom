@@ -17,10 +17,10 @@ export const RegisterPage = () => {
   const { isAuthenticated, register } = useAuth();
   const navigate = useNavigate();
 
-  // If already logged in, redirect to My Hub
+  // If already logged in, redirect to marketplace
   useEffect(() => {
     if (isAuthenticated) {
-      navigate('/my-hub', { replace: true });
+      navigate('/', { replace: true });
     }
   }, [isAuthenticated, navigate]);
 
@@ -51,7 +51,7 @@ export const RegisterPage = () => {
       setLoading(true);
       setError(null);
       await register(email, password, role, name);
-      navigate('/my-hub');
+      navigate('/');
     } catch (err) {
       console.error('Registration error:', err);
       setError(err.response?.data?.error || 'Registration failed. Try a different email.');

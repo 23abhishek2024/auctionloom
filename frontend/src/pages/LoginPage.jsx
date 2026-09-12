@@ -16,10 +16,10 @@ export const LoginPage = () => {
 
   const from = location.state?.from?.pathname || '/';
 
-  // If already logged in, redirect to home or My Hub
+  // If already logged in, redirect to home marketplace
   useEffect(() => {
     if (isAuthenticated) {
-      navigate('/my-hub', { replace: true });
+      navigate('/', { replace: true });
     }
   }, [isAuthenticated, navigate]);
 
