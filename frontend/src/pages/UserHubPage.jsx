@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { userApi, resolveImageUrl } from '../api/client';
+import { userApi, auctionApi, resolveImageUrl } from '../api/client';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 import {
   Gavel,
@@ -36,6 +36,7 @@ export const UserHubPage = () => {
   const [participations, setParticipations] = useState([]);
   const [myAuctions, setMyAuctions] = useState([]);
   const [wonAuctions, setWonAuctions] = useState([]);
+  const [liveAuctions, setLiveAuctions] = useState([]);
 
   const [activeTab, setActiveTab] = useState('bids'); // 'bids', 'seller', 'won'
   const [loading, setLoading] = useState(true);
@@ -57,17 +58,22 @@ export const UserHubPage = () => {
     try {
       setLoading(true);
       setError(null);
-      const [statsRes, bidsRes, auctionsRes, wonRes] = await Promise.all([
+      const [statsRes, bidsRes, auctionsRes, wonRes, exploreRes] = await Promise.all([
         userApi.getStats(),
         userApi.getMyBids(),
         userApi.getMyAuctions(),
         userApi.getMyWon(),
+        auctionApi.getAll().catch(() => ({ data: { auctions: [] } })),
       ]);
 
       setStats(statsRes.data.stats || {});
       setParticipations(bidsRes.data.participations || []);
       setMyAuctions(auctionsRes.data.auctions || []);
       setWonAuctions(wonRes.data.wonAuctions || []);
+      const activeList = (exploreRes.data?.auctions || []).filter(
+        (a) => a.status === 'ACTIVE' && new Date(a.end_time) > new Date()
+      );
+      setLiveAuctions(activeList.slice(0, 3));
     } catch (err) {
       console.error('Failed to load user hub data:', err);
       setError(err.response?.data?.error || 'Failed to load your personal dashboard data.');
@@ -370,20 +376,77 @@ export const UserHubPage = () => {
         {activeTab === 'bids' && (
           <div>
             {participations.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center mx-auto mb-3">
-                  <TrendingUp className="w-6 h-6" />
+              <div className="py-6">
+                <div className="text-center max-w-lg mx-auto mb-8">
+                  <div className="w-14 h-14 rounded-3xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center mx-auto mb-3 shadow-sm">
+                    <TrendingUp className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-lg font-extrabold text-slate-900 mb-1">
+                    No Active Bids Yet
+                  </h3>
+                  <p className="text-xs text-slate-500 leading-relaxed mb-4">
+                    <strong>My Hub</strong> is your private bidding ledger. Since your account is newly registered, you haven't placed any bids yet. Explore the live marketplace below and place your first bid!
+                  </p>
+                  <Link
+                    to="/"
+                    className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold shadow-md shadow-indigo-500/20"
+                  >
+                    <span>Browse All Live Auctions</span>
+                    <ArrowUpRight className="w-4 h-4" />
+                  </Link>
                 </div>
-                <h3 className="text-base font-bold text-slate-900 mb-1">No Active Bids Placed Yet</h3>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto mb-6">
-                  Explore active auctions and place a bid to start competing for luxury collectibles in real time.
-                </p>
-                <Link
-                  to="/"
-                  className="btn-primary inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-sm"
-                >
-                  Browse Live Auctions
-                </Link>
+
+                {/* Jumpstart Row: Featured Live Auctions */}
+                {liveAuctions.length > 0 && (
+                  <div className="border-t border-slate-100 pt-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <h4 className="text-xs font-bold uppercase tracking-wider font-mono text-slate-700">
+                          Recommended Auctions To Bid On
+                        </h4>
+                      </div>
+                      <Link to="/" className="text-xs font-semibold text-indigo-600 hover:text-indigo-700">
+                        View All Auctions →
+                      </Link>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {liveAuctions.map((item) => (
+                        <div
+                          key={item.id}
+                          className="border border-slate-200 rounded-2xl p-4 bg-slate-50/70 hover:bg-white hover:border-indigo-300 transition-all flex flex-col justify-between shadow-sm hover:shadow-md"
+                        >
+                          <div className="flex items-center gap-3 mb-3">
+                            <img
+                              src={resolveImageUrl(item.image_url)}
+                              alt={item.title}
+                              className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <h5 className="text-xs font-bold text-slate-900 truncate mb-1">
+                                {item.title}
+                              </h5>
+                              <span className="text-[11px] font-mono text-indigo-600 font-bold block">
+                                Current: ${parseFloat(item.current_price).toFixed(2)}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                Seller: {item.seller_name || 'Verified Seller'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <Link
+                            to={`/auctions/${item.id}`}
+                            className="btn-primary text-center py-2 rounded-xl text-xs font-semibold shadow-sm block"
+                          >
+                            Enter Live Room & Bid
+                          </Link>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
