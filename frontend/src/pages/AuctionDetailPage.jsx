@@ -476,22 +476,6 @@ export const AuctionDetailPage = () => {
             </div>
           )}
 
-          {/* System Architecture Explanation Card */}
-          <div className="glass-card border border-slate-200/90 rounded-3xl p-6 bg-white/95 backdrop-blur-xl shadow-sm">
-            <div className="flex items-center gap-2 text-indigo-600 font-bold text-xs uppercase tracking-wider font-mono mb-2">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Concurrency & Locking Architecture</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              When a bid is submitted, the Express API initiates a PostgreSQL transaction with{' '}
-              <code className="text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded font-mono">
-                SELECT * FROM auctions WHERE id = X FOR UPDATE
-              </code>
-              . This exclusively locks the auction row, queuing any concurrent bids. Once committed,
-              the row is unlocked and Socket.IO broadcasts the new price and chat messages instantly to all connected viewers.
-            </p>
-          </div>
-
           {/* ── Dual Tabs: Live Bids History vs Live Room Chat (Video 33) ── */}
           <div className="glass-card border border-slate-200/90 rounded-3xl p-6 bg-white/95 backdrop-blur-xl shadow-sm">
             <div className="flex items-center justify-between mb-5 border-b border-slate-200 pb-3">
@@ -803,7 +787,7 @@ export const AuctionDetailPage = () => {
                 </button>
 
                 <p className="text-[10px] text-center text-slate-400 font-mono">
-                  Transactions protected by PostgreSQL pessimistic locks (`FOR UPDATE`).
+                  Verified Bidding & Buyer Protection • Secure Real-Time Checkout
                 </p>
               </form>
             )}

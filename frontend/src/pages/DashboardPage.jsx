@@ -66,18 +66,18 @@ export const DashboardPage = () => {
         <div className="relative z-10 max-w-2xl">
           <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-mono mb-4 shadow-sm">
             <Zap className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-            <span>PostgreSQL Row Locking & WebSockets</span>
+            <span>Live Luxury Auctions & Real-Time Bidding</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 mb-4 leading-tight">
             High-Speed Live Bidding.{' '}
             <span className="bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent">
-              Zero Double-Wins.
+              Zero Delays.
             </span>
           </h1>
           <p className="text-slate-600 text-sm sm:text-base leading-relaxed mb-6">
-            Engineered with strict pessimistic locking (`FOR UPDATE`) and distributed job queues.
-            Place bids with instantaneous WebSocket price broadcasts and sub-millisecond consistency.
+            Experience real-time interactive auctions with instantaneous live price broadcasts and verified authentic listings.
+            Discover luxury timepieces, collector vehicles, and rare fine art.
           </p>
 
           <div className="flex flex-wrap items-center gap-3">
