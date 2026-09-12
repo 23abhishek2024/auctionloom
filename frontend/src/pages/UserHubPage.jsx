@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { userApi, resolveImageUrl } from '../api/client';
@@ -24,6 +24,7 @@ import {
 
 export const UserHubPage = () => {
   const { user, updateName, upgradeToSeller } = useAuth();
+  const tabsSectionRef = useRef(null);
 
   const [stats, setStats] = useState({
     listedCount: 0,
@@ -39,6 +40,13 @@ export const UserHubPage = () => {
   const [activeTab, setActiveTab] = useState('bids'); // 'bids', 'seller', 'won'
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const handleCardClick = (tabKey) => {
+    setActiveTab(tabKey);
+    if (tabsSectionRef.current) {
+      tabsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   // Edit Name Modal State
   const [isEditingName, setIsEditingName] = useState(false);
@@ -181,65 +189,141 @@ export const UserHubPage = () => {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         
         {/* Active Bids */}
-        <div className="glass-card border border-slate-200/90 rounded-2xl p-5 bg-white shadow-sm">
+        <button
+          type="button"
+          onClick={() => handleCardClick('bids')}
+          className={`group relative text-left rounded-2xl p-5 bg-white shadow-sm transition-all duration-200 cursor-pointer border hover:-translate-y-1 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500/40 ${
+            activeTab === 'bids'
+              ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20'
+              : 'border-slate-200/90 hover:border-indigo-300'
+          }`}
+          title="Click to view your active bids"
+        >
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-[11px] uppercase font-mono tracking-wider font-semibold">Active Bids</span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <span className="text-[11px] uppercase font-mono tracking-wider font-semibold group-hover:text-indigo-600 transition-colors">
+              Active Bids
+            </span>
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+              activeTab === 'bids'
+                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                : 'bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100'
+            }`}>
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
           <div className="text-2xl sm:text-3xl font-extrabold font-mono text-slate-900">
             {stats.activeBidsCount}
           </div>
-          <span className="text-[11px] text-slate-400 font-mono mt-1 block">Live auctions participating</span>
-        </div>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[11px] text-slate-400 font-mono">Live auctions participating</span>
+            <span className="text-[10px] font-mono text-indigo-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity hidden sm:inline">
+              View →
+            </span>
+          </div>
+        </button>
 
         {/* Won Auctions */}
-        <div className="glass-card border border-slate-200/90 rounded-2xl p-5 bg-white shadow-sm">
+        <button
+          type="button"
+          onClick={() => handleCardClick('won')}
+          className={`group relative text-left rounded-2xl p-5 bg-white shadow-sm transition-all duration-200 cursor-pointer border hover:-translate-y-1 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-amber-500/40 ${
+            activeTab === 'won'
+              ? 'border-amber-500 ring-2 ring-amber-500/20 bg-amber-50/20'
+              : 'border-slate-200/90 hover:border-amber-300'
+          }`}
+          title="Click to view won items"
+        >
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-[11px] uppercase font-mono tracking-wider font-semibold">Trophies Won</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+            <span className="text-[11px] uppercase font-mono tracking-wider font-semibold group-hover:text-amber-600 transition-colors">
+              Trophies Won
+            </span>
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+              activeTab === 'won'
+                ? 'bg-amber-500 text-white shadow-sm shadow-amber-500/30'
+                : 'bg-amber-50 text-amber-600 group-hover:bg-amber-100'
+            }`}>
               <Trophy className="w-4 h-4" />
             </div>
           </div>
           <div className="text-2xl sm:text-3xl font-extrabold font-mono text-amber-600">
             {stats.wonCount}
           </div>
-          <span className="text-[11px] text-slate-400 font-mono mt-1 block">Successfully claimed items</span>
-        </div>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[11px] text-slate-400 font-mono">Successfully claimed items</span>
+            <span className="text-[10px] font-mono text-amber-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity hidden sm:inline">
+              View →
+            </span>
+          </div>
+        </button>
 
         {/* Listed by Me */}
-        <div className="glass-card border border-slate-200/90 rounded-2xl p-5 bg-white shadow-sm">
+        <button
+          type="button"
+          onClick={() => handleCardClick('seller')}
+          className={`group relative text-left rounded-2xl p-5 bg-white shadow-sm transition-all duration-200 cursor-pointer border hover:-translate-y-1 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/40 ${
+            activeTab === 'seller'
+              ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/20'
+              : 'border-slate-200/90 hover:border-emerald-300'
+          }`}
+          title="Click to view created listings"
+        >
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-[11px] uppercase font-mono tracking-wider font-semibold">My Listings</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <span className="text-[11px] uppercase font-mono tracking-wider font-semibold group-hover:text-emerald-600 transition-colors">
+              My Listings
+            </span>
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+              activeTab === 'seller'
+                ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-500/30'
+                : 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100'
+            }`}>
               <Tag className="w-4 h-4" />
             </div>
           </div>
           <div className="text-2xl sm:text-3xl font-extrabold font-mono text-slate-900">
             {stats.listedCount}
           </div>
-          <span className="text-[11px] text-slate-400 font-mono mt-1 block">Items published as seller</span>
-        </div>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[11px] text-slate-400 font-mono">Items published as seller</span>
+            <span className="text-[10px] font-mono text-emerald-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity hidden sm:inline">
+              View →
+            </span>
+          </div>
+        </button>
 
         {/* Total Bids Placed */}
-        <div className="glass-card border border-slate-200/90 rounded-2xl p-5 bg-white shadow-sm">
+        <button
+          type="button"
+          onClick={() => handleCardClick('bids')}
+          className={`group relative text-left rounded-2xl p-5 bg-white shadow-sm transition-all duration-200 cursor-pointer border hover:-translate-y-1 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 ${
+            activeTab === 'bids'
+              ? 'border-violet-400 ring-2 ring-violet-500/20 bg-violet-50/10'
+              : 'border-slate-200/90 hover:border-violet-300'
+          }`}
+          title="Click to view all bid activity"
+        >
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-[11px] uppercase font-mono tracking-wider font-semibold">Total Bids</span>
-            <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center">
+            <span className="text-[11px] uppercase font-mono tracking-wider font-semibold group-hover:text-violet-600 transition-colors">
+              Total Bids
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center group-hover:bg-violet-100 transition-colors">
               <Gavel className="w-4 h-4" />
             </div>
           </div>
           <div className="text-2xl sm:text-3xl font-extrabold font-mono text-slate-900">
             {stats.totalBidsCount}
           </div>
-          <span className="text-[11px] text-slate-400 font-mono mt-1 block">Total bids submitted</span>
-        </div>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[11px] text-slate-400 font-mono">Total bids submitted</span>
+            <span className="text-[10px] font-mono text-violet-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity hidden sm:inline">
+              View →
+            </span>
+          </div>
+        </button>
 
       </div>
 
       {/* ── 3. Tabs Navigation ──────────────────────────────── */}
-      <div className="glass-card border border-slate-200/90 rounded-3xl p-6 bg-white shadow-sm mb-8">
+      <div ref={tabsSectionRef} className="glass-card border border-slate-200/90 rounded-3xl p-6 bg-white shadow-sm mb-8 scroll-mt-24">
         
         <div className="flex items-center gap-2 border-b border-slate-200 pb-4 mb-6">
           <button
