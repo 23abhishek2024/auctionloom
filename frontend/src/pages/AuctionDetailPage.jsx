@@ -21,6 +21,7 @@ import {
   Sparkles,
   Layers,
   Image as ImageIcon,
+  X,
 } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
@@ -56,6 +57,7 @@ export const AuctionDetailPage = () => {
   ]);
   const [chatInput, setChatInput] = useState('');
   const [activeReactions, setActiveReactions] = useState([]);
+  const [showReactions, setShowReactions] = useState(false);
   const chatBottomRef = useRef(null);
 
   // ── 1. Fetch initial auction & bid history ───────────────────
@@ -286,6 +288,7 @@ export const AuctionDetailPage = () => {
       senderName: formatDisplayName(user),
       senderEmail: user?.email || 'Bidder',
     });
+    setShowReactions(false);
   };
 
   if (loading) {
@@ -398,23 +401,43 @@ export const AuctionDetailPage = () => {
                 ))}
               </div>
 
-              {/* Real-time Emoji Reaction Trigger Bar */}
-              <div className="absolute bottom-4 right-4 flex items-center gap-1.5 p-1.5 rounded-2xl bg-white/90 backdrop-blur-md border border-slate-200 shadow-xl">
-                <span className="text-[10px] font-mono text-slate-600 pl-1.5 pr-1 flex items-center gap-1 font-medium">
-                  <Flame className="w-3 h-3 text-amber-500" /> React:
-                </span>
-                {['🔥', '🚀', '💎', '👏', '❤️', '⚡'].map((emoji) => (
+              {/* Real-time Emoji Reaction Trigger (Collapsible) */}
+              {!showReactions ? (
+                <button
+                  type="button"
+                  onClick={() => setShowReactions(true)}
+                  className="absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-slate-200 shadow-md hover:shadow-lg transition-all text-xs font-semibold text-slate-700 hover:scale-105 active:scale-95 cursor-pointer"
+                  title="React with emojis"
+                >
+                  <span className="text-sm">🔥</span>
+                  <span className="text-[11px] font-medium">React</span>
+                </button>
+              ) : (
+                <div className="absolute bottom-4 right-4 flex items-center gap-1.5 p-1.5 rounded-2xl bg-white/95 backdrop-blur-md border border-slate-200 shadow-xl animate-in fade-in zoom-in-95 duration-150">
+                  <span className="text-[10px] font-mono text-slate-500 pl-2 pr-1 font-semibold flex items-center gap-1">
+                    <Flame className="w-3 h-3 text-amber-500" /> React:
+                  </span>
+                  {['🔥', '🚀', '💎', '👏', '❤️', '⚡'].map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => handleTriggerReaction(emoji)}
+                      className="w-8 h-8 rounded-xl bg-slate-50 hover:bg-indigo-50 hover:scale-125 border border-slate-200 hover:border-indigo-300 transition-all text-base flex items-center justify-center cursor-pointer active:scale-95"
+                      title={`Send ${emoji} reaction`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
                   <button
-                    key={emoji}
                     type="button"
-                    onClick={() => handleTriggerReaction(emoji)}
-                    className="w-8 h-8 rounded-xl bg-slate-50 hover:bg-indigo-50 hover:scale-125 border border-slate-200 hover:border-indigo-300 transition-all text-base flex items-center justify-center cursor-pointer active:scale-95"
-                    title={`Send ${emoji} reaction`}
+                    onClick={() => setShowReactions(false)}
+                    className="w-6 h-6 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors flex items-center justify-center ml-1 text-xs cursor-pointer"
+                    title="Close reaction tray"
                   >
-                    {emoji}
+                    <X className="w-3.5 h-3.5" />
                   </button>
-                ))}
-              </div>
+                </div>
+              )}
 
               {/* Status Chip overlay on image */}
               <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-xs font-mono text-white shadow-lg">
