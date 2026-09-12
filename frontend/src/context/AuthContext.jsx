@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { authApi } from '../api/client';
+import { authApi, userApi } from '../api/client';
 
 const AuthContext = createContext(null);
 
@@ -62,6 +62,14 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
+  const upgradeToSeller = async () => {
+    const res = await userApi.upgradeToSeller();
+    const updatedUser = res.data.user;
+    setUser(updatedUser);
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+    return updatedUser;
+  };
+
   const logout = () => {
     setUser(null);
     setToken(null);
@@ -79,6 +87,7 @@ export const AuthProvider = ({ children }) => {
         login,
         register,
         updateName,
+        upgradeToSeller,
         logout,
       }}
     >

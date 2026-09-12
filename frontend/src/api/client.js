@@ -76,6 +76,7 @@ export const userApi = {
   getMyAuctions: () => api.get('/users/me/auctions'),
   getMyBids: () => api.get('/users/me/bids'),
   getMyWon: () => api.get('/users/me/won'),
+  upgradeToSeller: () => api.post('/users/me/upgrade-seller'),
 };
 
 export const aiApi = {

@@ -54,7 +54,7 @@ const PRESET_GALLERY = [
 
 export const CreateAuctionPage = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, upgradeToSeller } = useAuth();
 
   // Set default end_time to 24 hours from now
   const defaultEndTime = () => {
@@ -142,6 +142,15 @@ export const CreateAuctionPage = () => {
       setError(null);
       setAiMessage(null);
 
+      // Seamlessly upgrade legacy bidder if needed
+      if (user?.role === 'bidder' && upgradeToSeller) {
+        try {
+          await upgradeToSeller();
+        } catch (e) {
+          console.warn('Auto upgrade failed:', e);
+        }
+      }
+
       const res = await aiApi.generate({
         keywords: aiKeywords.trim(),
       });
@@ -193,6 +202,15 @@ export const CreateAuctionPage = () => {
     try {
       setSubmitting(true);
       setError(null);
+
+      // Seamlessly upgrade legacy bidder account to full seller privileges
+      if (user?.role === 'bidder' && upgradeToSeller) {
+        try {
+          await upgradeToSeller();
+        } catch (e) {
+          console.warn('Auto upgrade to seller failed:', e);
+        }
+      }
 
       const res = await auctionApi.create({
         title: formData.title.trim(),

@@ -81,7 +81,7 @@ export const DashboardPage = () => {
           </p>
 
           <div className="flex flex-wrap items-center gap-3">
-            {isAuthenticated && (user?.role === 'auctioneer' || user?.role === 'admin') ? (
+            {isAuthenticated ? (
               <Link
                 to="/create"
                 className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md shadow-indigo-500/25 transition-all"
@@ -89,7 +89,15 @@ export const DashboardPage = () => {
                 <Plus className="w-4 h-4" />
                 Launch New Auction
               </Link>
-            ) : null}
+            ) : (
+              <Link
+                to="/register"
+                className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md shadow-indigo-500/25 transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                Start Selling
+              </Link>
+            )}
 
             <button
               onClick={fetchAuctions}
@@ -199,13 +207,21 @@ export const DashboardPage = () => {
               ? `No results matching "${searchQuery}". Try adjusting your filters.`
               : 'There are no active auctions right now. Be the first to create one!'}
           </p>
-          {isAuthenticated && (user?.role === 'auctioneer' || user?.role === 'admin') && (
+          {isAuthenticated ? (
             <Link
               to="/create"
               className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold shadow-md shadow-indigo-500/25"
             >
               <Plus className="w-4 h-4" />
               Create the First Auction
+            </Link>
+          ) : (
+            <Link
+              to="/register"
+              className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold shadow-md shadow-indigo-500/25"
+            >
+              <Plus className="w-4 h-4" />
+              Register to Sell
             </Link>
           )}
         </div>

@@ -165,9 +165,35 @@ const getMyWon = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /api/users/me/upgrade-seller
+ * Allows an existing user (e.g. legacy 'bidder') to activate full seller privileges
+ */
+const upgradeToSeller = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const result = await pool.query(
+      "UPDATE users SET role = 'auctioneer' WHERE id = $1 RETURNING id, name, email, role, created_at",
+      [userId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    res.json({
+      message: 'Account successfully upgraded to full member (Bidder & Seller).',
+      user: result.rows[0],
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getMyStats,
   getMyAuctions,
   getMyBids,
   getMyWon,
+  upgradeToSeller,
 };

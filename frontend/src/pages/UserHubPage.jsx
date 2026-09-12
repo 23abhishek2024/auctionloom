@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const UserHubPage = () => {
-  const { user, updateName } = useAuth();
+  const { user, updateName, upgradeToSeller } = useAuth();
 
   const [stats, setStats] = useState({
     listedCount: 0,
@@ -151,6 +151,30 @@ export const UserHubPage = () => {
           </div>
 
         </div>
+
+        {user?.role === 'bidder' && (
+          <div className="mt-6 pt-5 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-indigo-50/70 p-4 rounded-2xl border border-indigo-100 text-xs">
+            <div className="flex items-center gap-2.5 text-indigo-900">
+              <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span>Your account is in <strong>Bidder Mode</strong>. Activate selling privileges to list items for auction!</span>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await upgradeToSeller();
+                  fetchHubData();
+                } catch (e) {
+                  alert('Upgrade failed: ' + (e.response?.data?.error || e.message));
+                }
+              }}
+              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-sm shrink-0 cursor-pointer transition-colors"
+            >
+              Activate Seller Privileges
+            </button>
+          </div>
+        )}
+
       </div>
 
       {/* ── 2. Metric KPI Cards Matrix ──────────────────────── */}
