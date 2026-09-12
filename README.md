@@ -216,5 +216,28 @@ AuctionLoom is engineered for decoupled cloud deployment:
 
 ---
 
+## 🛠️ Database Reset & Demo Seed
+
+To reset your database to a fresh state with clean test accounts and demo luxury auctions at any time:
+
+```bash
+cd backend
+npm run seed
+```
+
+### Pre-Seeded Test Credentials
+All test accounts use the password: **`test@123`**
+
+| Name | Email | Password | Role |
+| :--- | :--- | :--- | :--- |
+| **Test1** | `test1@gmail.com` (or `test1@gamil.com`) | `test@123` | Full Member (Buyer + Seller) |
+| **Test2** | `test2@gmail.com` (or `test2@gamil.com`) | `test@123` | Full Member (Buyer + Seller) |
+| **Test3** | `test3@gmail.com` (or `test3@gamil.com`) | `test@123` | Full Member (Buyer + Seller) |
+| **Test4** | `test4@gmail.com` (or `test4@gamil.com`) | `test@123` | Full Member (Buyer + Seller) |
+| **Test5** | `test5@gmail.com` (or `test5@gamil.com`) | `test@123` | Full Member (Buyer + Seller) |
+| **Admin** | `admin@gmail.com` (or `admin@gamil.com`) | `test@123` | Administrator |
+
+---
+
 ## 📄 License
 ISC License. Developed by **Abhishek** ([@23abhishek2024](https://github.com/23abhishek2024)).
