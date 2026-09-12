@@ -319,6 +319,14 @@ export const AuctionDetailPage = () => {
   }
 
   const isSeller = user?.id === auction.seller_id;
+  const highestBid = bids && bids.length > 0 ? bids[0] : null;
+  const winnerName = auction?.winner_name
+    ? formatDisplayName(auction.winner_name, auction.winner_email)
+    : (highestBid ? formatDisplayName(highestBid.bidder_name, highestBid.bidder_email) : null);
+  const isWinnerMe = user && (
+    (auction?.winner_id && user.id === auction.winner_id) ||
+    (highestBid && (user.id === highestBid.bidder_id || (user.email && highestBid.bidder_email === user.email)))
+  );
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -455,24 +463,64 @@ export const AuctionDetailPage = () => {
 
           {/* Winner Banner if Closed */}
           {isEnded && (
-            <div className="glass-card border border-amber-300 bg-amber-50/80 rounded-3xl p-6 flex items-center gap-4 shadow-sm">
-              <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0 text-amber-700 shadow-sm">
-                <Trophy className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-amber-900 mb-0.5">Auction Concluded</h3>
-                <p className="text-xs text-slate-700">
-                  Winning bid:{' '}
-                  <span className="font-mono font-bold text-slate-900 text-sm">
-                    ${parseFloat(auction.current_price).toFixed(2)}
-                  </span>
-                  {auction.winner_id ? (
-                    <span className="text-slate-500 ml-1">(Winner recorded in database)</span>
+            <div className={`glass-card border rounded-3xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm ${
+              isWinnerMe
+                ? 'border-emerald-300 bg-emerald-50/90'
+                : 'border-amber-300 bg-amber-50/80'
+            }`}>
+              <div className="flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
+                  isWinnerMe
+                    ? 'bg-emerald-100 border border-emerald-300 text-emerald-700'
+                    : 'bg-amber-100 border border-amber-300 text-amber-700'
+                }`}>
+                  <Trophy className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className={`text-base font-bold ${isWinnerMe ? 'text-emerald-900' : 'text-amber-900'}`}>
+                      Auction Concluded
+                    </h3>
+                    {isWinnerMe && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase rounded-full bg-emerald-600 text-white shadow-sm">
+                        You Won!
+                      </span>
+                    )}
+                  </div>
+
+                  {winnerName ? (
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      <span className="text-xs text-slate-600 font-medium">Declared Winner:</span>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-amber-200 shadow-sm">
+                        <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-amber-500 to-amber-600 text-white text-[10px] font-bold flex items-center justify-center">
+                          {getInitials(winnerName)}
+                        </div>
+                        <span className="text-xs font-bold text-slate-900">
+                          {winnerName}
+                        </span>
+                      </div>
+                      <span className="text-xs text-slate-600">
+                        with winning bid of <strong className="text-slate-900 font-mono font-bold">${parseFloat(auction.current_price).toFixed(2)}</strong>
+                      </span>
+                    </div>
                   ) : (
-                    <span className="text-slate-500 ml-1">(No winning bids placed)</span>
+                    <p className="text-xs text-slate-500 mt-1">
+                      No bids were placed on this item.
+                    </p>
                   )}
-                </p>
+                </div>
               </div>
+
+              {winnerName && (
+                <div className="flex items-center gap-2 self-start sm:self-center">
+                  <div className="px-3.5 py-2 rounded-xl bg-white/90 border border-amber-200 text-left sm:text-right shadow-sm">
+                    <span className="text-[10px] uppercase font-mono text-slate-400 block font-semibold">Winning Hammer Price</span>
+                    <span className="text-base font-extrabold font-mono text-amber-700">
+                      ${parseFloat(auction.current_price).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -672,10 +720,26 @@ export const AuctionDetailPage = () => {
 
             {/* Bid Form or Restrictions */}
             {isEnded ? (
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center">
-                <p className="text-xs text-slate-500 font-mono">
-                  This auction has ended. No further bids can be accepted.
-                </p>
+              <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 text-center space-y-2 shadow-sm">
+                <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-amber-800 font-mono">
+                  <Trophy className="w-4 h-4 text-amber-600" />
+                  <span>AUCTION CONCLUDED</span>
+                </div>
+                {winnerName ? (
+                  <div className="text-xs text-slate-700">
+                    <div className="flex items-center justify-center gap-1.5 my-1">
+                      <span className="text-slate-500">Winner:</span>
+                      <strong className="text-slate-900 font-bold">{winnerName}</strong>
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      Final Price: <span className="font-bold text-slate-900">${parseFloat(auction.current_price).toFixed(2)}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 font-mono">
+                    This auction concluded with no bids placed.
+                  </p>
+                )}
               </div>
             ) : isSeller ? (
               <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-center">

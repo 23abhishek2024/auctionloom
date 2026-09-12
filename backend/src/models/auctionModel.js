@@ -8,9 +8,12 @@ const auctionModel = {
     const result = await pool.query(
       `SELECT a.*, 
               COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS seller_name,
-              u.email AS seller_email
+              u.email AS seller_email,
+              COALESCE(NULLIF(w.name, ''), split_part(w.email, '@', 1)) AS winner_name,
+              w.email AS winner_email
        FROM auctions a
        JOIN users u ON a.seller_id = u.id
+       LEFT JOIN users w ON a.winner_id = w.id
        ORDER BY a.created_at DESC`
     );
     return result.rows;
@@ -23,9 +26,12 @@ const auctionModel = {
     const result = await pool.query(
       `SELECT a.*, 
               COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS seller_name,
-              u.email AS seller_email
+              u.email AS seller_email,
+              COALESCE(NULLIF(w.name, ''), split_part(w.email, '@', 1)) AS winner_name,
+              w.email AS winner_email
        FROM auctions a
        JOIN users u ON a.seller_id = u.id
+       LEFT JOIN users w ON a.winner_id = w.id
        WHERE a.id = $1`,
       [id]
     );
