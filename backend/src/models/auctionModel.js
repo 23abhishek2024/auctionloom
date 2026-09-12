@@ -2,20 +2,62 @@ const pool = require('../db');
 
 const auctionModel = {
   /**
-   * Get all active auctions
+   * Get all auctions with optional filters, search, and sorting
    */
-  findAll: async () => {
-    const result = await pool.query(
-      `SELECT a.*, 
-              COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS seller_name,
-              u.email AS seller_email,
-              COALESCE(NULLIF(w.name, ''), split_part(w.email, '@', 1)) AS winner_name,
-              w.email AS winner_email
-       FROM auctions a
-       JOIN users u ON a.seller_id = u.id
-       LEFT JOIN users w ON a.winner_id = w.id
-       ORDER BY a.created_at DESC`
-    );
+  findAll: async (filters = {}) => {
+    const { status, search, seller_id, limit, offset, sort } = filters;
+    const conditions = [];
+    const params = [];
+
+    if (status && (status.toUpperCase() === 'ACTIVE' || status.toUpperCase() === 'CLOSED')) {
+      params.push(status.toUpperCase());
+      conditions.push(`a.status = $${params.length}`);
+    }
+
+    if (seller_id) {
+      params.push(seller_id);
+      conditions.push(`a.seller_id = $${params.length}`);
+    }
+
+    if (search && search.trim()) {
+      params.push(`%${search.trim()}%`);
+      conditions.push(`(a.title ILIKE $${params.length} OR a.description ILIKE $${params.length})`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    let orderBy = 'ORDER BY a.created_at DESC';
+    if (sort === 'price_asc') orderBy = 'ORDER BY a.current_price ASC';
+    else if (sort === 'price_desc') orderBy = 'ORDER BY a.current_price DESC';
+    else if (sort === 'ending_soon') orderBy = 'ORDER BY a.end_time ASC';
+
+    let paginationClause = '';
+    const parsedLimit = parseInt(limit, 10);
+    const parsedOffset = parseInt(offset, 10);
+    if (!isNaN(parsedLimit) && parsedLimit > 0) {
+      params.push(parsedLimit);
+      paginationClause += ` LIMIT $${params.length}`;
+    }
+    if (!isNaN(parsedOffset) && parsedOffset >= 0) {
+      params.push(parsedOffset);
+      paginationClause += ` OFFSET $${params.length}`;
+    }
+
+    const query = `
+      SELECT a.*, 
+             COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS seller_name,
+             u.email AS seller_email,
+             COALESCE(NULLIF(w.name, ''), split_part(w.email, '@', 1)) AS winner_name,
+             w.email AS winner_email
+      FROM auctions a
+      JOIN users u ON a.seller_id = u.id
+      LEFT JOIN users w ON a.winner_id = w.id
+      ${whereClause}
+      ${orderBy}
+      ${paginationClause}
+    `;
+
+    const result = await pool.query(query, params);
     return result.rows;
   },
 
@@ -97,6 +139,22 @@ const auctionModel = {
        WHERE status = 'ACTIVE' AND end_time <= NOW()`
     );
     return result.rows;
+  },
+
+  /**
+   * Check if an auction has received any bids
+   */
+  hasBids: async (auctionId) => {
+    const result = await pool.query('SELECT COUNT(*)::int AS count FROM bids WHERE auction_id = $1', [auctionId]);
+    return (result.rows[0]?.count || 0) > 0;
+  },
+
+  /**
+   * Delete an auction by ID
+   */
+  delete: async (id) => {
+    const result = await pool.query('DELETE FROM auctions WHERE id = $1 RETURNING *', [id]);
+    return result.rows[0];
   },
 };
 

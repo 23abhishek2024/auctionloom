@@ -2,9 +2,10 @@ const pool = require('../db');
 const auctionModel = require('../models/auctionModel');
 const bidModel = require('../models/bidModel');
 const { getIO } = require('../services/socketService');
+const { isUUID, isPositiveNumber } = require('../utils/validators');
 
 /**
- * POST /api/bids
+ * POST /api/bids OR POST /api/auctions/:id/bids
  *
  * This is the most critical endpoint in the system.
  * It uses a PostgreSQL transaction with pessimistic locking (FOR UPDATE)
@@ -14,11 +15,22 @@ const placeBid = async (req, res, next) => {
   const client = await pool.connect(); // Get a dedicated client for the transaction
 
   try {
-    const { auction_id, amount } = req.body;
+    const auctionId = req.params.id || req.body.auction_id;
+    const { amount } = req.body;
 
-    if (!auction_id || !amount) {
+    if (!auctionId || amount === undefined || amount === null || amount === '') {
       return res.status(400).json({ error: 'auction_id and amount are required.' });
     }
+
+    if (!isUUID(auctionId)) {
+      return res.status(400).json({ error: 'Invalid auction ID format. Must be a valid UUID.' });
+    }
+
+    if (!isPositiveNumber(amount)) {
+      return res.status(400).json({ error: 'amount must be a positive number greater than 0.' });
+    }
+
+    const numericAmount = parseFloat(amount);
 
     // ── BEGIN TRANSACTION ───────────────────────────────────────
     await client.query('BEGIN');
@@ -26,7 +38,7 @@ const placeBid = async (req, res, next) => {
     // ── PESSIMISTIC LOCK ────────────────────────────────────────
     // SELECT ... FOR UPDATE locks this specific auction row.
     // All other concurrent bids will WAIT here until we COMMIT or ROLLBACK.
-    const auction = await auctionModel.findByIdForUpdate(client, auction_id);
+    const auction = await auctionModel.findByIdForUpdate(client, auctionId);
 
     if (!auction) {
       await client.query('ROLLBACK');
@@ -44,7 +56,7 @@ const placeBid = async (req, res, next) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'You cannot bid on your own auction.' });
     }
-    if (parseFloat(amount) <= parseFloat(auction.current_price)) {
+    if (numericAmount <= parseFloat(auction.current_price)) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         error: `Bid must be higher than current price of $${auction.current_price}.`,
@@ -52,10 +64,10 @@ const placeBid = async (req, res, next) => {
     }
 
     // ── WRITE NEW BID ───────────────────────────────────────────
-    const newBid = await bidModel.create(client, auction_id, req.user.id, amount);
+    const newBid = await bidModel.create(client, auctionId, req.user.id, numericAmount);
 
     // ── UPDATE AUCTION PRICE ────────────────────────────────────
-    await auctionModel.updatePrice(client, auction_id, amount);
+    await auctionModel.updatePrice(client, auctionId, numericAmount);
 
     // ── COMMIT TRANSACTION ──────────────────────────────────────
     // Row lock is released here. Next concurrent bid can now proceed.
@@ -64,9 +76,9 @@ const placeBid = async (req, res, next) => {
     // ── REAL-TIME BROADCAST (after commit) ──────────────────────
     const io = getIO();
     const bidderName = req.user.name || (req.user.email ? req.user.email.split('@')[0] : 'Bidder');
-    io.to(auction_id).emit('PRICE_UPDATE', {
-      auction_id,
-      new_price: amount,
+    io.to(auctionId).emit('PRICE_UPDATE', {
+      auction_id: auctionId,
+      new_price: numericAmount,
       bidder_name: bidderName,
       bidder_email: req.user.email,
       bid_id: newBid.id,
@@ -82,12 +94,17 @@ const placeBid = async (req, res, next) => {
 };
 
 /**
- * GET /api/bids/:auction_id - Get all bids for an auction
+ * GET /api/bids/:auction_id OR GET /api/auctions/:id/bids - Get all bids for an auction
  */
 const getBidsForAuction = async (req, res, next) => {
   try {
-    const bids = await bidModel.findByAuctionId(req.params.auction_id);
-    res.json({ bids });
+    const auctionId = req.params.auction_id || req.params.id;
+    if (!isUUID(auctionId)) {
+      return res.status(400).json({ error: 'Invalid auction ID format. Must be a valid UUID.' });
+    }
+
+    const bids = await bidModel.findByAuctionId(auctionId);
+    res.json({ bids, count: bids.length });
   } catch (err) {
     next(err);
   }

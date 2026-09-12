@@ -84,7 +84,10 @@ const getMyAuctions = async (req, res, next) => {
       [userId]
     );
 
-    res.json({ auctions: result.rows });
+    res.json({
+      auctions: result.rows,
+      count: result.rows.length,
+    });
   } catch (err) {
     next(err);
   }
@@ -126,7 +129,11 @@ const getMyBids = async (req, res, next) => {
       [userId]
     );
 
-    res.json({ participations: result.rows });
+    res.json({
+      participations: result.rows,
+      bids: result.rows,
+      count: result.rows.length,
+    });
   } catch (err) {
     next(err);
   }
@@ -159,7 +166,11 @@ const getMyWon = async (req, res, next) => {
       [userId]
     );
 
-    res.json({ wonAuctions: result.rows });
+    res.json({
+      wonAuctions: result.rows,
+      won: result.rows,
+      count: result.rows.length,
+    });
   } catch (err) {
     next(err);
   }

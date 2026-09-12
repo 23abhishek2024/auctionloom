@@ -42,25 +42,80 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/users', userRoutes);
 
-// ── Root & Health Check ───────────────────────────────────────
+// ── Root, API Directory & Health Check ───────────────────────
 app.get('/', (req, res) => {
   res.json({
     message: '🚀 AuctionLoom Backend API & Real-Time WebSocket Server',
     status: 'online',
     version: '1.0.0',
+    documentation: '/api',
     frontend: process.env.FRONTEND_URL || 'http://localhost:5173',
     endpoints: {
       health: '/health',
+      api_index: '/api',
       auctions: '/api/auctions',
       auth: '/api/auth',
       bids: '/api/bids',
+      users: '/api/users',
       ai: '/api/ai/generate',
+      upload: '/api/upload',
     },
   });
 });
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', pid: process.pid, time: new Date().toISOString() });
+});
+
+// REST API Discovery Catalog
+app.get('/api', (req, res) => {
+  res.json({
+    title: 'AuctionLoom RESTful API Specification',
+    version: '1.1.0',
+    status: 'online',
+    timestamp: new Date().toISOString(),
+    resources: {
+      auth: {
+        'POST /api/auth/register': { desc: 'Register a new member', auth: 'Public', body: ['email', 'password', 'role (optional)', 'name (optional)'] },
+        'POST /api/auth/login': { desc: 'Authenticate and receive JWT token', auth: 'Public', body: ['email', 'password'] },
+        'GET /api/auth/me': { desc: 'Get current user profile', auth: 'Bearer JWT' },
+        'PUT /api/auth/profile': { desc: 'Update profile name', auth: 'Bearer JWT', body: ['name'] },
+      },
+      auctions: {
+        'GET /api/auctions': { desc: 'List all auctions with optional filters', auth: 'Public', query: ['status (ACTIVE|CLOSED)', 'search', 'seller_id', 'sort (price_asc|price_desc|ending_soon)', 'limit', 'offset'] },
+        'GET /api/auctions/:id': { desc: 'Get single auction by UUID', auth: 'Public' },
+        'POST /api/auctions': { desc: 'Create a new auction listing', auth: 'Bearer JWT (Auctioneer/Admin)', body: ['title', 'description', 'starting_price', 'end_time', 'image_url'] },
+        'DELETE /api/auctions/:id': { desc: 'Delete an auction listing (before bids)', auth: 'Bearer JWT (Owner/Admin)' },
+        'GET /api/auctions/:id/bids': { desc: 'Get all bids placed on an auction', auth: 'Public' },
+        'POST /api/auctions/:id/bids': { desc: 'Place a bid on an auction', auth: 'Bearer JWT', body: ['amount'] },
+      },
+      bids: {
+        'POST /api/bids': { desc: 'Place a bid on an auction (legacy route)', auth: 'Bearer JWT', body: ['auction_id', 'amount'] },
+        'GET /api/bids/:auction_id': { desc: 'Get all bids for an auction (legacy route)', auth: 'Public' },
+      },
+      users: {
+        'GET /api/users/me/stats': { desc: 'Aggregated user metrics (listings, active bids, wins, volume)', auth: 'Bearer JWT' },
+        'GET /api/users/me/auctions': { desc: 'Auctions created by user', auth: 'Bearer JWT' },
+        'GET /api/users/me/bids': { desc: 'Auctions user has bid on with high bid indicator', auth: 'Bearer JWT' },
+        'GET /api/users/me/won': { desc: 'Auctions won by user', auth: 'Bearer JWT' },
+        'POST /api/users/me/upgrade-seller': { desc: 'Upgrade user account to seller privileges', auth: 'Bearer JWT' },
+      },
+      ai: {
+        'POST /api/ai/generate': { desc: 'Generate luxury title, description, and starting price', auth: 'Bearer JWT (Auctioneer/Admin)', body: ['keywords', 'category'] },
+      },
+      upload: {
+        'POST /api/upload': { desc: 'Upload auction image (multipart/form-data)', auth: 'Bearer JWT', body: 'image (file)' },
+      },
+    },
+  });
+});
+
+// ── 404 Fallback Handler ──────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).json({
+    error: `Route not found: ${req.method} ${req.originalUrl}`,
+    help: 'Visit GET /api to view all available REST endpoints.',
+  });
 });
 
 // ── Global Error Handler ──────────────────────────────────────
