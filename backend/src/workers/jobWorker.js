@@ -86,12 +86,34 @@ const handleCloseAuction = async (auctionId) => {
     const highestBid = await bidModel.findHighestBid(client, auctionId);
     const winnerId = highestBid ? highestBid.bidder_id : null;
 
+    // 1. Close auction and record winner
     await auctionModel.close(client, auctionId, winnerId);
+
+    // 2. If auction concluded with a winner, calculate 5% platform commission (Piyush Garg / Sachin Reference)
+    if (winnerId && highestBid) {
+      const commission = parseFloat((highestBid.amount * 0.05).toFixed(2));
+      await client.query(
+        `UPDATE auctions 
+         SET commission_amount = $1, commission_calculated = TRUE 
+         WHERE id = $2`,
+        [commission, auctionId]
+      );
+
+      await client.query(
+        `UPDATE users 
+         SET unpaid_commission = unpaid_commission + $1 
+         WHERE id = $2`,
+        [commission, auction.seller_id]
+      );
+      console.log(`[Worker] Accrued $${commission} (5% platform commission) to seller ${auction.seller_id}`);
+    }
+
     await client.query('COMMIT');
 
     console.log(
       `[Worker] Auction ${auctionId} closed. Winner: ${winnerId || 'No bids placed'}`
     );
+
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

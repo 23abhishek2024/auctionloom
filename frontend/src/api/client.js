@@ -61,9 +61,11 @@ export const authApi = {
 };
 
 export const auctionApi = {
-  getAll: () => api.get('/auctions'),
+  getAll: (params) => api.get('/auctions', { params }),
   getById: (id) => api.get(`/auctions/${id}`),
   create: (auctionData) => api.post('/auctions', auctionData),
+  republish: (id, data) => api.post(`/auctions/${id}/republish`, data),
+  delete: (id) => api.delete(`/auctions/${id}`),
 };
 
 export const bidApi = {
@@ -77,6 +79,29 @@ export const userApi = {
   getMyBids: () => api.get('/users/me/bids'),
   getMyWon: () => api.get('/users/me/won'),
   upgradeToSeller: () => api.post('/users/me/upgrade-seller'),
+  getLeaderboard: () => api.get('/users/leaderboard'),
+  getPayoutMethods: () => api.get('/users/me/payout-methods'),
+  updatePayoutMethods: (data) => api.put('/users/me/payout-methods', data),
+  getSellerPayoutForWinner: (auctionId) => api.get(`/users/auction-payout/${auctionId}`),
+};
+
+export const adminApi = {
+  getMetrics: () => api.get('/admin/metrics'),
+  getRevenueChart: () => api.get('/admin/revenue-chart'),
+  getUsers: (search) => api.get('/admin/users', { params: { search } }),
+  updateRole: (id, role) => api.put(`/admin/users/${id}/role`, { role }),
+  deleteAuction: (id) => api.delete(`/admin/auctions/${id}`),
+  getProofs: (status) => api.get('/admin/commission-proofs', { params: { status } }),
+  updateProofStatus: (id, status, notes) =>
+    api.put(`/admin/commission-proofs/${id}/status`, { status, admin_notes: notes }),
+};
+
+export const commissionApi = {
+  submitProof: (formData) =>
+    api.post('/commissions/proof', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  getMyProofs: () => api.get('/commissions/my-proofs'),
 };
 
 export const aiApi = {

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio, Pencil, LayoutDashboard } from 'lucide-react';
+import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio, Pencil, LayoutDashboard, Trophy, ShieldAlert, DollarSign, HelpCircle } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
 export const Navbar = () => {
@@ -67,7 +67,7 @@ export const Navbar = () => {
             </Link>
 
             {/* Socket Status indicator */}
-            <div className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs shadow-inner">
+            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs shadow-inner">
               <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 shadow-[0_0_6px_#10b981] animate-pulse' : 'bg-rose-500'}`} />
               <span className="text-slate-600 font-mono text-[11px] font-medium">
                 {isConnected ? 'LIVE SYNC' : 'OFFLINE'}
@@ -76,34 +76,69 @@ export const Navbar = () => {
           </div>
 
           {/* Center Links */}
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-1 sm:gap-2">
             <Link
               to="/"
-              className="px-3.5 py-1.5 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all"
+              className="px-3 py-1.5 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all"
             >
               Auctions
+            </Link>
+
+            <Link
+              to="/leaderboard"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-medium text-slate-600 hover:text-amber-600 hover:bg-amber-50/50 transition-all"
+            >
+              <Trophy className="w-3.5 h-3.5 text-amber-500" />
+              <span>Leaderboard</span>
+            </Link>
+
+            <Link
+              to="/how-it-works"
+              className="px-3 py-1.5 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all"
+            >
+              Guide
             </Link>
 
             {isAuthenticated && (
               <>
                 <Link
                   to="/my-hub"
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-sm font-medium text-slate-700 hover:text-indigo-600 hover:bg-slate-100 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium text-slate-700 hover:text-indigo-600 hover:bg-slate-100 transition-all"
                 >
                   <LayoutDashboard className="w-4 h-4 text-indigo-500" />
-                  My Hub
+                  <span>My Hub</span>
                 </Link>
+
+                <Link
+                  to="/submit-commission"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-slate-100 transition-all"
+                  title="Commission & Proofs"
+                >
+                  <DollarSign className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Commission</span>
+                </Link>
+
+                {user?.role === 'admin' && (
+                  <Link
+                    to="/admin"
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold font-mono bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-all shadow-sm"
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Admin</span>
+                  </Link>
+                )}
 
                 <Link
                   to="/create"
                   className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-sm font-medium text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all shadow-sm"
                 >
                   <PlusCircle className="w-4 h-4 text-indigo-600" />
-                  Create Auction
+                  <span>Create</span>
                 </Link>
               </>
             )}
           </div>
+
 
           {/* Right Actions */}
           <div className="flex items-center gap-3">

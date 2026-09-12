@@ -156,6 +156,54 @@ const auctionModel = {
     const result = await pool.query('DELETE FROM auctions WHERE id = $1 RETURNING *', [id]);
     return result.rows[0];
   },
+
+  /**
+   * Republish a closed/ended auction with a new end time and reset bidding state
+   */
+  republish: async (client, auctionId, newEndTime, newStartingPrice = null) => {
+    // Delete previous bids to start fresh bidding cycle
+    await client.query('DELETE FROM bids WHERE auction_id = $1', [auctionId]);
+
+    let query;
+    let params;
+
+    if (newStartingPrice !== null && newStartingPrice !== undefined) {
+      query = `
+        UPDATE auctions 
+        SET starting_price = $2,
+            current_price = $2,
+            start_time = NOW(),
+            end_time = $3,
+            status = 'ACTIVE',
+            winner_id = NULL,
+            republished_at = NOW(),
+            commission_calculated = FALSE,
+            commission_amount = 0.00
+        WHERE id = $1
+        RETURNING *
+      `;
+      params = [auctionId, newStartingPrice, newEndTime];
+    } else {
+      query = `
+        UPDATE auctions 
+        SET current_price = starting_price,
+            start_time = NOW(),
+            end_time = $2,
+            status = 'ACTIVE',
+            winner_id = NULL,
+            republished_at = NOW(),
+            commission_calculated = FALSE,
+            commission_amount = 0.00
+        WHERE id = $1
+        RETURNING *
+      `;
+      params = [auctionId, newEndTime];
+    }
+
+    const result = await client.query(query, params);
+    return result.rows[0];
+  },
 };
+
 
 module.exports = auctionModel;

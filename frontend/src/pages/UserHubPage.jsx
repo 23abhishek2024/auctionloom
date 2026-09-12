@@ -17,10 +17,16 @@ import {
   Layers,
   Sparkles,
   Zap,
-  Flame,
   Radio,
   RefreshCw,
+  RotateCcw,
+  CreditCard,
+  Building2,
+  QrCode,
+  DollarSign,
+  X,
 } from 'lucide-react';
+import { auctionApi } from '../api/client';
 
 export const UserHubPage = () => {
   const { user, updateName, upgradeToSeller } = useAuth();
@@ -32,14 +38,36 @@ export const UserHubPage = () => {
     wonCount: 0,
     totalBidsCount: 0,
     totalVolume: 0,
+    unpaidCommission: 0,
   });
   const [participations, setParticipations] = useState([]);
   const [myAuctions, setMyAuctions] = useState([]);
   const [wonAuctions, setWonAuctions] = useState([]);
 
-  const [activeTab, setActiveTab] = useState('bids'); // 'bids', 'seller', 'won'
+  const [activeTab, setActiveTab] = useState('bids'); // 'bids', 'seller', 'won', 'payout'
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Republish Modal State
+  const [republishModal, setRepublishModal] = useState({
+    isOpen: false,
+    auction: null,
+    newEndTime: '',
+    newStartingPrice: '',
+    loading: false,
+    error: null,
+  });
+
+  // Payout Coordinates State
+  const [payoutForm, setPayoutForm] = useState({
+    bank_name: '',
+    account_number: '',
+    ifsc_swift: '',
+    upi_id: '',
+    paypal_email: '',
+  });
+  const [savingPayout, setSavingPayout] = useState(false);
+  const [payoutSuccess, setPayoutSuccess] = useState(false);
 
   const handleCardClick = (tabKey) => {
     setActiveTab(tabKey);
@@ -57,17 +85,21 @@ export const UserHubPage = () => {
     try {
       setLoading(true);
       setError(null);
-      const [statsRes, bidsRes, auctionsRes, wonRes] = await Promise.all([
+      const [statsRes, bidsRes, auctionsRes, wonRes, payoutRes] = await Promise.all([
         userApi.getStats(),
         userApi.getMyBids(),
         userApi.getMyAuctions(),
         userApi.getMyWon(),
+        userApi.getPayoutMethods().catch(() => ({ data: { payoutMethods: {} } })),
       ]);
 
       setStats(statsRes.data.stats || {});
       setParticipations(bidsRes.data.participations || []);
       setMyAuctions(auctionsRes.data.auctions || []);
       setWonAuctions(wonRes.data.wonAuctions || []);
+      if (payoutRes.data?.payoutMethods) {
+        setPayoutForm((prev) => ({ ...prev, ...payoutRes.data.payoutMethods }));
+      }
     } catch (err) {
       console.error('Failed to load user hub data:', err);
       setError(err.response?.data?.error || 'Failed to load your personal dashboard data.');
@@ -75,6 +107,67 @@ export const UserHubPage = () => {
       setLoading(false);
     }
   };
+
+  const handleOpenRepublish = (auc) => {
+    const defaultFuture = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const tzOffset = defaultFuture.getTimezoneOffset() * 60000;
+    const localISOTime = new Date(defaultFuture.getTime() - tzOffset).toISOString().slice(0, 16);
+
+    setRepublishModal({
+      isOpen: true,
+      auction: auc,
+      newEndTime: localISOTime,
+      newStartingPrice: auc.starting_price.toString(),
+      loading: false,
+      error: null,
+    });
+  };
+
+  const handleRepublishSubmit = async (e) => {
+    e.preventDefault();
+    if (!republishModal.auction) return;
+    try {
+      setRepublishModal((prev) => ({ ...prev, loading: true, error: null }));
+      await auctionApi.republish(republishModal.auction.id, {
+        end_time: new Date(republishModal.newEndTime).toISOString(),
+        starting_price: republishModal.newStartingPrice,
+      });
+      setRepublishModal({
+        isOpen: false,
+        auction: null,
+        newEndTime: '',
+        newStartingPrice: '',
+        loading: false,
+        error: null,
+      });
+      await fetchHubData();
+      alert('Auction republished successfully! It is now live in the marketplace.');
+    } catch (err) {
+      setRepublishModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: err.response?.data?.error || 'Failed to republish auction.',
+      }));
+    }
+  };
+
+  const handleSavePayout = async (e) => {
+    e.preventDefault();
+    try {
+      setSavingPayout(true);
+      setPayoutSuccess(false);
+      await userApi.updatePayoutMethods(payoutForm);
+      setPayoutSuccess(true);
+      setTimeout(() => setPayoutSuccess(false), 4000);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to save payout coordinates.');
+    } finally {
+      setSavingPayout(false);
+    }
+  };
+
+
+
 
   useEffect(() => {
     fetchHubData();
@@ -185,8 +278,35 @@ export const UserHubPage = () => {
 
       </div>
 
+      {/* Commission Settlement Alert Banner */}
+      {stats.unpaidCommission > 0 && (
+        <div className="mb-8 p-5 rounded-3xl bg-gradient-to-r from-rose-50 to-orange-50 border border-rose-200 text-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm animate-fade-in">
+          <div className="flex items-center gap-3.5">
+            <div className="p-2.5 rounded-2xl bg-rose-600 text-white shrink-0 shadow-md">
+              <DollarSign className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="font-extrabold text-sm text-rose-900 flex items-center gap-2">
+                <span>Platform Commission Settlement Required:</span>
+                <span className="font-mono text-base text-rose-600">${stats.unpaidCommission.toFixed(2)}</span>
+              </div>
+              <p className="text-xs text-rose-700 mt-0.5 max-w-xl">
+                A 5% platform fee has accrued from your concluded auction lots. Settle your balance at the commission portal to keep your listing privileges active.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/submit-commission"
+            className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-600/20 transition-all active:scale-95 shrink-0"
+          >
+            Settle Balance ➔
+          </Link>
+        </div>
+      )}
+
       {/* ── 2. Metric KPI Cards Matrix ──────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+
         
         {/* Active Bids */}
         <button
@@ -364,7 +484,21 @@ export const UserHubPage = () => {
             <Trophy className="w-4 h-4" />
             <span>Won Items ({wonAuctions.length})</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('payout')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'payout'
+                ? 'btn-primary text-white shadow-md shadow-indigo-500/20'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Payout Coordinates</span>
+          </button>
         </div>
+
 
         {/* ── TAB 1: BIDS & PARTICIPATIONS ───────────────────── */}
         {activeTab === 'bids' && (
@@ -550,15 +684,29 @@ export const UserHubPage = () => {
                           </span>
                         </div>
 
-                        <Link
-                          to={`/auctions/${item.id}`}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl font-sans font-semibold text-xs bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 transition-colors"
-                        >
-                          <span>View Live Room</span>
-                          <ArrowUpRight className="w-3.5 h-3.5" />
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          {isClosed && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenRepublish(item)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl font-sans font-semibold text-xs bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 transition-colors cursor-pointer"
+                              title="Republish with new timeline"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Republish</span>
+                            </button>
+                          )}
+                          <Link
+                            to={`/auctions/${item.id}`}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl font-sans font-semibold text-xs bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 transition-colors"
+                          >
+                            <span>View Live Room</span>
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                          </Link>
+                        </div>
                       </div>
                     </div>
+
                   );
                 })}
               </div>
@@ -636,6 +784,111 @@ export const UserHubPage = () => {
           </div>
         )}
 
+        {/* ── TAB 4: PAYOUT COORDINATES (SELLER SETTINGS) ────── */}
+        {activeTab === 'payout' && (
+          <div className="max-w-2xl mx-auto py-4">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center shrink-0">
+                <CreditCard className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">
+                  Seller Payout Settlement Coordinates
+                </h3>
+                <p className="text-xs text-slate-500">
+                  When you sell an item, your winning bidder will be provided these coordinates to transfer your payment.
+                </p>
+              </div>
+            </div>
+
+            {payoutSuccess && (
+              <div className="mb-6 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Your payout coordinates have been securely saved and updated!</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSavePayout} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold font-mono uppercase tracking-wider text-slate-700 mb-1">
+                    Bank Name
+                  </label>
+                  <input
+                    type="text"
+                    value={payoutForm.bank_name || ''}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, bank_name: e.target.value })}
+                    placeholder="e.g. HDFC Bank / Chase"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold font-mono uppercase tracking-wider text-slate-700 mb-1">
+                    Account Number
+                  </label>
+                  <input
+                    type="text"
+                    value={payoutForm.account_number || ''}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, account_number: e.target.value })}
+                    placeholder="e.g. 50100492817291"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold font-mono uppercase tracking-wider text-slate-700 mb-1">
+                    IFSC / SWIFT / Routing Code
+                  </label>
+                  <input
+                    type="text"
+                    value={payoutForm.ifsc_swift || ''}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, ifsc_swift: e.target.value })}
+                    placeholder="e.g. HDFC0001234"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold font-mono uppercase tracking-wider text-slate-700 mb-1">
+                    UPI ID (Instant Mobile Transfer)
+                  </label>
+                  <input
+                    type="text"
+                    value={payoutForm.upi_id || ''}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, upi_id: e.target.value })}
+                    placeholder="e.g. username@okhdfcbank"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold font-mono uppercase tracking-wider text-slate-700 mb-1">
+                  PayPal Email (Global Collectors)
+                </label>
+                <input
+                  type="email"
+                  value={payoutForm.paypal_email || ''}
+                  onChange={(e) => setPayoutForm({ ...payoutForm, paypal_email: e.target.value })}
+                  placeholder="e.g. yourname@gmail.com"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+
+              <div className="pt-4 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={savingPayout}
+                  className="btn-primary px-6 py-2.5 rounded-xl text-xs font-semibold shadow-md shadow-indigo-500/20 active:scale-95 transition-all"
+                >
+                  {savingPayout ? 'Saving Coordinates...' : 'Save Payout Details'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
       </div>
 
       {/* Quick Edit Name Modal */}
@@ -681,6 +934,104 @@ export const UserHubPage = () => {
           </div>
         </div>
       )}
+
+      {/* Republish Auction Modal */}
+      {republishModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2 text-indigo-600 font-bold text-sm">
+                <RotateCcw className="w-4 h-4" />
+                <span>Republish Expired Auction</span>
+              </div>
+              <button
+                onClick={() =>
+                  setRepublishModal({
+                    isOpen: false,
+                    auction: null,
+                    newEndTime: '',
+                    newStartingPrice: '',
+                    loading: false,
+                    error: null,
+                  })
+                }
+                className="text-slate-400 hover:text-slate-700 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <h3 className="font-extrabold text-slate-900 text-base mb-1 truncate">
+              {republishModal.auction?.title}
+            </h3>
+            <p className="text-xs text-slate-500 mb-5">
+              Reset bidding history and relist this item in the live marketplace with a new end date.
+            </p>
+
+            {republishModal.error && (
+              <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+                {republishModal.error}
+              </div>
+            )}
+
+            <form onSubmit={handleRepublishSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  New Ending Date & Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={republishModal.newEndTime}
+                  onChange={(e) => setRepublishModal({ ...republishModal, newEndTime: e.target.value })}
+                  required
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-mono bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Starting Bid Price (USD)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  value={republishModal.newStartingPrice}
+                  onChange={(e) => setRepublishModal({ ...republishModal, newStartingPrice: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-mono bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRepublishModal({
+                      isOpen: false,
+                      auction: null,
+                      newEndTime: '',
+                      newStartingPrice: '',
+                      loading: false,
+                      error: null,
+                    })
+                  }
+                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={republishModal.loading}
+                  className="btn-primary px-5 py-2 rounded-xl text-xs font-semibold shadow-md shadow-indigo-500/20 active:scale-95"
+                >
+                  {republishModal.loading ? 'Republishing...' : 'Launch Fresh Auction'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
 
     </div>
   );

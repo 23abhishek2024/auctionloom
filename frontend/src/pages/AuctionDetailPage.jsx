@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { auctionApi, bidApi, resolveImageUrl } from '../api/client';
+import { auctionApi, bidApi, userApi, resolveImageUrl } from '../api/client';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -22,6 +22,7 @@ import {
   Layers,
   Image as ImageIcon,
   X,
+  CreditCard,
 } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
@@ -58,7 +59,9 @@ export const AuctionDetailPage = () => {
   const [chatInput, setChatInput] = useState('');
   const [activeReactions, setActiveReactions] = useState([]);
   const [showReactions, setShowReactions] = useState(false);
+  const [sellerPayout, setSellerPayout] = useState(null);
   const chatBottomRef = useRef(null);
+
 
   // ── 1. Fetch initial auction & bid history ───────────────────
   useEffect(() => {
@@ -331,7 +334,16 @@ export const AuctionDetailPage = () => {
     (highestBid && (user.id === highestBid.bidder_id || (user.email && highestBid.bidder_email === user.email)))
   );
 
+  useEffect(() => {
+    if (user && id && isEnded && isWinnerMe && !sellerPayout) {
+      userApi.getSellerPayoutForWinner(id)
+        .then((res) => setSellerPayout(res.data.seller))
+        .catch(() => {});
+    }
+  }, [user, id, isEnded, isWinnerMe, sellerPayout]);
+
   return (
+
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
       {/* Top Back Nav & Live Room Indicator */}
@@ -486,6 +498,7 @@ export const AuctionDetailPage = () => {
 
           {/* Winner Banner if Closed */}
           {isEnded && (
+            <>
             <div className={`glass-card border rounded-3xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm ${
               isWinnerMe
                 ? 'border-emerald-300 bg-emerald-50/90'
@@ -545,7 +558,62 @@ export const AuctionDetailPage = () => {
                 </div>
               )}
             </div>
+
+            {/* Seller Payout Coordinates for Winning Bidder */}
+            {isWinnerMe && (
+              <div className="rounded-3xl p-6 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-400 shadow-lg animate-fade-in space-y-3">
+                <div className="flex items-center gap-2 text-emerald-900 font-bold text-sm">
+                  <CreditCard className="w-5 h-5 text-emerald-600" />
+                  <span>Seller Settlement & Payment Instructions</span>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Congratulations on winning this lot! Please complete checkout by transferring the hammer price of <strong>${parseFloat(auction.current_price).toFixed(2)}</strong> directly to the seller using their verified payout credentials:
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono bg-white/90 p-4 rounded-2xl border border-emerald-200 shadow-inner">
+                  {sellerPayout?.payoutMethods?.bank_name && (
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase">Bank Wire</span>
+                      <strong className="text-slate-900 font-sans">{sellerPayout.payoutMethods.bank_name}</strong>
+                    </div>
+                  )}
+                  {sellerPayout?.payoutMethods?.account_number && (
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase">Account Number</span>
+                      <strong className="text-indigo-700 font-mono">{sellerPayout.payoutMethods.account_number}</strong>
+                    </div>
+                  )}
+                  {sellerPayout?.payoutMethods?.ifsc_swift && (
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase">IFSC / SWIFT</span>
+                      <strong className="text-slate-900">{sellerPayout.payoutMethods.ifsc_swift}</strong>
+                    </div>
+                  )}
+                  {sellerPayout?.payoutMethods?.upi_id && (
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase">UPI ID</span>
+                      <strong className="text-indigo-700 font-mono bg-indigo-50 px-2 py-0.5 rounded">{sellerPayout.payoutMethods.upi_id}</strong>
+                    </div>
+                  )}
+                  {sellerPayout?.payoutMethods?.paypal_email && (
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase">PayPal</span>
+                      <strong className="text-slate-900">{sellerPayout.payoutMethods.paypal_email}</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-slate-500 pt-1 flex items-center justify-between font-mono">
+                  <span>Seller: <strong>{sellerPayout?.name || auction.seller_name}</strong></span>
+                  <a href={`mailto:${sellerPayout?.email || auction.seller_email}`} className="text-indigo-600 underline font-sans">
+                    Email Seller ({sellerPayout?.email || auction.seller_email})
+                  </a>
+                </div>
+              </div>
+            )}
+          </>
           )}
+
 
           {/* ── Dual Tabs: Live Bids History vs Live Room Chat (Video 33) ── */}
           <div className="glass-card border border-slate-200/90 rounded-3xl p-6 bg-white/95 backdrop-blur-xl shadow-sm">

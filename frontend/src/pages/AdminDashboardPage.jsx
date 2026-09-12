@@ -1,0 +1,671 @@
+import React, { useState, useEffect } from 'react';
+import { adminApi, auctionApi, resolveImageUrl } from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import {
+  ShieldAlert,
+  Users,
+  DollarSign,
+  Gavel,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  TrendingUp,
+  RefreshCw,
+  Search,
+  Trash2,
+  Eye,
+  Check,
+  X,
+  ExternalLink,
+  Lock,
+} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+
+export const AdminDashboardPage = () => {
+  const { user, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  const [metrics, setMetrics] = useState(null);
+  const [revenueChart, setRevenueChart] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [proofs, setProofs] = useState([]);
+  const [auctions, setAuctions] = useState([]);
+
+  const [activeTab, setActiveTab] = useState('proofs'); // 'proofs', 'users', 'auctions'
+  const [proofStatusFilter, setProofStatusFilter] = useState('PENDING'); // 'PENDING', 'APPROVED', 'REJECTED', 'ALL'
+  const [userSearch, setUserSearch] = useState('');
+  const [auctionSearch, setAuctionSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [selectedProofModal, setSelectedProofModal] = useState(null);
+
+  // Authorization gate: Only role === 'admin'
+  useEffect(() => {
+    if (!isAuthenticated || (user && user.role !== 'admin')) {
+      navigate('/');
+    }
+  }, [isAuthenticated, user, navigate]);
+
+  const fetchAllAdminData = async () => {
+    try {
+      setLoading(true);
+      const [mRes, rRes, uRes, pRes, aRes] = await Promise.all([
+        adminApi.getMetrics(),
+        adminApi.getRevenueChart(),
+        adminApi.getUsers(userSearch),
+        adminApi.getProofs(proofStatusFilter === 'ALL' ? undefined : proofStatusFilter),
+        auctionApi.getAll(),
+      ]);
+
+      setMetrics(mRes.data.metrics);
+      setRevenueChart(rRes.data.chartData || []);
+      setUsers(uRes.data.users || []);
+      setProofs(pRes.data.proofs || []);
+      setAuctions(aRes.data.auctions || []);
+    } catch (err) {
+      console.error('Failed to load admin telemetry:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      fetchAllAdminData();
+    }
+  }, [proofStatusFilter]);
+
+  // Handle Proof Approval / Rejection
+  const handleProofDecision = async (proofId, status) => {
+    if (!window.confirm(`Are you sure you want to mark this receipt as ${status}?`)) return;
+    try {
+      setActionLoading(true);
+      await adminApi.updateProofStatus(proofId, status);
+      await fetchAllAdminData();
+      if (selectedProofModal?.id === proofId) setSelectedProofModal(null);
+    } catch (err) {
+      alert(err.response?.data?.error || `Failed to update status to ${status}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle User Role Change
+  const handleRoleChange = async (userId, newRole) => {
+    try {
+      setActionLoading(true);
+      await adminApi.updateRole(userId, newRole);
+      await fetchAllAdminData();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to update user role');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Emergency Auction Deletion
+  const handleForceDeleteAuction = async (auctionId, title) => {
+    if (!window.confirm(`EMERGENCY MODERATION: Are you sure you want to permanently delete "${title}"? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      setActionLoading(true);
+      await adminApi.deleteAuction(auctionId);
+      await fetchAllAdminData();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to delete auction');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  if (!user || user.role !== 'admin') {
+    return null;
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      {/* Title & Refresh */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+        <div>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 text-xs font-semibold uppercase tracking-wider mb-2">
+            <ShieldAlert className="w-3.5 h-3.5" /> Super Admin Control Center
+          </div>
+          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+            Platform Operations & Financial Governance
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Real-time telemetry, platform commission approvals, user moderation, and inventory control.
+          </p>
+        </div>
+
+        <button
+          onClick={fetchAllAdminData}
+          disabled={loading || actionLoading}
+          className="self-start sm:self-auto inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 shadow-sm active:scale-95 transition-all"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh Metrics
+        </button>
+      </div>
+
+      {/* KPI Telemetry Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
+        {/* Total Settled Volume */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+          <div className="flex items-center justify-between text-slate-400 mb-2">
+            <span className="text-xs font-mono font-semibold uppercase tracking-wider">Gross Auction Volume</span>
+            <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+              <DollarSign className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="text-2xl font-extrabold text-slate-900 font-mono">
+            ${metrics?.totalVolume?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Across {metrics?.settledAuctions || 0} successfully concluded auctions
+          </p>
+        </div>
+
+        {/* Platform 5% Commission */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+          <div className="flex items-center justify-between text-slate-400 mb-2">
+            <span className="text-xs font-mono font-semibold uppercase tracking-wider">Platform Revenue (5%)</span>
+            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+              <TrendingUp className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="text-2xl font-extrabold text-emerald-600 font-mono">
+            ${metrics?.collectedCommission?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            ${metrics?.accruedCommission?.toLocaleString() || '0.00'} total accrued fees
+          </p>
+        </div>
+
+        {/* Registered Users */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+          <div className="flex items-center justify-between text-slate-400 mb-2">
+            <span className="text-xs font-mono font-semibold uppercase tracking-wider">Registered Accounts</span>
+            <div className="p-2 rounded-xl bg-purple-50 text-purple-600">
+              <Users className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="text-2xl font-extrabold text-slate-900 font-mono">
+            {metrics?.totalUsers || 0}
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            {metrics?.userBreakdown?.auctioneer_count || 0} Auctioneers • {metrics?.userBreakdown?.bidder_count || 0} Bidders
+          </p>
+        </div>
+
+        {/* Pending Proofs & Auctions */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+          <div className="flex items-center justify-between text-slate-400 mb-2">
+            <span className="text-xs font-mono font-semibold uppercase tracking-wider">Pending Receipts</span>
+            <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
+              <Clock className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="text-2xl font-extrabold text-amber-600 font-mono">
+            {metrics?.pendingProofsCount || 0}
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            {metrics?.activeAuctions || 0} live auctions actively receiving bids
+          </p>
+        </div>
+      </div>
+
+      {/* Monthly Financial Chart (Visual SVG Bar Graph) */}
+      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 mb-10">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Monthly Revenue & Commission Ledger</h2>
+            <p className="text-xs text-slate-500">Gross settled marketplace volume vs. platform 5% fee collection</p>
+          </div>
+          <div className="flex items-center gap-4 text-xs font-mono">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-indigo-600" /> Gross Volume
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-emerald-500" /> Platform Fee (5%)
+            </span>
+          </div>
+        </div>
+
+        {/* Responsive Bar Chart Rendering */}
+        <div className="h-64 flex items-end gap-3 sm:gap-6 pt-6 border-b border-slate-200 pb-2">
+          {revenueChart.map((m, idx) => {
+            const maxVal = Math.max(...revenueChart.map((d) => d.grossVolume), 10000);
+            const volumeHeight = Math.max(12, Math.round((m.grossVolume / maxVal) * 190));
+            const commHeight = Math.max(8, Math.round((m.commission / (maxVal * 0.1)) * 90));
+
+            return (
+              <div key={idx} className="flex-1 flex flex-col items-center gap-2 group relative">
+                {/* Tooltip */}
+                <div className="absolute -top-16 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none bg-slate-900 text-white text-[11px] p-2 rounded-lg shadow-xl whitespace-nowrap z-20 font-mono">
+                  <div>Volume: ${m.grossVolume.toLocaleString()}</div>
+                  <div className="text-emerald-400">Commission: ${m.commission.toLocaleString()}</div>
+                  <div className="text-slate-400">{m.auctionsCount} items closed</div>
+                </div>
+
+                {/* Bars */}
+                <div className="w-full flex items-end justify-center gap-1">
+                  <div
+                    style={{ height: `${volumeHeight}px` }}
+                    className="w-1/2 max-w-[28px] bg-gradient-to-t from-indigo-700 to-indigo-500 rounded-t-md transition-all group-hover:brightness-110"
+                  />
+                  <div
+                    style={{ height: `${commHeight}px` }}
+                    className="w-1/2 max-w-[18px] bg-gradient-to-t from-emerald-600 to-emerald-400 rounded-t-md transition-all group-hover:brightness-110"
+                  />
+                </div>
+
+                {/* Month Label */}
+                <span className="text-[11px] text-slate-500 font-mono font-medium truncate w-full text-center">
+                  {m.month.split(' ')[0]}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Operations Tab Bar */}
+      <div className="flex border-b border-slate-200 mb-6 gap-2">
+        <button
+          onClick={() => setActiveTab('proofs')}
+          className={`pb-3 px-4 font-bold text-sm transition-all flex items-center gap-2 border-b-2 ${
+            activeTab === 'proofs'
+              ? 'border-indigo-600 text-indigo-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          Commission Receipts
+          {metrics?.pendingProofsCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-xs bg-amber-500 text-white font-mono">
+              {metrics.pendingProofsCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('users')}
+          className={`pb-3 px-4 font-bold text-sm transition-all flex items-center gap-2 border-b-2 ${
+            activeTab === 'users'
+              ? 'border-indigo-600 text-indigo-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          User Management ({users.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('auctions')}
+          className={`pb-3 px-4 font-bold text-sm transition-all flex items-center gap-2 border-b-2 ${
+            activeTab === 'auctions'
+              ? 'border-indigo-600 text-indigo-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Gavel className="w-4 h-4" />
+          Auction Inventory ({auctions.length})
+        </button>
+      </div>
+
+      {/* TAB 1: COMMISSION PROOF RECEIPTS */}
+      {activeTab === 'proofs' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6">
+          {/* Status Filter Buttons */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+            <div className="flex items-center gap-2">
+              {['PENDING', 'APPROVED', 'REJECTED', 'ALL'].map((status) => (
+                <button
+                  key={status}
+                  onClick={() => setProofStatusFilter(status)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold font-mono transition-all ${
+                    proofStatusFilter === status
+                      ? 'bg-slate-900 text-white shadow'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
+            <div className="text-xs text-slate-500 font-mono">
+              Total {proofs.length} receipts in current view
+            </div>
+          </div>
+
+          {proofs.length === 0 ? (
+            <div className="py-16 text-center text-slate-400">
+              <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2 opacity-50" />
+              <p className="font-semibold text-slate-700">No {proofStatusFilter.toLowerCase()} payment receipts</p>
+              <p className="text-xs text-slate-400 mt-1">Auctioneers submit proofs after paying the 5% platform fee.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                    <th className="py-3 px-4">Receipt</th>
+                    <th className="py-3 px-4">Auctioneer</th>
+                    <th className="py-3 px-4">Amount</th>
+                    <th className="py-3 px-4">Current Debt</th>
+                    <th className="py-3 px-4">Note / Comment</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {proofs.map((proof) => (
+                    <tr key={proof.id} className="hover:bg-slate-50/70 transition-colors">
+                      {/* Image Thumbnail */}
+                      <td className="py-3 px-4">
+                        <button
+                          onClick={() => setSelectedProofModal(proof)}
+                          className="relative group block w-14 h-14 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shadow-sm"
+                        >
+                          <img
+                            src={resolveImageUrl(proof.proof_url)}
+                            alt="Receipt"
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
+                            <Eye className="w-4 h-4" />
+                          </div>
+                        </button>
+                      </td>
+
+                      {/* User Info */}
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-slate-900">{proof.user_name}</div>
+                        <div className="text-xs text-slate-400 font-mono">{proof.user_email}</div>
+                      </td>
+
+                      {/* Amount */}
+                      <td className="py-3 px-4 font-mono font-bold text-emerald-600 text-base">
+                        ${proof.amount.toFixed(2)}
+                      </td>
+
+                      {/* Current Debt */}
+                      <td className="py-3 px-4 font-mono text-xs">
+                        <span className={proof.user_unpaid_commission > 0 ? 'text-rose-600 font-bold' : 'text-slate-500'}>
+                          ${proof.user_unpaid_commission.toFixed(2)}
+                        </span>
+                      </td>
+
+                      {/* Comment */}
+                      <td className="py-3 px-4 text-xs text-slate-600 max-w-xs truncate">
+                        {proof.comment || '—'}
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-3 px-4">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold font-mono ${
+                            proof.status === 'APPROVED'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : proof.status === 'REJECTED'
+                              ? 'bg-rose-100 text-rose-800'
+                              : 'bg-amber-100 text-amber-800 animate-pulse'
+                          }`}
+                        >
+                          {proof.status}
+                        </span>
+                      </td>
+
+                      {/* Decision Buttons */}
+                      <td className="py-3 px-4 text-right space-x-2">
+                        {proof.status === 'PENDING' ? (
+                          <>
+                            <button
+                              onClick={() => handleProofDecision(proof.id, 'APPROVED')}
+                              disabled={actionLoading}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs shadow-sm transition-all active:scale-95 inline-flex items-center gap-1"
+                            >
+                              <Check className="w-3.5 h-3.5" /> Approve
+                            </button>
+                            <button
+                              onClick={() => handleProofDecision(proof.id, 'REJECTED')}
+                              disabled={actionLoading}
+                              className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-medium text-xs transition-all active:scale-95 inline-flex items-center gap-1"
+                            >
+                              <X className="w-3.5 h-3.5" /> Reject
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-400 font-mono">Settled</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: USER MANAGEMENT */}
+      {activeTab === 'users' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="relative w-72">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search by email or name..."
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
+              />
+            </div>
+            <div className="text-xs text-slate-500 font-mono">
+              Total {users.length} members registered
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                  <th className="py-3 px-4">User</th>
+                  <th className="py-3 px-4">Role</th>
+                  <th className="py-3 px-4 text-center">Listings</th>
+                  <th className="py-3 px-4 text-center">Total Bids</th>
+                  <th className="py-3 px-4 text-center">Wins</th>
+                  <th className="py-3 px-4 text-right">Spent Volume</th>
+                  <th className="py-3 px-4 text-right">Unpaid Commission</th>
+                  <th className="py-3 px-4 text-center">Modify Role</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {users.map((u) => (
+                  <tr key={u.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-3 px-4">
+                      <div className="font-bold text-slate-900">{u.name}</div>
+                      <div className="text-xs text-slate-400 font-mono">{u.email}</div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span
+                        className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold uppercase font-mono ${
+                          u.role === 'admin'
+                            ? 'bg-rose-100 text-rose-800'
+                            : u.role === 'auctioneer'
+                            ? 'bg-indigo-100 text-indigo-800'
+                            : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {u.role}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-center font-mono">{u.listings_count}</td>
+                    <td className="py-3 px-4 text-center font-mono">{u.total_bids}</td>
+                    <td className="py-3 px-4 text-center font-bold text-emerald-600 font-mono">{u.auctions_won}</td>
+                    <td className="py-3 px-4 text-right font-mono font-bold">${u.total_spent.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono">
+                      <span className={u.unpaid_commission > 0 ? 'text-rose-600 font-bold' : 'text-slate-400'}>
+                        ${u.unpaid_commission.toFixed(2)}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <select
+                        value={u.role}
+                        onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                        disabled={actionLoading || u.id === user.id}
+                        className="text-xs rounded-lg border border-slate-200 bg-white px-2 py-1 focus:ring-1 focus:ring-indigo-500 font-mono cursor-pointer"
+                      >
+                        <option value="bidder">bidder</option>
+                        <option value="auctioneer">auctioneer</option>
+                        <option value="admin">admin</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: AUCTION INVENTORY & MODERATION */}
+      {activeTab === 'auctions' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                  <th className="py-3 px-4">Item</th>
+                  <th className="py-3 px-4">Seller</th>
+                  <th className="py-3 px-4">Current Price</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">End Time</th>
+                  <th className="py-3 px-4 text-right">Moderation</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {auctions.map((auc) => (
+                  <tr key={auc.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={resolveImageUrl(auc.image_url)}
+                          alt={auc.title}
+                          className="w-10 h-10 rounded-lg object-cover border border-slate-200"
+                        />
+                        <div>
+                          <div className="font-bold text-slate-900 line-clamp-1">{auc.title}</div>
+                          <div className="text-xs text-slate-400 font-mono truncate max-w-xs">{auc.id}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="font-medium text-slate-800">{auc.seller_name}</div>
+                      <div className="text-xs text-slate-400 font-mono">{auc.seller_email}</div>
+                    </td>
+                    <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                      ${parseFloat(auc.current_price).toLocaleString()}
+                    </td>
+                    <td className="py-3 px-4">
+                      <span
+                        className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold font-mono ${
+                          auc.status === 'ACTIVE'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {auc.status}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-xs font-mono text-slate-500">
+                      {new Date(auc.end_time).toLocaleString()}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <button
+                        onClick={() => handleForceDeleteAuction(auc.id, auc.title)}
+                        disabled={actionLoading}
+                        className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors active:scale-95"
+                        title="Force Delete Auction"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* RECEIPT INSPECTION MODAL */}
+      {selectedProofModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 relative overflow-hidden">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+              <h3 className="font-bold text-slate-900">Proof of Payment Receipt</h3>
+              <button
+                onClick={() => setSelectedProofModal(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 max-h-80 flex items-center justify-center mb-4">
+              <img
+                src={resolveImageUrl(selectedProofModal.proof_url)}
+                alt="Receipt screenshot"
+                className="max-h-80 w-auto object-contain"
+              />
+            </div>
+
+            <div className="space-y-2 text-xs font-mono mb-6 bg-slate-50 p-3 rounded-xl border border-slate-200">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Auctioneer:</span>
+                <span className="font-bold text-slate-800">{selectedProofModal.user_name} ({selectedProofModal.user_email})</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Amount Paid:</span>
+                <span className="font-bold text-emerald-600 text-sm">${selectedProofModal.amount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Unpaid Balance:</span>
+                <span className="font-bold text-rose-600">${selectedProofModal.user_unpaid_commission.toFixed(2)}</span>
+              </div>
+              {selectedProofModal.comment && (
+                <div className="pt-2 border-t border-slate-200">
+                  <span className="text-slate-500 block mb-0.5">Note from seller:</span>
+                  <p className="text-slate-700 italic font-sans">{selectedProofModal.comment}</p>
+                </div>
+              )}
+            </div>
+
+            {selectedProofModal.status === 'PENDING' && (
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handleProofDecision(selectedProofModal.id, 'APPROVED')}
+                  disabled={actionLoading}
+                  className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" /> Approve & Settle Debt
+                </button>
+                <button
+                  onClick={() => handleProofDecision(selectedProofModal.id, 'REJECTED')}
+                  disabled={actionLoading}
+                  className="flex-1 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs transition-all flex items-center justify-center gap-2"
+                >
+                  <X className="w-4 h-4" /> Reject Receipt
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

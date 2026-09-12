@@ -48,6 +48,9 @@ const getMyStats = async (req, res, next) => {
       [userId]
     );
 
+    // 5. Unpaid commission debt
+    const userRes = await pool.query('SELECT unpaid_commission FROM users WHERE id = $1', [userId]);
+
     res.json({
       stats: {
         listedCount: listedRes.rows[0].count || 0,
@@ -55,6 +58,7 @@ const getMyStats = async (req, res, next) => {
         wonCount: wonRes.rows[0].count || 0,
         totalBidsCount: totalBidsRes.rows[0].count || 0,
         totalVolume: parseFloat(totalBidsRes.rows[0].total_volume || 0),
+        unpaidCommission: parseFloat(userRes.rows[0]?.unpaid_commission || 0),
       },
     });
   } catch (err) {
@@ -201,10 +205,146 @@ const upgradeToSeller = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /api/users/leaderboard (or /api/analytics/leaderboard)
+ * Public leaderboard of top bidders by total expenditure & won auctions
+ */
+const getLeaderboard = async (req, res, next) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        u.id, 
+        u.email,
+        COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS username,
+        u.role,
+        COALESCE(SUM(b.amount), 0)::numeric AS total_spent,
+        COUNT(DISTINCT a.id)::int AS auctions_won,
+        COUNT(DISTINCT b.id)::int AS total_bids
+      FROM users u
+      LEFT JOIN auctions a ON a.winner_id = u.id AND a.status = 'CLOSED'
+      LEFT JOIN bids b ON b.bidder_id = u.id
+      GROUP BY u.id, u.name, u.email, u.role
+      HAVING COALESCE(SUM(b.amount), 0) > 0 OR COUNT(DISTINCT a.id) > 0 OR COUNT(DISTINCT b.id) > 0
+      ORDER BY total_spent DESC, auctions_won DESC, total_bids DESC
+      LIMIT 100
+    `);
+
+    const ranked = result.rows.map((row, index) => {
+      const rank = index + 1;
+      let tier = 'Active Bidder';
+      if (rank === 1) tier = 'Grand Master';
+      else if (rank <= 3) tier = 'High Roller';
+      else if (parseFloat(row.total_spent) > 1000) tier = 'VIP Collector';
+
+      return {
+        rank,
+        id: row.id,
+        username: row.username,
+        email: row.email,
+        totalSpent: parseFloat(row.total_spent),
+        auctionsWon: row.auctions_won,
+        totalBids: row.total_bids,
+        tier,
+      };
+    });
+
+    res.json({
+      leaderboard: ranked,
+      count: ranked.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /api/users/me/payout-methods
+ */
+const getPayoutMethods = async (req, res, next) => {
+  try {
+    const result = await pool.query('SELECT payout_methods FROM users WHERE id = $1', [req.user.id]);
+    res.json({ payoutMethods: result.rows[0]?.payout_methods || {} });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * PUT /api/users/me/payout-methods
+ */
+const updatePayoutMethods = async (req, res, next) => {
+  try {
+    const { bank_name, account_number, ifsc_swift, upi_id, paypal_email } = req.body;
+    const methods = {
+      bank_name: bank_name ? bank_name.trim() : '',
+      account_number: account_number ? account_number.trim() : '',
+      ifsc_swift: ifsc_swift ? ifsc_swift.trim() : '',
+      upi_id: upi_id ? upi_id.trim() : '',
+      paypal_email: paypal_email ? paypal_email.trim() : '',
+      updated_at: new Date().toISOString(),
+    };
+
+    const result = await pool.query(
+      'UPDATE users SET payout_methods = $1 WHERE id = $2 RETURNING id, payout_methods',
+      [JSON.stringify(methods), req.user.id]
+    );
+
+    res.json({
+      message: 'Payout coordinates saved successfully.',
+      payoutMethods: result.rows[0].payout_methods,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /api/users/auction-payout/:auctionId
+ * Allows winning bidder to view seller's payout instructions
+ */
+const getSellerPayoutForWinner = async (req, res, next) => {
+  try {
+    const { auctionId } = req.params;
+    const auctionRes = await pool.query('SELECT * FROM auctions WHERE id = $1', [auctionId]);
+    if (auctionRes.rowCount === 0) return res.status(404).json({ error: 'Auction not found.' });
+
+    const auction = auctionRes.rows[0];
+    if (req.user.id !== auction.winner_id && req.user.id !== auction.seller_id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only the winning bidder can view seller payout instructions.' });
+    }
+
+    const sellerRes = await pool.query(
+      "SELECT id, name, email, payout_methods FROM users WHERE id = $1",
+      [auction.seller_id]
+    );
+
+    res.json({
+      seller: {
+        id: sellerRes.rows[0]?.id,
+        name: sellerRes.rows[0]?.name || sellerRes.rows[0]?.email?.split('@')[0],
+        email: sellerRes.rows[0]?.email,
+        payoutMethods: sellerRes.rows[0]?.payout_methods || {},
+      },
+      auction: {
+        id: auction.id,
+        title: auction.title,
+        winningBid: parseFloat(auction.current_price),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getMyStats,
   getMyAuctions,
   getMyBids,
   getMyWon,
   upgradeToSeller,
+  getLeaderboard,
+  getPayoutMethods,
+  updatePayoutMethods,
+  getSellerPayoutForWinner,
 };
+

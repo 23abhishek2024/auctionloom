@@ -14,6 +14,9 @@ const bidRoutes = require('./routes/bidRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const userRoutes = require('./routes/userRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const commissionRoutes = require('./routes/commissionRoutes');
+const { getLeaderboard } = require('./controllers/userController');
 const path = require('path');
 
 // Services
@@ -41,13 +44,19 @@ app.use('/api/bids', bidRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/commissions', commissionRoutes);
+
+// Public leaderboard endpoint aliases
+app.get('/api/analytics/leaderboard', getLeaderboard);
+app.get('/api/leaderboard', getLeaderboard);
 
 // ── Root, API Directory & Health Check ───────────────────────
 app.get('/', (req, res) => {
   res.json({
     message: '🚀 AuctionLoom Backend API & Real-Time WebSocket Server',
     status: 'online',
-    version: '1.0.0',
+    version: '2.0.0',
     documentation: '/api',
     frontend: process.env.FRONTEND_URL || 'http://localhost:5173',
     endpoints: {
@@ -57,11 +66,15 @@ app.get('/', (req, res) => {
       auth: '/api/auth',
       bids: '/api/bids',
       users: '/api/users',
+      leaderboard: '/api/leaderboard',
+      admin: '/api/admin',
+      commissions: '/api/commissions',
       ai: '/api/ai/generate',
       upload: '/api/upload',
     },
   });
 });
+
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', pid: process.pid, time: new Date().toISOString() });
