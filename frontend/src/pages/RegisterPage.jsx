@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { UserPlus, Mail, Lock, AlertCircle, Gavel, User, Store, Eye, EyeOff } from 'lucide-react';
 
 export const RegisterPage = () => {
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -37,7 +38,7 @@ export const RegisterPage = () => {
     try {
       setLoading(true);
       setError(null);
-      await register(email, password, role);
+      await register(email, password, role, name);
       navigate('/');
     } catch (err) {
       console.error('Registration error:', err);
@@ -74,6 +75,24 @@ export const RegisterPage = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           
+          {/* Full Name */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-700 mb-1.5">
+              Full Name *
+            </label>
+            <div className="relative">
+              <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Abhishek Kumar"
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-900 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors placeholder:text-slate-400 shadow-sm"
+                required
+              />
+            </div>
+          </div>
+
           {/* Email */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-700 mb-1.5">

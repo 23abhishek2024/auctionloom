@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio } from 'lucide-react';
+import { formatDisplayName, getInitials } from '../utils/formatters';
 
 export const Navbar = () => {
   const { user, isAuthenticated, logout } = useAuth();
@@ -80,13 +81,18 @@ export const Navbar = () => {
             {isAuthenticated ? (
               <div className="flex items-center gap-3">
                 {/* User info & role badge */}
-                <div className="hidden sm:flex flex-col items-end text-right">
-                  <span className="text-xs font-semibold text-slate-800 max-w-[140px] truncate">
-                    {user?.email}
-                  </span>
-                  <span className={`text-[10px] uppercase font-mono font-medium px-2 py-0.5 rounded-full border ${getRoleBadge(user?.role)}`}>
-                    {user?.role}
-                  </span>
+                <div className="hidden sm:flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-semibold text-xs flex items-center justify-center shadow-sm shadow-indigo-500/20">
+                    {getInitials(user)}
+                  </div>
+                  <div className="flex flex-col items-start text-left">
+                    <span className="text-xs font-semibold text-slate-900 max-w-[150px] truncate" title={user?.email}>
+                      {formatDisplayName(user)}
+                    </span>
+                    <span className={`text-[10px] uppercase font-mono font-medium px-2 py-0.5 rounded-full border ${getRoleBadge(user?.role)}`}>
+                      {user?.role}
+                    </span>
+                  </div>
                 </div>
 
                 <button

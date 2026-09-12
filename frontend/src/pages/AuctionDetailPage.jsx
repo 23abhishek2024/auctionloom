@@ -22,6 +22,7 @@ import {
   Layers,
   Image as ImageIcon,
 } from 'lucide-react';
+import { formatDisplayName, getInitials } from '../utils/formatters';
 
 export const AuctionDetailPage = () => {
   const { id } = useParams();
@@ -47,6 +48,7 @@ export const AuctionDetailPage = () => {
     {
       id: 'welcome-1',
       text: '👋 Welcome to the live auction room! Ask questions or share thoughts here in real time.',
+      senderName: 'System Bot',
       senderEmail: 'System Bot',
       role: 'system',
       timestamp: new Date().toISOString(),
@@ -99,8 +101,9 @@ export const AuctionDetailPage = () => {
         const newBidEntry = {
           id: data.bid_id || Math.random().toString(),
           amount: data.new_price,
+          bidder_name: data.bidder_name,
           bidder_email: data.bidder_email,
-          created_at: new Date().toISOString(),
+          created_at: data.timestamp || new Date().toISOString(),
         };
 
         setBids((prev) => [newBidEntry, ...prev.filter((b) => b.id !== newBidEntry.id)]);
@@ -268,6 +271,7 @@ export const AuctionDetailPage = () => {
     sendMessage({
       auctionId: id,
       text: chatInput.trim(),
+      senderName: formatDisplayName(user),
       senderEmail: user?.email || 'Anonymous Bidder',
       role: user?.role || 'bidder',
     });
@@ -279,6 +283,7 @@ export const AuctionDetailPage = () => {
     sendReaction({
       auctionId: id,
       emoji,
+      senderName: formatDisplayName(user),
       senderEmail: user?.email || 'Bidder',
     });
   };
@@ -358,7 +363,7 @@ export const AuctionDetailPage = () => {
               </span>
 
               <div className="text-xs text-slate-500 font-mono">
-                Seller: <span className="text-slate-800 font-medium">{auction.seller_email}</span>
+                Seller: <span className="text-slate-800 font-medium">{formatDisplayName(auction.seller_name, auction.seller_email)}</span>
               </div>
             </div>
 
@@ -541,24 +546,32 @@ export const AuctionDetailPage = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {bids.map((b, idx) => (
-                        <tr key={b.id || idx} className={idx === 0 ? 'bg-indigo-50/50' : ''}>
-                          <td className="py-3 text-slate-800 font-medium">
-                            {b.bidder_email || 'Anonymous Bidder'}
-                            {idx === 0 && (
-                              <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
-                                HIGHEST
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3 text-slate-900 font-bold text-sm">
-                            <span className="text-indigo-600 font-bold">$</span>{parseFloat(b.amount).toFixed(2)}
-                          </td>
-                          <td className="py-3 text-slate-500 text-right">
-                            {new Date(b.created_at).toLocaleTimeString()}
-                          </td>
-                        </tr>
-                      ))}
+                      {bids.map((b, idx) => {
+                        const bidderDisplayName = formatDisplayName(b.bidder_name, b.bidder_email);
+                        return (
+                          <tr key={b.id || idx} className={idx === 0 ? 'bg-indigo-50/50' : ''}>
+                            <td className="py-3 text-slate-800 font-medium">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-bold flex items-center justify-center shrink-0">
+                                  {getInitials(bidderDisplayName)}
+                                </div>
+                                <span className="font-semibold text-slate-900">{bidderDisplayName}</span>
+                                {idx === 0 && (
+                                  <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
+                                    HIGHEST
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3 text-slate-900 font-bold text-sm">
+                              <span className="text-indigo-600 font-bold">$</span>{parseFloat(b.amount).toFixed(2)}
+                            </td>
+                            <td className="py-3 text-slate-500 text-right">
+                              {new Date(b.created_at).toLocaleTimeString()}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -568,8 +581,9 @@ export const AuctionDetailPage = () => {
               <div className="space-y-4">
                 <div className="h-64 overflow-y-auto space-y-2.5 pr-2">
                   {chatMessages.map((msg) => {
-                    const isMe = user?.email && msg.senderEmail === user.email;
+                    const isMe = user && ((user.email && msg.senderEmail === user.email) || (user.name && msg.senderName === user.name));
                     const isSys = msg.role === 'system';
+                    const senderDisplayName = formatDisplayName(msg.senderName, msg.senderEmail);
                     return (
                       <div
                         key={msg.id}
@@ -583,7 +597,7 @@ export const AuctionDetailPage = () => {
                       >
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <span className={`font-mono font-bold text-[11px] flex items-center gap-1.5 ${isMe ? 'text-indigo-100' : 'text-indigo-600'}`}>
-                            {msg.senderEmail}
+                            {senderDisplayName}
                             {msg.role === 'admin' && (
                               <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.2 rounded font-sans">
                                 Admin

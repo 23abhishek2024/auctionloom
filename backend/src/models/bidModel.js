@@ -6,7 +6,9 @@ const bidModel = {
    */
   findByAuctionId: async (auctionId) => {
     const result = await pool.query(
-      `SELECT b.*, u.email AS bidder_email
+      `SELECT b.*, 
+              COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS bidder_name,
+              u.email AS bidder_email
        FROM bids b
        JOIN users u ON b.bidder_id = u.id
        WHERE b.auction_id = $1

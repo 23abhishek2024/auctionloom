@@ -6,7 +6,9 @@ const auctionModel = {
    */
   findAll: async () => {
     const result = await pool.query(
-      `SELECT a.*, u.email AS seller_email
+      `SELECT a.*, 
+              COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS seller_name,
+              u.email AS seller_email
        FROM auctions a
        JOIN users u ON a.seller_id = u.id
        ORDER BY a.created_at DESC`
@@ -19,7 +21,9 @@ const auctionModel = {
    */
   findById: async (id) => {
     const result = await pool.query(
-      `SELECT a.*, u.email AS seller_email
+      `SELECT a.*, 
+              COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS seller_name,
+              u.email AS seller_email
        FROM auctions a
        JOIN users u ON a.seller_id = u.id
        WHERE a.id = $1`,

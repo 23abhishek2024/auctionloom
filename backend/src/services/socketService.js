@@ -49,17 +49,19 @@ const initSocket = (server) => {
         const text = String(data.text).trim().slice(0, 500);
         if (!text) return;
 
+        const senderName = data.senderName || (data.senderEmail ? data.senderEmail.split('@')[0] : 'Bidder');
         const messagePayload = {
           id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
           auctionId: data.auctionId,
           text,
-          senderEmail: data.senderEmail || 'Anonymous Bidder',
+          senderName,
+          senderEmail: data.senderEmail || senderName,
           role: data.role || 'bidder',
           timestamp: new Date().toISOString(),
         };
 
         io.to(data.auctionId).emit('CHAT_MESSAGE', messagePayload);
-        console.log(`[Socket] Chat message broadcasted in room ${data.auctionId} from ${messagePayload.senderEmail}`);
+        console.log(`[Socket] Chat message broadcasted in room ${data.auctionId} from ${senderName}`);
       } catch (err) {
         console.error('[Socket] SEND_MESSAGE error:', err.message);
       }
@@ -72,11 +74,13 @@ const initSocket = (server) => {
         const allowed = ['🔥', '🚀', '💎', '👏', '❤️', '⚡', '🎉'];
         const emoji = allowed.includes(data.emoji) ? data.emoji : '🔥';
 
+        const senderName = data.senderName || (data.senderEmail ? data.senderEmail.split('@')[0] : 'Bidder');
         const reactionPayload = {
           id: `react-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
           auctionId: data.auctionId,
           emoji,
-          senderEmail: data.senderEmail || 'Bidder',
+          senderName,
+          senderEmail: data.senderEmail || senderName,
           timestamp: new Date().toISOString(),
         };
 

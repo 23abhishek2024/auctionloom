@@ -14,7 +14,7 @@ const userModel = {
    */
   findById: async (id) => {
     const result = await pool.query(
-      'SELECT id, email, role, created_at FROM users WHERE id = $1',
+      'SELECT id, name, email, role, created_at FROM users WHERE id = $1',
       [id]
     );
     return result.rows[0];
@@ -23,10 +23,11 @@ const userModel = {
   /**
    * Create a new user
    */
-  create: async (email, passwordHash, role = 'bidder') => {
+  create: async (email, passwordHash, role = 'bidder', name = null) => {
+    const displayName = name && name.trim() ? name.trim() : email.split('@')[0];
     const result = await pool.query(
-      'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role, created_at',
-      [email, passwordHash, role]
+      'INSERT INTO users (email, password_hash, role, name) VALUES ($1, $2, $3, $4) RETURNING id, name, email, role, created_at',
+      [email, passwordHash, role, displayName]
     );
     return result.rows[0];
   },

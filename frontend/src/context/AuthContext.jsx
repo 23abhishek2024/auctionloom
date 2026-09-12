@@ -40,8 +40,8 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
-  const register = async (email, password, role = 'bidder') => {
-    const res = await authApi.register({ email, password, role });
+  const register = async (email, password, role = 'bidder', name = '') => {
+    const res = await authApi.register({ email, password, role, name });
     const { user: userData, token: tokenData } = res.data;
     setUser(userData);
     setToken(tokenData);

@@ -41,13 +41,20 @@ const pool = new Pool(poolConfig);
  * Test the connection on startup.
  * This will throw an error immediately if your DB credentials are wrong.
  */
-pool.connect((err, client, release) => {
+pool.connect(async (err, client, release) => {
   if (err) {
     console.error('[DB] ❌ Failed to connect to PostgreSQL:', err.message);
     process.exit(1); // Kill the process — no point running without a DB
   }
-  console.log('[DB] ✅ PostgreSQL connected successfully.');
-  release(); // Release the client back to the pool
+  try {
+    // Auto-migration: ensure 'name' column exists in users table
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);');
+    console.log('[DB] ✅ PostgreSQL connected successfully & user schema verified.');
+  } catch (migErr) {
+    console.warn('[DB] ⚠️ Schema auto-migration notice:', migErr.message);
+  } finally {
+    release(); // Release the client back to the pool
+  }
 });
 
 // Listen for unexpected pool errors

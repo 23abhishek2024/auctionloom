@@ -9,7 +9,7 @@ const SALT_ROUNDS = 10;
  */
 const register = async (req, res, next) => {
   try {
-    const { email, password, role } = req.body;
+    const { email, password, role, name } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
@@ -22,10 +22,10 @@ const register = async (req, res, next) => {
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const user = await userModel.create(email, passwordHash, role || 'bidder');
+    const user = await userModel.create(email, passwordHash, role || 'bidder', name);
 
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
+      { id: user.id, name: user.name, email: user.email, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -57,14 +57,16 @@ const login = async (req, res, next) => {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
+    const displayName = user.name || user.email.split('@')[0];
+
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
+      { id: user.id, name: displayName, email: user.email, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
     res.json({
-      user: { id: user.id, email: user.email, role: user.role },
+      user: { id: user.id, name: displayName, email: user.email, role: user.role },
       token,
     });
   } catch (err) {

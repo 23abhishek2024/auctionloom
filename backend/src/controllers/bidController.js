@@ -63,9 +63,11 @@ const placeBid = async (req, res, next) => {
 
     // ── REAL-TIME BROADCAST (after commit) ──────────────────────
     const io = getIO();
+    const bidderName = req.user.name || (req.user.email ? req.user.email.split('@')[0] : 'Bidder');
     io.to(auction_id).emit('PRICE_UPDATE', {
       auction_id,
       new_price: amount,
+      bidder_name: bidderName,
       bidder_email: req.user.email,
       bid_id: newBid.id,
     });
