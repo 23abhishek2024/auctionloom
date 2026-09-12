@@ -20,6 +20,11 @@ export const RegisterPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    if (!name || !name.trim()) {
+      setError('Please enter your full name. This will be shown to other bidders.');
+      return;
+    }
+
     if (!email || !password) {
       setError('Please fill in all required fields.');
       return;
@@ -91,6 +96,9 @@ export const RegisterPage = () => {
                 required
               />
             </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              This name will be displayed publicly on bids and live room chat instead of your email.
+            </p>
           </div>
 
           {/* Email */}

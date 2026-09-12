@@ -50,6 +50,18 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
+  const updateName = async (newName) => {
+    const res = await authApi.updateProfile({ name: newName });
+    const { user: userData, token: tokenData } = res.data;
+    setUser(userData);
+    if (tokenData) {
+      setToken(tokenData);
+      localStorage.setItem('token', tokenData);
+    }
+    localStorage.setItem('user', JSON.stringify(userData));
+    return userData;
+  };
+
   const logout = () => {
     setUser(null);
     setToken(null);
@@ -66,6 +78,7 @@ export const AuthProvider = ({ children }) => {
         loading,
         login,
         register,
+        updateName,
         logout,
       }}
     >

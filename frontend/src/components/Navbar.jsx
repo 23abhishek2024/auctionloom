@@ -1,18 +1,37 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio } from 'lucide-react';
+import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio, Pencil } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
 export const Navbar = () => {
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, updateName } = useAuth();
   const { isConnected } = useSocket();
   const navigate = useNavigate();
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [savingName, setSavingName] = useState(false);
 
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const handleSaveName = async (e) => {
+    e.preventDefault();
+    if (!nameInput.trim()) return;
+    try {
+      setSavingName(true);
+      await updateName(nameInput.trim());
+      setIsEditingName(false);
+    } catch (err) {
+      console.error('Failed to update name:', err);
+      alert(err.response?.data?.error || 'Failed to update name.');
+    } finally {
+      setSavingName(false);
+    }
   };
 
   const getRoleBadge = (role) => {
@@ -83,12 +102,25 @@ export const Navbar = () => {
                 {/* User info & role badge */}
                 <div className="hidden sm:flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-semibold text-xs flex items-center justify-center shadow-sm shadow-indigo-500/20">
-                    {getInitials(user)}
+                    {getInitials(user?.name || user?.email)}
                   </div>
                   <div className="flex flex-col items-start text-left">
-                    <span className="text-xs font-semibold text-slate-900 max-w-[150px] truncate" title={user?.email}>
-                      {formatDisplayName(user)}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-semibold text-slate-900 max-w-[130px] truncate" title={user?.email}>
+                        {user?.name || formatDisplayName(user)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNameInput(user?.name || '');
+                          setIsEditingName(true);
+                        }}
+                        className="text-slate-400 hover:text-indigo-600 transition-colors p-0.5 rounded cursor-pointer"
+                        title="Change display name"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                    </div>
                     <span className={`text-[10px] uppercase font-mono font-medium px-2 py-0.5 rounded-full border ${getRoleBadge(user?.role)}`}>
                       {user?.role}
                     </span>
@@ -126,6 +158,50 @@ export const Navbar = () => {
 
         </div>
       </div>
+
+      {/* Quick Edit Name Modal */}
+      {isEditingName && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-200">
+            <h3 className="text-lg font-extrabold tracking-tight text-slate-900 mb-1">
+              Set Your Display Name
+            </h3>
+            <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+              This name will be shown publicly to other users on live bids, auction rooms, and chat.
+            </p>
+            <form onSubmit={handleSaveName}>
+              <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-700 mb-1.5">
+                Your Full Name
+              </label>
+              <input
+                type="text"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                placeholder="e.g. Abhishek Kumar"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 mb-5 text-slate-900 shadow-sm"
+                autoFocus
+                required
+              />
+              <div className="flex justify-end items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingName(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingName || !nameInput.trim()}
+                  className="btn-primary px-5 py-2 rounded-xl text-xs font-semibold shadow-md shadow-indigo-500/20 disabled:opacity-50 cursor-pointer"
+                >
+                  {savingName ? 'Saving...' : 'Save Name'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </nav>
   );
 };

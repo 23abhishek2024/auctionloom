@@ -31,6 +31,17 @@ const userModel = {
     );
     return result.rows[0];
   },
+
+  /**
+   * Update a user's display name
+   */
+  updateName: async (id, name) => {
+    const result = await pool.query(
+      'UPDATE users SET name = $1 WHERE id = $2 RETURNING id, name, email, role, created_at',
+      [name, id]
+    );
+    return result.rows[0];
+  },
 };
 
 module.exports = userModel;

@@ -87,4 +87,31 @@ const getMe = async (req, res, next) => {
   }
 };
 
-module.exports = { register, login, getMe };
+/**
+ * PUT /api/auth/profile - Update user's name
+ */
+const updateProfile = async (req, res, next) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Name is required.' });
+    }
+
+    const updatedUser = await userModel.updateName(req.user.id, name.trim());
+    if (!updatedUser) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const token = jwt.sign(
+      { id: updatedUser.id, name: updatedUser.name, email: updatedUser.email, role: updatedUser.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ user: updatedUser, token });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { register, login, getMe, updateProfile };
