@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LogIn, Mail, Lock, AlertCircle, Gavel, UserCheck, Eye, EyeOff } from 'lucide-react';
+import { LogIn, Mail, Lock, AlertCircle, Gavel, UserCheck, Eye, EyeOff, Sparkles } from 'lucide-react';
 
 export const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -10,11 +10,18 @@ export const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const { login } = useAuth();
+  const { user, isAuthenticated, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const from = location.state?.from?.pathname || '/';
+
+  // If already logged in, redirect to home or My Hub
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/my-hub', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -44,8 +51,8 @@ export const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
-      <div className="max-w-md w-full glass-panel border border-slate-200/90 rounded-3xl p-8 sm:p-10 shadow-xl shadow-slate-200/50 bg-white/95 backdrop-blur-xl">
+    <div className="min-h-[calc(100vh-130px)] flex items-center justify-center px-4 py-6 sm:py-10">
+      <div className="max-w-md w-full glass-panel border border-slate-200/90 rounded-3xl p-6 sm:p-9 shadow-xl shadow-slate-200/50 bg-white/95 backdrop-blur-xl">
         
         {/* Brand Header */}
         <div className="text-center mb-8">
@@ -132,26 +139,47 @@ export const LoginPage = () => {
         </form>
 
         {/* Quick Demo Accounts Helpers */}
-        <div className="mt-8 pt-6 border-t border-slate-200">
-          <span className="text-[10px] font-mono uppercase tracking-widest text-slate-400 block text-center mb-3">
-            Testing Demo Accounts
-          </span>
+        <div className="mt-7 pt-5 border-t border-slate-200">
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold">
+              1-Click Demo Logins
+            </span>
+            <span className="text-[10px] font-mono text-slate-400">
+              Pass: test@123
+            </span>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => handleQuickFill('bidder@auctionloom.com', 'password123')}
-              className="px-2.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-indigo-300 text-left text-[11px] font-mono text-slate-700 transition-all cursor-pointer"
+              onClick={() => handleQuickFill('test1@gmail.com', 'test@123')}
+              className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-300 text-left transition-all cursor-pointer group"
             >
-              <div className="text-indigo-600 font-bold">Demo Bidder</div>
-              <div className="text-[10px] text-slate-500 truncate">bidder@auctionloom.com</div>
+              <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">Test1</div>
+              <div className="text-[10px] font-mono text-slate-500 truncate">test1@gmail.com</div>
             </button>
             <button
               type="button"
-              onClick={() => handleQuickFill('seller@auctionloom.com', 'password123')}
-              className="px-2.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-amber-300 text-left text-[11px] font-mono text-slate-700 transition-all cursor-pointer"
+              onClick={() => handleQuickFill('test2@gmail.com', 'test@123')}
+              className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-300 text-left transition-all cursor-pointer group"
             >
-              <div className="text-amber-600 font-bold">Demo Auctioneer</div>
-              <div className="text-[10px] text-slate-500 truncate">seller@auctionloom.com</div>
+              <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">Test2</div>
+              <div className="text-[10px] font-mono text-slate-500 truncate">test2@gmail.com</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickFill('test3@gmail.com', 'test@123')}
+              className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-300 text-left transition-all cursor-pointer group"
+            >
+              <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">Test3</div>
+              <div className="text-[10px] font-mono text-slate-500 truncate">test3@gmail.com</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickFill('admin@gmail.com', 'test@123')}
+              className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-rose-50/70 border border-slate-200 hover:border-rose-300 text-left transition-all cursor-pointer group"
+            >
+              <div className="text-xs font-bold text-slate-800 group-hover:text-rose-600">Admin</div>
+              <div className="text-[10px] font-mono text-slate-500 truncate">admin@gmail.com</div>
             </button>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { UserPlus, Mail, Lock, AlertCircle, Gavel, User, Store, Eye, EyeOff } from 'lucide-react';
@@ -14,8 +14,15 @@ export const RegisterPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const { register } = useAuth();
+  const { isAuthenticated, register } = useAuth();
   const navigate = useNavigate();
+
+  // If already logged in, redirect to My Hub
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/my-hub', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -44,7 +51,7 @@ export const RegisterPage = () => {
       setLoading(true);
       setError(null);
       await register(email, password, role, name);
-      navigate('/');
+      navigate('/my-hub');
     } catch (err) {
       console.error('Registration error:', err);
       setError(err.response?.data?.error || 'Registration failed. Try a different email.');
@@ -54,8 +61,8 @@ export const RegisterPage = () => {
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
-      <div className="max-w-md w-full glass-panel border border-slate-200/90 rounded-3xl p-8 sm:p-10 shadow-xl shadow-slate-200/50 bg-white/95 backdrop-blur-xl">
+    <div className="min-h-[calc(100vh-130px)] flex items-center justify-center px-4 py-6 sm:py-10">
+      <div className="max-w-md w-full glass-panel border border-slate-200/90 rounded-3xl p-6 sm:p-9 shadow-xl shadow-slate-200/50 bg-white/95 backdrop-blur-xl">
         
         {/* Brand Header */}
         <div className="text-center mb-8">
