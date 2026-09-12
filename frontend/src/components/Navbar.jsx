@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio, Pencil } from 'lucide-react';
+import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio, Pencil, LayoutDashboard } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
 export const Navbar = () => {
@@ -84,14 +84,24 @@ export const Navbar = () => {
               Auctions
             </Link>
 
-            {isAuthenticated && (user?.role === 'auctioneer' || user?.role === 'admin') && (
-              <Link
-                to="/create"
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-sm font-medium text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all shadow-sm"
-              >
-                <PlusCircle className="w-4 h-4 text-indigo-600" />
-                Create Auction
-              </Link>
+            {isAuthenticated && (
+              <>
+                <Link
+                  to="/my-hub"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-sm font-medium text-slate-700 hover:text-indigo-600 hover:bg-slate-100 transition-all"
+                >
+                  <LayoutDashboard className="w-4 h-4 text-indigo-500" />
+                  My Hub
+                </Link>
+
+                <Link
+                  to="/create"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-sm font-medium text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all shadow-sm"
+                >
+                  <PlusCircle className="w-4 h-4 text-indigo-600" />
+                  Create Auction
+                </Link>
+              </>
             )}
           </div>
 
@@ -99,33 +109,38 @@ export const Navbar = () => {
           <div className="flex items-center gap-3">
             {isAuthenticated ? (
               <div className="flex items-center gap-3">
-                {/* User info & role badge */}
-                <div className="hidden sm:flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-semibold text-xs flex items-center justify-center shadow-sm shadow-indigo-500/20">
+                {/* User info & role badge - Links to My Hub */}
+                <Link
+                  to="/my-hub"
+                  className="flex items-center gap-2.5 p-1 rounded-2xl hover:bg-slate-100/80 transition-all group cursor-pointer"
+                  title="View My Hub Dashboard"
+                >
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-semibold text-xs flex items-center justify-center shadow-sm shadow-indigo-500/20 group-hover:scale-105 transition-transform">
                     {getInitials(user?.name || user?.email)}
                   </div>
-                  <div className="flex flex-col items-start text-left">
+                  <div className="hidden sm:flex flex-col items-start text-left">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-semibold text-slate-900 max-w-[130px] truncate" title={user?.email}>
+                      <span className="text-xs font-semibold text-slate-900 max-w-[130px] truncate group-hover:text-indigo-600 transition-colors" title={user?.email}>
                         {user?.name || formatDisplayName(user)}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNameInput(user?.name || '');
-                          setIsEditingName(true);
-                        }}
-                        className="text-slate-400 hover:text-indigo-600 transition-colors p-0.5 rounded cursor-pointer"
-                        title="Change display name"
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </button>
                     </div>
-                    <span className={`text-[10px] uppercase font-mono font-medium px-2 py-0.5 rounded-full border ${getRoleBadge(user?.role)}`}>
+                    <span className={`text-[10px] uppercase font-mono font-medium px-2 py-0.2 rounded-full border ${getRoleBadge(user?.role)}`}>
                       {user?.role}
                     </span>
                   </div>
-                </div>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNameInput(user?.name || '');
+                    setIsEditingName(true);
+                  }}
+                  className="text-slate-400 hover:text-indigo-600 transition-colors p-1.5 rounded-xl hover:bg-slate-100 cursor-pointer"
+                  title="Quick change display name"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
 
                 <button
                   onClick={handleLogout}

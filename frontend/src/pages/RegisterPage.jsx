@@ -10,7 +10,7 @@ export const RegisterPage = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [role, setRole] = useState('bidder');
+  const [role, setRole] = useState('auctioneer');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -181,44 +181,10 @@ export const RegisterPage = () => {
             </div>
           </div>
 
-          {/* Role Selection */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-700 mb-2">
-              Select Account Role
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setRole('bidder')}
-                className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all cursor-pointer ${
-                  role === 'bidder'
-                    ? 'bg-indigo-50 border-indigo-500 text-indigo-900 shadow-sm'
-                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold text-xs">
-                  <User className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Bidder</span>
-                </div>
-                <span className="text-[10px] text-slate-500">Place live bids</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setRole('auctioneer')}
-                className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all cursor-pointer ${
-                  role === 'auctioneer'
-                    ? 'bg-amber-50 border-amber-500 text-amber-900 shadow-sm'
-                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold text-xs">
-                  <Store className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Auctioneer</span>
-                </div>
-                <span className="text-[10px] text-slate-500">Create & sell auctions</span>
-              </button>
-            </div>
+          {/* Unified Member Perk note */}
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center gap-2.5 text-xs text-slate-600">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+            <span>All-in-one account: <strong>Bid on live auctions</strong> and <strong>list items for sale</strong>.</span>
           </div>
 
           {/* Submit */}

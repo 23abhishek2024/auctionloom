@@ -11,6 +11,7 @@ import { AuctionDetailPage } from './pages/AuctionDetailPage';
 import { CreateAuctionPage } from './pages/CreateAuctionPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { UserHubPage } from './pages/UserHubPage';
 
 function App() {
   return (
@@ -29,9 +30,17 @@ function App() {
                   <Route path="/" element={<DashboardPage />} />
                   <Route path="/auctions/:id" element={<AuctionDetailPage />} />
                   <Route
+                    path="/my-hub"
+                    element={
+                      <ProtectedRoute>
+                        <UserHubPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/create"
                     element={
-                      <ProtectedRoute allowedRoles={['auctioneer', 'admin']}>
+                      <ProtectedRoute>
                         <CreateAuctionPage />
                       </ProtectedRoute>
                     }

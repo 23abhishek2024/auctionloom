@@ -71,6 +71,13 @@ export const bidApi = {
   placeBid: (bidData) => api.post('/bids', bidData),
 };
 
+export const userApi = {
+  getStats: () => api.get('/users/me/stats'),
+  getMyAuctions: () => api.get('/users/me/auctions'),
+  getMyBids: () => api.get('/users/me/bids'),
+  getMyWon: () => api.get('/users/me/won'),
+};
+
 export const aiApi = {
   generate: (data) => api.post('/ai/generate', data, { timeout: 35000 }),
 };
