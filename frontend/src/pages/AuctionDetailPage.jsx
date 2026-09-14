@@ -23,6 +23,8 @@ import {
   Image as ImageIcon,
   X,
   CreditCard,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
@@ -60,7 +62,15 @@ export const AuctionDetailPage = () => {
   const [activeReactions, setActiveReactions] = useState([]);
   const [showReactions, setShowReactions] = useState(false);
   const [sellerPayout, setSellerPayout] = useState(null);
+  const [copiedKey, setCopiedKey] = useState(null);
   const chatBottomRef = useRef(null);
+
+  const copyToClipboard = (text, key) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
 
 
   // ── 1. Fetch initial auction & bid history ───────────────────
@@ -577,54 +587,180 @@ export const AuctionDetailPage = () => {
 
             {/* Seller Payout Coordinates for Winning Bidder */}
             {isWinnerMe && (
-              <div className="rounded-3xl p-6 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-400 shadow-lg animate-fade-in space-y-3">
-                <div className="flex items-center gap-2 text-emerald-900 font-bold text-sm">
-                  <CreditCard className="w-5 h-5 text-emerald-600" />
-                  <span>Seller Settlement & Payment Instructions</span>
+              <div className="rounded-3xl p-6 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-400 shadow-lg animate-fade-in space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-emerald-900 font-bold text-sm">
+                    <CreditCard className="w-5 h-5 text-emerald-600" />
+                    <span>Seller Settlement & Payment Instructions</span>
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 text-[10px] font-bold uppercase tracking-wider">
+                    Verified Winner
+                  </span>
                 </div>
+
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Congratulations on winning this lot! Please complete checkout by transferring the hammer price of <strong>${parseFloat(auction.current_price).toFixed(2)}</strong> directly to the seller using their verified payout credentials:
+                  Congratulations on winning this lot! Please complete checkout by transferring the hammer price of <strong className="text-slate-900">${parseFloat(auction.current_price).toFixed(2)}</strong> directly to the seller using their verified payout credentials:
                 </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono bg-white/90 p-4 rounded-2xl border border-emerald-200 shadow-inner">
-                  {sellerPayout?.payoutMethods?.bank_name && (
-                    <div>
-                      <span className="text-slate-400 block text-[10px] uppercase">Bank Wire</span>
-                      <strong className="text-slate-900 font-sans">{sellerPayout.payoutMethods.bank_name}</strong>
-                    </div>
-                  )}
-                  {sellerPayout?.payoutMethods?.account_number && (
-                    <div>
-                      <span className="text-slate-400 block text-[10px] uppercase">Account Number</span>
-                      <strong className="text-indigo-700 font-mono">{sellerPayout.payoutMethods.account_number}</strong>
-                    </div>
-                  )}
-                  {sellerPayout?.payoutMethods?.ifsc_swift && (
-                    <div>
-                      <span className="text-slate-400 block text-[10px] uppercase">IFSC / SWIFT</span>
-                      <strong className="text-slate-900">{sellerPayout.payoutMethods.ifsc_swift}</strong>
-                    </div>
-                  )}
-                  {sellerPayout?.payoutMethods?.upi_id && (
-                    <div>
-                      <span className="text-slate-400 block text-[10px] uppercase">UPI ID</span>
-                      <strong className="text-indigo-700 font-mono bg-indigo-50 px-2 py-0.5 rounded">{sellerPayout.payoutMethods.upi_id}</strong>
-                    </div>
-                  )}
-                  {sellerPayout?.payoutMethods?.paypal_email && (
-                    <div>
-                      <span className="text-slate-400 block text-[10px] uppercase">PayPal</span>
-                      <strong className="text-slate-900">{sellerPayout.payoutMethods.paypal_email}</strong>
-                    </div>
-                  )}
-                </div>
+                {sellerPayout?.payoutMethods && (
+                  sellerPayout.payoutMethods.bank_name ||
+                  sellerPayout.payoutMethods.account_number ||
+                  sellerPayout.payoutMethods.ifsc_swift ||
+                  sellerPayout.payoutMethods.upi_id ||
+                  sellerPayout.payoutMethods.paypal_email
+                ) ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono bg-white/95 p-4 rounded-2xl border border-emerald-200 shadow-inner">
+                    {sellerPayout.payoutMethods.bank_name && (
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-2">
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase">Bank Wire</span>
+                          <strong className="text-slate-900 font-sans text-xs">{sellerPayout.payoutMethods.bank_name}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(sellerPayout.payoutMethods.bank_name, 'bank')}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                          title="Copy Bank Name"
+                        >
+                          {copiedKey === 'bank' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    )}
 
-                <div className="text-[11px] text-slate-500 pt-1 flex items-center justify-between font-mono">
-                  <span>Seller: <strong>{sellerPayout?.name || auction.seller_name}</strong></span>
-                  <a href={`mailto:${sellerPayout?.email || auction.seller_email}`} className="text-indigo-600 underline font-sans">
-                    Email Seller ({sellerPayout?.email || auction.seller_email})
+                    {sellerPayout.payoutMethods.account_number && (
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-2">
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase">Account Number</span>
+                          <strong className="text-indigo-700 font-mono text-xs">{sellerPayout.payoutMethods.account_number}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(sellerPayout.payoutMethods.account_number, 'account')}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                          title="Copy Account Number"
+                        >
+                          {copiedKey === 'account' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    )}
+
+                    {sellerPayout.payoutMethods.ifsc_swift && (
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-2">
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase">IFSC / SWIFT</span>
+                          <strong className="text-slate-900 text-xs">{sellerPayout.payoutMethods.ifsc_swift}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(sellerPayout.payoutMethods.ifsc_swift, 'ifsc')}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                          title="Copy IFSC/SWIFT"
+                        >
+                          {copiedKey === 'ifsc' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    )}
+
+                    {sellerPayout.payoutMethods.upi_id && (
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-2">
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase">UPI ID</span>
+                          <strong className="text-indigo-700 font-mono text-xs bg-indigo-50 px-1.5 py-0.5 rounded">{sellerPayout.payoutMethods.upi_id}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(sellerPayout.payoutMethods.upi_id, 'upi')}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                          title="Copy UPI ID"
+                        >
+                          {copiedKey === 'upi' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    )}
+
+                    {sellerPayout.payoutMethods.paypal_email && (
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-2 sm:col-span-2">
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase">PayPal</span>
+                          <strong className="text-slate-900 text-xs">{sellerPayout.payoutMethods.paypal_email}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(sellerPayout.payoutMethods.paypal_email, 'paypal')}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                          title="Copy PayPal Address"
+                        >
+                          {copiedKey === 'paypal' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    )}
+
+                    {sellerPayout.payoutMethods.notes && (
+                      <div className="sm:col-span-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 italic">
+                        <strong>Seller Notes:</strong> {sellerPayout.payoutMethods.notes}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Informative state when seller has not yet entered automated credentials */
+                  <div className="rounded-2xl bg-amber-50/90 border border-amber-200 p-4 text-xs text-amber-900 space-y-2.5">
+                    <div className="flex items-center gap-2 font-bold text-amber-950">
+                      <AlertCircle className="w-4 h-4 text-amber-600" />
+                      <span>Direct Seller Settlement</span>
+                    </div>
+                    <p className="text-amber-800 leading-relaxed">
+                      Seller <strong>{sellerPayout?.name || auction.seller_name}</strong> has not yet published automated digital payment coordinates (Bank wire, UPI, or PayPal). Please contact the seller directly below to arrange payment and delivery:
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <a
+                        href={`mailto:${sellerPayout?.email || auction.seller_email}?subject=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}&body=${encodeURIComponent(`Hi ${sellerPayout?.name || auction.seller_name},\n\nI won your auction "${auction.title}" with a winning bid of $${parseFloat(auction.current_price).toFixed(2)}.\nPlease reply with your payment coordinates and shipping arrangements.\n\nThank you!`)}`}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 text-white font-semibold text-xs shadow-md shadow-indigo-500/20 hover:bg-indigo-700 transition-all cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Email Seller for Payment Details</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('chat')}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs shadow-sm hover:bg-slate-50 transition-all cursor-pointer"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Message in Live Chat</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="text-[11px] text-slate-500 pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-emerald-200/60 font-mono">
+                  <span>Seller: <strong>{sellerPayout?.name || auction.seller_name}</strong> ({sellerPayout?.email || auction.seller_email})</span>
+                  <a
+                    href={`mailto:${sellerPayout?.email || auction.seller_email}?subject=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}`}
+                    className="text-indigo-600 font-sans font-semibold underline hover:text-indigo-700"
+                  >
+                    Open Mail Client →
                   </a>
                 </div>
+              </div>
+            )}
+
+            {/* If seller is viewing their own concluded auction, provide reminder */}
+            {isSeller && isEnded && (
+              <div className="rounded-3xl p-5 bg-indigo-50/80 border border-indigo-200 text-xs text-indigo-900 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-bold text-sm text-indigo-950">
+                    <CreditCard className="w-4 h-4 text-indigo-600" />
+                    <span>Your Seller Payout Setup</span>
+                  </div>
+                  <Link
+                    to="/my-hub"
+                    className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-indigo-600 text-white font-semibold text-xs hover:bg-indigo-700 transition-colors"
+                  >
+                    Configure Coordinates in My Hub →
+                  </Link>
+                </div>
+                <p className="text-slate-600">
+                  This auction concluded with a winning bid of <strong>${parseFloat(auction.current_price).toFixed(2)}</strong> by <strong>{winnerName || 'Winner'}</strong>. Ensure your Bank, UPI, and PayPal details are configured in My Hub so your buyer can complete payment.
+                </p>
               </div>
             )}
           </>

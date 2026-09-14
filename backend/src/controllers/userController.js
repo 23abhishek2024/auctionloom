@@ -274,13 +274,18 @@ const getPayoutMethods = async (req, res, next) => {
  */
 const updatePayoutMethods = async (req, res, next) => {
   try {
-    const { bank_name, account_number, ifsc_swift, upi_id, paypal_email } = req.body;
+    const bank_name = req.body.bank_name || req.body.bankName || '';
+    const account_number = req.body.account_number || req.body.accountNumber || '';
+    const ifsc_swift = req.body.ifsc_swift || req.body.ifscCode || req.body.ifscSwift || '';
+    const upi_id = req.body.upi_id || req.body.upiId || '';
+    const paypal_email = req.body.paypal_email || req.body.paypalEmail || '';
+
     const methods = {
-      bank_name: bank_name ? bank_name.trim() : '',
-      account_number: account_number ? account_number.trim() : '',
-      ifsc_swift: ifsc_swift ? ifsc_swift.trim() : '',
-      upi_id: upi_id ? upi_id.trim() : '',
-      paypal_email: paypal_email ? paypal_email.trim() : '',
+      bank_name: String(bank_name).trim(),
+      account_number: String(account_number).trim(),
+      ifsc_swift: String(ifsc_swift).trim(),
+      upi_id: String(upi_id).trim(),
+      paypal_email: String(paypal_email).trim(),
       updated_at: new Date().toISOString(),
     };
 
