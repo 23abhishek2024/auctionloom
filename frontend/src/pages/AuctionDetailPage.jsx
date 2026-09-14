@@ -294,6 +294,28 @@ export const AuctionDetailPage = () => {
     setShowReactions(false);
   };
 
+  // Derived state (calculated unconditionally before early returns)
+  const isSeller = user?.id === auction?.seller_id;
+  const highestBid = bids && bids.length > 0 ? bids[0] : null;
+  const winnerName = auction?.winner_name
+    ? formatDisplayName(auction.winner_name, auction.winner_email)
+    : (highestBid ? formatDisplayName(highestBid.bidder_name, highestBid.bidder_email) : null);
+  const isWinnerMe = Boolean(
+    user && (
+      (auction?.winner_id && user.id === auction.winner_id) ||
+      (highestBid && (user.id === highestBid.bidder_id || (user.email && highestBid.bidder_email === user.email)))
+    )
+  );
+
+  // Hook 5: Winner settlement payout instructions
+  useEffect(() => {
+    if (user && id && isEnded && isWinnerMe && !sellerPayout) {
+      userApi.getSellerPayoutForWinner(id)
+        .then((res) => setSellerPayout(res.data.seller))
+        .catch(() => {});
+    }
+  }, [user, id, isEnded, isWinnerMe, sellerPayout]);
+
   if (loading) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
@@ -305,13 +327,13 @@ export const AuctionDetailPage = () => {
     );
   }
 
-  if (error && !auction) {
+  if (error || !auction) {
     return (
       <div className="max-w-xl mx-auto px-4 py-16 text-center">
         <div className="glass-card border border-rose-200 p-8 rounded-3xl bg-white shadow-lg">
           <AlertCircle className="w-12 h-12 text-rose-500 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-slate-900 mb-2">Auction Not Found</h2>
-          <p className="text-xs text-slate-500 mb-6">{error}</p>
+          <p className="text-xs text-slate-500 mb-6">{error || 'The requested auction could not be found or has been removed.'}</p>
           <Link
             to="/"
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold text-white btn-primary"
@@ -323,24 +345,6 @@ export const AuctionDetailPage = () => {
       </div>
     );
   }
-
-  const isSeller = user?.id === auction.seller_id;
-  const highestBid = bids && bids.length > 0 ? bids[0] : null;
-  const winnerName = auction?.winner_name
-    ? formatDisplayName(auction.winner_name, auction.winner_email)
-    : (highestBid ? formatDisplayName(highestBid.bidder_name, highestBid.bidder_email) : null);
-  const isWinnerMe = user && (
-    (auction?.winner_id && user.id === auction.winner_id) ||
-    (highestBid && (user.id === highestBid.bidder_id || (user.email && highestBid.bidder_email === user.email)))
-  );
-
-  useEffect(() => {
-    if (user && id && isEnded && isWinnerMe && !sellerPayout) {
-      userApi.getSellerPayoutForWinner(id)
-        .then((res) => setSellerPayout(res.data.seller))
-        .catch(() => {});
-    }
-  }, [user, id, isEnded, isWinnerMe, sellerPayout]);
 
   return (
 
