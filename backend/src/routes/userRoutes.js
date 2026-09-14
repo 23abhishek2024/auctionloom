@@ -27,6 +27,7 @@ router.post('/me/upgrade-seller', authMiddleware, upgradeToSeller);
 router.get('/me/payout-methods', authMiddleware, getPayoutMethods);
 router.put('/me/payout-methods', authMiddleware, updatePayoutMethods);
 router.get('/auction-payout/:auctionId', authMiddleware, getSellerPayoutForWinner);
+router.get('/auctions/:auctionId/seller-payout', authMiddleware, getSellerPayoutForWinner);
 
 module.exports = router;
 

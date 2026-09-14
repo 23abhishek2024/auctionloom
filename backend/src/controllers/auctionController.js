@@ -56,11 +56,16 @@ const createAuction = async (req, res, next) => {
       });
     }
 
-    const { title, description, starting_price, end_time } = req.body;
+    let { title, description, starting_price, end_time, duration_minutes, duration_hours } = req.body;
     const imageUrl = req.body.image_url || req.body.imageUrl || null;
 
+    if (!end_time && (duration_minutes || duration_hours)) {
+      const mins = parseInt(duration_minutes, 10) || ((parseInt(duration_hours, 10) || 0) * 60) || 60;
+      end_time = new Date(Date.now() + mins * 60 * 1000).toISOString();
+    }
+
     if (!title || !starting_price || !end_time) {
-      return res.status(400).json({ error: 'Title, starting_price, and end_time are required.' });
+      return res.status(400).json({ error: 'Title, starting_price, and end_time (or duration_minutes) are required.' });
     }
 
     const price = parseFloat(starting_price);
