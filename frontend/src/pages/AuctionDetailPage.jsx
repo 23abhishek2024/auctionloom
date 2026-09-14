@@ -130,7 +130,10 @@ export const AuctionDetailPage = () => {
     const handleChatMessage = (msg) => {
       console.log('[Socket] Live CHAT_MESSAGE received:', msg);
       if (msg.auctionId === id) {
-        setChatMessages((prev) => [...prev, msg]);
+        setChatMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
       }
     };
 
@@ -163,7 +166,7 @@ export const AuctionDetailPage = () => {
       }
       leaveAuction(id);
     };
-  }, [id, socket]);
+  }, [id, socket, isConnected]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -273,14 +276,23 @@ export const AuctionDetailPage = () => {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
-    sendMessage({
+    const text = chatInput.trim();
+    const msgId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const senderName = formatDisplayName(user);
+    const messagePayload = {
+      id: msgId,
       auctionId: id,
-      text: chatInput.trim(),
-      senderName: formatDisplayName(user),
-      senderEmail: user?.email || 'Anonymous Bidder',
+      text,
+      senderName,
+      senderEmail: user?.email || senderName,
       role: user?.role || 'bidder',
-    });
+      timestamp: new Date().toISOString(),
+    };
 
+    // Optimistically show message immediately in chat box for instant feedback
+    setChatMessages((prev) => [...prev, messagePayload]);
+
+    sendMessage(messagePayload);
     setChatInput('');
   };
 

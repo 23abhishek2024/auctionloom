@@ -49,15 +49,18 @@ const initSocket = (server) => {
         const text = String(data.text).trim().slice(0, 500);
         if (!text) return;
 
+        // Auto-join room to ensure sender receives room broadcasts
+        socket.join(data.auctionId);
+
         const senderName = data.senderName || (data.senderEmail ? data.senderEmail.split('@')[0] : 'Bidder');
         const messagePayload = {
-          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+          id: data.id || `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
           auctionId: data.auctionId,
           text,
           senderName,
           senderEmail: data.senderEmail || senderName,
           role: data.role || 'bidder',
-          timestamp: new Date().toISOString(),
+          timestamp: data.timestamp || new Date().toISOString(),
         };
 
         io.to(data.auctionId).emit('CHAT_MESSAGE', messagePayload);
@@ -71,17 +74,18 @@ const initSocket = (server) => {
     socket.on('SEND_REACTION', (data) => {
       try {
         if (!data || !data.auctionId || !data.emoji) return;
+        socket.join(data.auctionId);
         const allowed = ['🔥', '🚀', '💎', '👏', '❤️', '⚡', '🎉'];
         const emoji = allowed.includes(data.emoji) ? data.emoji : '🔥';
 
         const senderName = data.senderName || (data.senderEmail ? data.senderEmail.split('@')[0] : 'Bidder');
         const reactionPayload = {
-          id: `react-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+          id: data.id || `react-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
           auctionId: data.auctionId,
           emoji,
           senderName,
           senderEmail: data.senderEmail || senderName,
-          timestamp: new Date().toISOString(),
+          timestamp: data.timestamp || new Date().toISOString(),
         };
 
         io.to(data.auctionId).emit('REACTION', reactionPayload);
