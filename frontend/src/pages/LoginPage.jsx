@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LogIn, Mail, Lock, AlertCircle, Gavel, UserCheck, Eye, EyeOff, Sparkles } from 'lucide-react';
+import { LogIn, Mail, Lock, AlertCircle, Gavel, Eye, EyeOff } from 'lucide-react';
 
 export const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -41,13 +41,6 @@ export const LoginPage = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Quick fill helper for local testing
-  const handleQuickFill = (demoEmail, demoPassword) => {
-    setEmail(demoEmail);
-    setPassword(demoPassword);
-    setError(null);
   };
 
   return (
@@ -137,52 +130,6 @@ export const LoginPage = () => {
           </button>
 
         </form>
-
-        {/* Quick Demo Accounts Helpers */}
-        <div className="mt-7 pt-5 border-t border-slate-200">
-          <div className="flex items-center justify-between mb-2.5">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold">
-              1-Click Demo Logins
-            </span>
-            <span className="text-[10px] font-mono text-slate-400">
-              Pass: test@123
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleQuickFill('test1@gmail.com', 'test@123')}
-              className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-300 text-left transition-all cursor-pointer group"
-            >
-              <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">Test1</div>
-              <div className="text-[10px] font-mono text-slate-500 truncate">test1@gmail.com</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill('test2@gmail.com', 'test@123')}
-              className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-300 text-left transition-all cursor-pointer group"
-            >
-              <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">Test2</div>
-              <div className="text-[10px] font-mono text-slate-500 truncate">test2@gmail.com</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill('test3@gmail.com', 'test@123')}
-              className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-300 text-left transition-all cursor-pointer group"
-            >
-              <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">Test3</div>
-              <div className="text-[10px] font-mono text-slate-500 truncate">test3@gmail.com</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill('admin@gmail.com', 'test@123')}
-              className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-rose-50/70 border border-slate-200 hover:border-rose-300 text-left transition-all cursor-pointer group"
-            >
-              <div className="text-xs font-bold text-slate-800 group-hover:text-rose-600">Admin</div>
-              <div className="text-[10px] font-mono text-slate-500 truncate">admin@gmail.com</div>
-            </button>
-          </div>
-        </div>
 
         {/* Footer link */}
         <div className="mt-6 text-center text-xs text-slate-500">
