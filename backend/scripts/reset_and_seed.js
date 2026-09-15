@@ -146,19 +146,6 @@ async function resetAndSeed() {
           { bidder: usersMap['Test2'].id, amount: 2100.00, time: pastHours(8) },
           { bidder: usersMap['Test1'].id, amount: 2500.00, time: pastHours(3) },
         ]
-      },
-      {
-        key: 'diamond',
-        seller: usersMap['Test1'].id,
-        title: '4.50 Carat Emerald-Cut Diamond Platinum Solitaire',
-        description: 'GIA Certified 4.50ct Emerald Cut Natural Diamond with VVS1 clarity, E color, and excellent polish/symmetry set in a handmade platinum four-prong mounting.',
-        starting_price: 22000.00,
-        current_price: 22000.00,
-        end_time: hours(72),
-        status: 'ACTIVE',
-        winner_id: null,
-        image_url: 'https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=800&q=80',
-        bids: []
       }
     ];
 

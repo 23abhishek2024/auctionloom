@@ -22,7 +22,9 @@ const register = async (req, res, next) => {
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const user = await userModel.create(email, passwordHash, role || 'auctioneer', name);
+    // Security: Whitelist roles on public registration (forbid self-assigning 'admin')
+    const assignedRole = (role === 'auctioneer' || role === 'bidder') ? role : 'bidder';
+    const user = await userModel.create(email, passwordHash, assignedRole, name);
 
     const token = jwt.sign(
       { id: user.id, name: user.name, email: user.email, role: user.role },

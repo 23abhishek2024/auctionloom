@@ -7,7 +7,7 @@ const rateLimit = require('express-rate-limit');
  */
 const rateLimiterMiddleware = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 100 : 5000, // 5000 in dev, 100 in production
+  max: 5000, // 5000 requests per 15 mins for active real-time bidding & catalog browsing
   standardHeaders: true,     // Return rate limit info in RateLimit-* headers
   legacyHeaders: false,
   message: {
