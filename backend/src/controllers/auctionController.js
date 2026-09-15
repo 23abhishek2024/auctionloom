@@ -118,6 +118,9 @@ const deleteAuction = async (req, res, next) => {
       return res.status(400).json({ error: 'Cannot delete auction after bids have already been placed.' });
     }
 
+    // Clean up jobs & bids
+    await pool.query(`DELETE FROM jobs WHERE payload->>'auction_id' = $1`, [id]);
+    await pool.query(`DELETE FROM bids WHERE auction_id = $1`, [id]);
     await auctionModel.delete(id);
     res.json({ message: 'Auction deleted successfully.' });
   } catch (err) {

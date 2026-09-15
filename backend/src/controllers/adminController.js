@@ -215,6 +215,10 @@ const forceDeleteAuction = async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid auction ID format.' });
     }
 
+    // Explicitly cleanup associated jobs and bids
+    await pool.query(`DELETE FROM jobs WHERE payload->>'auction_id' = $1`, [id]);
+    await pool.query(`DELETE FROM bids WHERE auction_id = $1`, [id]);
+
     const result = await pool.query(`DELETE FROM auctions WHERE id = $1 RETURNING *`, [id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Auction not found.' });

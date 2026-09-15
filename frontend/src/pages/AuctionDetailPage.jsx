@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { auctionApi, bidApi, userApi, resolveImageUrl } from '../api/client';
+import { auctionApi, bidApi, userApi, adminApi, resolveImageUrl } from '../api/client';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -27,6 +27,8 @@ import {
   Check,
   Mail,
   ExternalLink,
+  Trash2,
+  ShieldAlert,
 } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
@@ -47,6 +49,7 @@ export const AuctionDetailPage = () => {
   const [timeLeft, setTimeLeft] = useState('');
   const [isEnded, setIsEnded] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Tabs: 'bids' or 'chat' (Socket.IO Video 33)
   const [activeTab, setActiveTab] = useState('bids');
@@ -308,6 +311,46 @@ export const AuctionDetailPage = () => {
     setError(null);
   };
 
+  // Super Admin Force Delete Auction from Detail Page
+  const handleAdminDeleteAuction = async () => {
+    const confirmed = window.confirm(
+      `🚨 SUPER ADMIN MODERATION ACTION:\n\nAre you sure you want to permanently delete "${auction?.title}"?\n\nThis will remove the auction and all associated bids immediately from the marketplace.\nThis action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeleting(true);
+      setError(null);
+      await adminApi.deleteAuction(id);
+      alert(`Auction "${auction?.title}" was successfully deleted by Administrator.`);
+      navigate('/auctions');
+    } catch (err) {
+      console.error('Failed to delete auction:', err);
+      setError(err.response?.data?.error || 'Failed to delete auction.');
+      setDeleting(false);
+    }
+  };
+
+  // Seller Delete Auction (Allowed only if 0 bids)
+  const handleSellerDeleteAuction = async () => {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete your auction "${auction?.title}"?`
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeleting(true);
+      setError(null);
+      await auctionApi.delete(id);
+      alert(`Your auction "${auction?.title}" was deleted.`);
+      navigate('/auctions');
+    } catch (err) {
+      console.error('Failed to delete seller auction:', err);
+      setError(err.response?.data?.error || 'Failed to delete auction.');
+      setDeleting(false);
+    }
+  };
+
   // ── 5. Live Room Chat & Reactions Handlers (Video 33) ────────
   const handleSendChatMessage = (e) => {
     e.preventDefault();
@@ -410,11 +453,27 @@ export const AuctionDetailPage = () => {
           Back to Live Auctions
         </Link>
 
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-xs font-mono shadow-sm">
-          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse shadow-[0_0_6px_#10b981]' : 'bg-rose-500'}`} />
-          <span className="text-slate-500">
-            Room: <span className="text-slate-800 font-semibold">{id.slice(0, 8)}...</span>
-          </span>
+        <div className="flex items-center gap-2.5">
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleAdminDeleteAuction}
+              disabled={deleting}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-mono font-bold transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-50"
+              title="Super Admin: Permanently Delete Auction"
+              id="btn-top-admin-delete"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <span>{deleting ? 'Deleting...' : 'Delete Auction (Admin)'}</span>
+            </button>
+          )}
+
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-xs font-mono shadow-sm">
+            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse shadow-[0_0_6px_#10b981]' : 'bg-rose-500'}`} />
+            <span className="text-slate-500">
+              Room: <span className="text-slate-800 font-semibold">{id.slice(0, 8)}...</span>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1078,15 +1137,41 @@ export const AuctionDetailPage = () => {
                     This auction concluded with no bids placed.
                   </p>
                 )}
+
+                {/* If Admin is viewing concluded auction, provide moderation delete */}
+                {isAdmin && (
+                  <div className="pt-3 border-t border-amber-200/80">
+                    <button
+                      type="button"
+                      onClick={handleAdminDeleteAuction}
+                      disabled={deleting}
+                      className="w-full py-2 px-3 rounded-xl text-xs font-mono font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{deleting ? 'Deleting...' : 'Delete Ended Auction (Admin)'}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : isSeller ? (
-              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-center">
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-center space-y-2">
                 <p className="text-xs text-amber-800 font-mono">
                   You are the seller of this auction. Self-bidding is blocked by backend concurrency rules.
                 </p>
+                {bids.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={handleSellerDeleteAuction}
+                    disabled={deleting}
+                    className="w-full py-2 px-3 rounded-xl text-xs font-mono text-rose-600 bg-white hover:bg-rose-50 border border-rose-200 flex items-center justify-center gap-1.5 transition-all font-semibold cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete My Listing (0 Bids)</span>
+                  </button>
+                )}
               </div>
             ) : isAdmin ? (
-              <div className="p-4 rounded-2xl bg-indigo-50/90 border border-indigo-200 text-center space-y-2 shadow-xs">
+              <div className="p-5 rounded-2xl bg-indigo-50/90 border border-indigo-200 text-center space-y-3.5 shadow-sm">
                 <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-indigo-900 font-mono">
                   <ShieldCheck className="w-4 h-4 text-indigo-600" />
                   <span>PLATFORM NEUTRALITY POLICY</span>
@@ -1097,6 +1182,33 @@ export const AuctionDetailPage = () => {
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white rounded-full border border-indigo-200 text-[10px] font-mono text-indigo-800 font-semibold shadow-xs">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                   Auditor Mode Active
+                </div>
+
+                {/* ── Super Admin Emergency Moderation ── */}
+                <div className="pt-3.5 border-t border-indigo-200/80 space-y-2.5 text-left">
+                  <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-800">
+                    <span className="flex items-center gap-1.5 text-rose-700">
+                      <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+                      Moderation Controls
+                    </span>
+                    <span className="text-[10px] font-mono text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200 font-semibold">
+                      Super Admin
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAdminDeleteAuction}
+                    disabled={deleting}
+                    className="w-full py-2.5 px-4 rounded-xl text-xs font-mono font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center gap-2 transition-all shadow-md shadow-rose-600/20 active:scale-95 cursor-pointer disabled:opacity-50"
+                    id="btn-sidebar-admin-delete"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>{deleting ? 'Deleting Auction...' : 'Delete Auction (Admin)'}</span>
+                  </button>
+                  <p className="text-[10px] text-slate-500 font-mono text-center">
+                    Permanently removes this lot and all bids from the platform.
+                  </p>
                 </div>
               </div>
             ) : (
