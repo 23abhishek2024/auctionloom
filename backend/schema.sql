@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS auctions (
     republished_at        TIMESTAMP WITH TIME ZONE,
     commission_amount     DECIMAL(12, 2) DEFAULT 0.00,
     commission_calculated BOOLEAN DEFAULT FALSE,
+    winner_email_preview_url TEXT,
     created_at            TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

@@ -25,6 +25,8 @@ import {
   CreditCard,
   Copy,
   Check,
+  Mail,
+  ExternalLink,
 } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
@@ -740,6 +742,24 @@ export const AuctionDetailPage = () => {
                     Open Mail Client →
                   </a>
                 </div>
+
+                {auction.winner_email_preview_url && (
+                  <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-between gap-3 flex-wrap bg-white/80 p-3 rounded-2xl border border-emerald-200 shadow-sm">
+                    <div className="flex items-center gap-2 text-slate-700 text-xs">
+                      <Mail className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                      <span><strong>Transactional Notice:</strong> Automated winning invoice dispatched by worker</span>
+                    </div>
+                    <a
+                      href={auction.winner_email_preview_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-semibold text-xs shadow-sm hover:from-violet-700 hover:to-indigo-700 transition-all cursor-pointer"
+                    >
+                      <span>View Email Preview (Ethereal)</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                )}
               </div>
             )}
 

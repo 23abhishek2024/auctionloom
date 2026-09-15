@@ -1,6 +1,7 @@
 const pool = require('../db');
 const auctionModel = require('../models/auctionModel');
 const bidModel = require('../models/bidModel');
+const emailService = require('../services/emailService');
 
 /**
  * Job Worker — Phase 6 (Distributed Background Workers)
@@ -113,6 +114,60 @@ const handleCloseAuction = async (auctionId) => {
     console.log(
       `[Worker] Auction ${auctionId} closed. Winner: ${winnerId || 'No bids placed'}`
     );
+
+    // 3. Dispatch Winner & Seller Transactional Notifications via EmailService
+    if (winnerId && highestBid) {
+      try {
+        const winnerRes = await pool.query('SELECT id, name, email FROM users WHERE id = $1', [winnerId]);
+        const sellerRes = await pool.query('SELECT id, name, email, payout_methods FROM users WHERE id = $1', [auction.seller_id]);
+        const winner = winnerRes.rows[0];
+        const seller = sellerRes.rows[0];
+
+        if (winner && seller) {
+          const emailResult = await emailService.sendAuctionWonNotification({
+            winnerEmail: winner.email,
+            winnerName: winner.name || winner.email.split('@')[0],
+            auction: {
+              id: auctionId,
+              title: auction.title,
+              current_price: highestBid.amount,
+            },
+            seller: {
+              name: seller.name || seller.email.split('@')[0],
+              email: seller.email,
+              payout_methods: seller.payout_methods || {},
+            },
+            hammerPrice: highestBid.amount,
+          });
+
+          if (emailResult && emailResult.previewUrl) {
+            await pool.query(
+              'UPDATE auctions SET winner_email_preview_url = $1 WHERE id = $2',
+              [emailResult.previewUrl, auctionId]
+            );
+            console.log(`[Worker] ✉️ Stored Ethereal email preview URL for auction ${auctionId}`);
+          }
+
+          // Also notify seller
+          await emailService.sendAuctionSoldNotification({
+            sellerEmail: seller.email,
+            sellerName: seller.name || seller.email.split('@')[0],
+            auction: {
+              id: auctionId,
+              title: auction.title,
+              current_price: highestBid.amount,
+            },
+            winner: {
+              name: winner.name || winner.email.split('@')[0],
+              email: winner.email,
+            },
+            hammerPrice: highestBid.amount,
+          });
+        }
+      } catch (emailErr) {
+        console.error('[Worker] ⚠️ Transactional email notification failed non-critically:', emailErr.message);
+      }
+    }
 
   } catch (err) {
     await client.query('ROLLBACK');
