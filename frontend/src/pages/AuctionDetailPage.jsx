@@ -74,6 +74,21 @@ export const AuctionDetailPage = () => {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  // Smooth scroll and focus jump to Live Room Chat
+  const handleJumpToChat = () => {
+    setActiveTab('chat');
+    setTimeout(() => {
+      const el = document.getElementById('auction-live-chat-section');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      const input = document.getElementById('live-chat-input-box');
+      if (input) {
+        input.focus();
+      }
+    }, 150);
+  };
+
 
   // ── 1. Fetch initial auction & bid history ───────────────────
   useEffect(() => {
@@ -714,33 +729,81 @@ export const AuctionDetailPage = () => {
                       Seller <strong>{sellerPayout?.name || auction.seller_name}</strong> has not yet published automated digital payment coordinates (Bank wire, UPI, or PayPal). Please contact the seller directly below to arrange payment and delivery:
                     </p>
                     <div className="flex flex-wrap items-center gap-2 pt-1">
+                      {/* Option 1: Open in Web Gmail */}
                       <a
-                        href={`mailto:${sellerPayout?.email || auction.seller_email}?subject=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}&body=${encodeURIComponent(`Hi ${sellerPayout?.name || auction.seller_name},\n\nI won your auction "${auction.title}" with a winning bid of $${parseFloat(auction.current_price).toFixed(2)}.\nPlease reply with your payment coordinates and shipping arrangements.\n\nThank you!`)}`}
+                        href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sellerPayout?.email || auction.seller_email)}&su=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}&body=${encodeURIComponent(`Hi ${sellerPayout?.name || auction.seller_name},\n\nI won your auction "${auction.title}" with a winning bid of $${parseFloat(auction.current_price).toFixed(2)}.\nPlease reply with your payment coordinates and shipping arrangements.\n\nThank you!`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 text-white font-semibold text-xs shadow-md shadow-indigo-500/20 hover:bg-indigo-700 transition-all cursor-pointer"
+                        title="Compose email directly in Web Gmail"
                       >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>Email Seller for Payment Details</span>
+                        <Mail className="w-3.5 h-3.5 text-amber-300" />
+                        <span>Email via Web Gmail ↗</span>
                       </a>
+
+                      {/* Option 2: 1-Click Copy Email */}
                       <button
                         type="button"
-                        onClick={() => setActiveTab('chat')}
+                        onClick={() => copyToClipboard(sellerPayout?.email || auction.seller_email, 'seller-email')}
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs shadow-sm hover:bg-slate-50 transition-all cursor-pointer"
+                        title="Copy seller email address"
                       >
-                        <MessageSquare className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>Message in Live Chat</span>
+                        {copiedKey === 'seller-email' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="text-emerald-700 font-bold">Copied! ✓</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Copy Email</span>
+                          </>
+                        )}
+                      </button>
+
+                      {/* Option 3: Smooth Scroll & Jump into Live Chat */}
+                      <button
+                        type="button"
+                        onClick={handleJumpToChat}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold text-xs shadow-sm hover:bg-emerald-100 transition-all cursor-pointer"
+                        title="Jump to live room chat below"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Message in Live Chat ↓</span>
                       </button>
                     </div>
                   </div>
                 )}
 
                 <div className="text-[11px] text-slate-500 pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-emerald-200/60 font-mono">
-                  <span>Seller: <strong>{sellerPayout?.name || auction.seller_name}</strong> ({sellerPayout?.email || auction.seller_email})</span>
-                  <a
-                    href={`mailto:${sellerPayout?.email || auction.seller_email}?subject=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}`}
-                    className="text-indigo-600 font-sans font-semibold underline hover:text-indigo-700"
-                  >
-                    Open Mail Client →
-                  </a>
+                  <div className="flex items-center gap-1.5">
+                    <span>Seller: <strong>{sellerPayout?.name || auction.seller_name}</strong> ({sellerPayout?.email || auction.seller_email})</span>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(sellerPayout?.email || auction.seller_email, 'seller-email-small')}
+                      className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition-colors"
+                      title="Copy seller email"
+                    >
+                      {copiedKey === 'seller-email-small' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-3 font-sans font-semibold">
+                    <a
+                      href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sellerPayout?.email || auction.seller_email)}&su=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-indigo-600 font-semibold hover:text-indigo-700 underline"
+                    >
+                      Gmail Web ↗
+                    </a>
+                    <span className="text-slate-300">|</span>
+                    <a
+                      href={`mailto:${sellerPayout?.email || auction.seller_email}?subject=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}`}
+                      className="text-slate-500 font-semibold hover:text-slate-700 underline"
+                    >
+                      Desktop Mail App
+                    </a>
+                  </div>
                 </div>
 
                 {auction.winner_email_preview_url && (
@@ -788,7 +851,7 @@ export const AuctionDetailPage = () => {
 
 
           {/* ── Dual Tabs: Live Bids History vs Live Room Chat (Video 33) ── */}
-          <div className="glass-card border border-slate-200/90 rounded-3xl p-6 bg-white/95 backdrop-blur-xl shadow-sm">
+          <div id="auction-live-chat-section" className="glass-card border border-slate-200/90 rounded-3xl p-6 bg-white/95 backdrop-blur-xl shadow-sm scroll-mt-24">
             <div className="flex items-center justify-between mb-5 border-b border-slate-200 pb-3">
               <div className="flex items-center gap-2">
                 <button
@@ -913,6 +976,7 @@ export const AuctionDetailPage = () => {
                 {/* Chat input form */}
                 <form onSubmit={handleSendChatMessage} className="flex gap-2 pt-2 border-t border-slate-200">
                   <input
+                    id="live-chat-input-box"
                     type="text"
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
