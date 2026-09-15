@@ -59,6 +59,9 @@ pool.connect(async (err, client, release) => {
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS commission_amount NUMERIC(12,2) DEFAULT 0.00;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS commission_calculated BOOLEAN DEFAULT FALSE;
 
+      ALTER TABLE auctions DROP CONSTRAINT IF EXISTS auctions_status_check;
+      ALTER TABLE auctions ADD CONSTRAINT auctions_status_check CHECK (status IN ('ACTIVE', 'CLOSED', 'RESTRICTED'));
+
       CREATE TABLE IF NOT EXISTS commission_proofs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id UUID REFERENCES users(id) ON DELETE CASCADE,

@@ -65,6 +65,8 @@ export const AuctionCard = ({ auction }) => {
             className={`w-2 h-2 rounded-full ${
               isEnded
                 ? 'bg-slate-400'
+                : auction.status === 'RESTRICTED'
+                ? 'bg-amber-400 animate-pulse'
                 : isUrgent
                 ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b] animate-ping'
                 : 'bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse'
@@ -74,12 +76,14 @@ export const AuctionCard = ({ auction }) => {
             className={
               isEnded
                 ? 'text-slate-300'
+                : auction.status === 'RESTRICTED'
+                ? 'text-amber-300 font-bold'
                 : isUrgent
                 ? 'text-amber-300'
                 : 'text-emerald-300'
             }
           >
-            {isEnded ? 'CLOSED' : isUrgent ? 'ENDING SOON' : 'LIVE'}
+            {isEnded ? 'CLOSED' : auction.status === 'RESTRICTED' ? 'RESTRICTED' : isUrgent ? 'ENDING SOON' : 'LIVE'}
           </span>
         </div>
 

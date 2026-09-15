@@ -91,6 +91,8 @@ export const adminApi = {
   getUsers: (search) => api.get('/admin/users', { params: { search } }),
   updateRole: (id, role) => api.put(`/admin/users/${id}/role`, { role }),
   deleteAuction: (id) => api.delete(`/admin/auctions/${id}`),
+  updateAuctionStatus: (id, status, reason) =>
+    api.put(`/admin/auctions/${id}/status`, { status, reason }),
   getProofs: (status) => api.get('/admin/commission-proofs', { params: { status } }),
   updateProofStatus: (id, status, notes) =>
     api.put(`/admin/commission-proofs/${id}/status`, { status, admin_notes: notes }),

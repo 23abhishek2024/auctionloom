@@ -15,8 +15,9 @@ router.get('/revenue-chart', adminController.getRevenueChart);
 router.get('/users', adminController.getAllUsers);
 router.put('/users/:id/role', adminController.updateUserRole);
 
-// Auction moderation
+// Auction moderation & restriction
 router.delete('/auctions/:id', adminController.forceDeleteAuction);
+router.put('/auctions/:id/status', adminController.updateAuctionStatus);
 
 // Commission proofs management
 router.get('/commission-proofs', adminController.getAllPaymentProofs);

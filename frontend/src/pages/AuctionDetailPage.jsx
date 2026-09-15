@@ -29,6 +29,9 @@ import {
   ExternalLink,
   Trash2,
   ShieldAlert,
+  Pause,
+  Play,
+  AlertTriangle,
 } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
@@ -50,6 +53,7 @@ export const AuctionDetailPage = () => {
   const [isEnded, setIsEnded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [restricting, setRestricting] = useState(false);
 
   // Tabs: 'bids' or 'chat' (Socket.IO Video 33)
   const [activeTab, setActiveTab] = useState('bids');
@@ -182,10 +186,26 @@ export const AuctionDetailPage = () => {
       }
     };
 
+    // Socket event handler for AUCTION_STATUS_CHANGED (Moderation Restriction / Hold)
+    const handleStatusChanged = (data) => {
+      console.log('[Socket] Live AUCTION_STATUS_CHANGED received:', data);
+      if (data.auction_id === id) {
+        setAuction((prev) => (prev ? { ...prev, status: data.status } : prev));
+        if (data.status === 'RESTRICTED') {
+          setError(`⚠️ Administrative Notice: ${data.reason || 'This auction is now restricted by platform moderation.'}`);
+        } else if (data.status === 'ACTIVE') {
+          setSuccessMsg('✅ Administrative hold lifted. Bidding is now active!');
+          setError(null);
+          setTimeout(() => setSuccessMsg(null), 4000);
+        }
+      }
+    };
+
     if (socket) {
       socket.on('PRICE_UPDATE', handlePriceUpdate);
       socket.on('CHAT_MESSAGE', handleChatMessage);
       socket.on('REACTION', handleReaction);
+      socket.on('AUCTION_STATUS_CHANGED', handleStatusChanged);
     }
 
     return () => {
@@ -193,6 +213,7 @@ export const AuctionDetailPage = () => {
         socket.off('PRICE_UPDATE', handlePriceUpdate);
         socket.off('CHAT_MESSAGE', handleChatMessage);
         socket.off('REACTION', handleReaction);
+        socket.off('AUCTION_STATUS_CHANGED', handleStatusChanged);
       }
       leaveAuction(id);
     };
@@ -244,6 +265,11 @@ export const AuctionDetailPage = () => {
       return;
     }
 
+    if (auction?.status === 'RESTRICTED') {
+      setError('This auction has been placed under administrative restriction. Bidding is temporarily frozen.');
+      return;
+    }
+
     const numAmount = parseFloat(bidAmount);
     if (isNaN(numAmount) || numAmount <= parseFloat(auction.current_price)) {
       setError(`Bid must be strictly higher than $${auction.current_price}`);
@@ -282,6 +308,11 @@ export const AuctionDetailPage = () => {
       return;
     }
 
+    if (auction?.status === 'RESTRICTED') {
+      setError('This auction has been placed under administrative restriction. Bidding is temporarily frozen.');
+      return;
+    }
+
     const current = parseFloat(auction?.current_price || 0);
     const targetAmount = parseFloat((current + inc).toFixed(2));
 
@@ -309,6 +340,39 @@ export const AuctionDetailPage = () => {
     const current = parseFloat(auction?.current_price || 0);
     setBidAmount((current + inc).toFixed(2));
     setError(null);
+  };
+
+  // Super Admin Restrict / Resume Auction Toggle
+  const handleAdminToggleRestrict = async () => {
+    if (!auction) return;
+    const isRestricted = auction.status === 'RESTRICTED';
+    const targetStatus = isRestricted ? 'ACTIVE' : 'RESTRICTED';
+    const actionLabel = isRestricted
+      ? 'lift restriction and resume bidding'
+      : 'place under administrative restriction (freeze bidding)';
+
+    const confirmMsg = window.confirm(
+      `🚨 SUPER ADMIN MODERATION ACTION:\n\nAre you sure you want to ${actionLabel} for "${auction.title}"?`
+    );
+    if (!confirmMsg) return;
+
+    try {
+      setRestricting(true);
+      setError(null);
+      const res = await adminApi.updateAuctionStatus(id, targetStatus);
+      setAuction(res.data.auction);
+      setSuccessMsg(
+        targetStatus === 'RESTRICTED'
+          ? '⚠️ Auction placed under administrative restriction. Bidding is frozen.'
+          : '✅ Administrative restriction lifted. Bidding is now active!'
+      );
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err) {
+      console.error('Failed to update auction status:', err);
+      setError(err.response?.data?.error || 'Failed to update auction status.');
+    } finally {
+      setRestricting(false);
+    }
   };
 
   // Super Admin Force Delete Auction from Detail Page
@@ -455,17 +519,44 @@ export const AuctionDetailPage = () => {
 
         <div className="flex items-center gap-2.5">
           {isAdmin && (
-            <button
-              type="button"
-              onClick={handleAdminDeleteAuction}
-              disabled={deleting}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-mono font-bold transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-50"
-              title="Super Admin: Permanently Delete Auction"
-              id="btn-top-admin-delete"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-              <span>{deleting ? 'Deleting...' : 'Delete Auction (Admin)'}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleAdminToggleRestrict}
+                disabled={restricting}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-mono font-bold transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-50 border ${
+                  auction?.status === 'RESTRICTED'
+                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                    : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
+                }`}
+                title={auction?.status === 'RESTRICTED' ? 'Resume Bidding' : 'Freeze / Restrict Bidding'}
+                id="btn-top-admin-restrict"
+              >
+                {auction?.status === 'RESTRICTED' ? (
+                  <>
+                    <Play className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>{restricting ? 'Resuming...' : 'Resume Auction'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Pause className="w-3.5 h-3.5 text-amber-600" />
+                    <span>{restricting ? 'Restricting...' : 'Restrict Auction'}</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAdminDeleteAuction}
+                disabled={deleting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-mono font-bold transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-50"
+                title="Super Admin: Permanently Delete Auction"
+                id="btn-top-admin-delete"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>{deleting ? 'Deleting...' : 'Delete (Admin)'}</span>
+              </button>
+            </div>
           )}
 
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-xs font-mono shadow-sm">
@@ -492,10 +583,16 @@ export const AuctionDetailPage = () => {
                 className={`px-3 py-1 rounded-full text-xs font-mono font-medium border ${
                   isEnded
                     ? 'bg-slate-100 text-slate-500 border-slate-200'
+                    : auction.status === 'RESTRICTED'
+                    ? 'bg-amber-100 text-amber-900 border-amber-300 shadow-sm'
                     : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'
                 }`}
               >
-                {isEnded ? 'AUCTION CLOSED' : 'ACTIVE BIDDING'}
+                {isEnded
+                  ? 'AUCTION CLOSED'
+                  : auction.status === 'RESTRICTED'
+                  ? '⚠️ RESTRICTED / ON HOLD'
+                  : 'ACTIVE BIDDING'}
               </span>
 
               <div className="text-xs text-slate-500 font-mono">
@@ -1170,6 +1267,19 @@ export const AuctionDetailPage = () => {
                   </button>
                 )}
               </div>
+            ) : auction?.status === 'RESTRICTED' && !isAdmin ? (
+              <div className="p-5 rounded-2xl bg-amber-50 border-2 border-amber-300 text-center space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-amber-900 font-mono">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <span>AUCTION RESTRICTED UNDER REVIEW</span>
+                </div>
+                <p className="text-xs text-amber-800 font-mono leading-relaxed">
+                  This auction lot has been placed on administrative hold by platform moderation. Bidding is temporarily frozen pending compliance review.
+                </p>
+                <div className="inline-flex items-center gap-1 px-2.5 py-1 bg-white rounded-full border border-amber-200 text-[10px] font-mono text-amber-800 font-semibold shadow-xs">
+                  Bidding Frozen
+                </div>
+              </div>
             ) : isAdmin ? (
               <div className="p-5 rounded-2xl bg-indigo-50/90 border border-indigo-200 text-center space-y-3.5 shadow-sm">
                 <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-indigo-900 font-mono">
@@ -1185,7 +1295,7 @@ export const AuctionDetailPage = () => {
                 </div>
 
                 {/* ── Super Admin Emergency Moderation ── */}
-                <div className="pt-3.5 border-t border-indigo-200/80 space-y-2.5 text-left">
+                <div className="pt-3.5 border-t border-indigo-200/80 space-y-2 text-left">
                   <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-800">
                     <span className="flex items-center gap-1.5 text-rose-700">
                       <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
@@ -1195,6 +1305,31 @@ export const AuctionDetailPage = () => {
                       Super Admin
                     </span>
                   </div>
+
+                  {/* Restrict / Resume Action */}
+                  <button
+                    type="button"
+                    onClick={handleAdminToggleRestrict}
+                    disabled={restricting}
+                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-mono font-bold flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50 border ${
+                      auction?.status === 'RESTRICTED'
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
+                        : 'bg-amber-500 hover:bg-amber-600 text-white border-amber-500'
+                    }`}
+                    id="btn-sidebar-admin-restrict"
+                  >
+                    {auction?.status === 'RESTRICTED' ? (
+                      <>
+                        <Play className="w-4 h-4" />
+                        <span>{restricting ? 'Resuming...' : 'Lift Restriction & Resume'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Pause className="w-4 h-4" />
+                        <span>{restricting ? 'Restricting...' : 'Restrict / Freeze Bidding'}</span>
+                      </>
+                    )}
+                  </button>
 
                   <button
                     type="button"

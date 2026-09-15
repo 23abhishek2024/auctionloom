@@ -1,5 +1,7 @@
 const pool = require('../db');
+const auctionModel = require('../models/auctionModel');
 const { isUUID } = require('../utils/validators');
+const { getIO } = require('../services/socketService');
 
 /**
  * GET /api/admin/metrics
@@ -231,6 +233,52 @@ const forceDeleteAuction = async (req, res, next) => {
 };
 
 /**
+ * PUT /api/admin/auctions/:id/status
+ * Moderate auction status: RESTRICTED, ACTIVE, CLOSED
+ */
+const updateAuctionStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status, reason } = req.body;
+
+    if (!isUUID(id)) {
+      return res.status(400).json({ error: 'Invalid auction ID format.' });
+    }
+
+    if (!status || !['ACTIVE', 'CLOSED', 'RESTRICTED'].includes(status.toUpperCase())) {
+      return res.status(400).json({
+        error: "Status must be one of 'ACTIVE', 'CLOSED', or 'RESTRICTED'.",
+      });
+    }
+
+    const normalizedStatus = status.toUpperCase();
+    const updated = await auctionModel.updateStatus(id, normalizedStatus);
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Auction not found.' });
+    }
+
+    // Real-time broadcast to room so all clients update live
+    try {
+      const io = getIO();
+      io.to(id).emit('AUCTION_STATUS_CHANGED', {
+        auction_id: id,
+        status: normalizedStatus,
+        reason: reason || (normalizedStatus === 'RESTRICTED' ? 'Administrative hold applied.' : 'Restriction lifted.'),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (_) {}
+
+    res.json({
+      message: `Auction status successfully updated to ${normalizedStatus}.`,
+      auction: updated,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * GET /api/admin/commission-proofs
  * Returns payment proofs filtered by status (PENDING, APPROVED, REJECTED)
  */
@@ -340,6 +388,7 @@ module.exports = {
   getAllUsers,
   updateUserRole,
   forceDeleteAuction,
+  updateAuctionStatus,
   getAllPaymentProofs,
   updatePaymentProofStatus,
 };

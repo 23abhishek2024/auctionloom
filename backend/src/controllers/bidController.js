@@ -55,6 +55,12 @@ const placeBid = async (req, res, next) => {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Auction not found.' });
     }
+    if (auction.status === 'RESTRICTED') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'This auction has been placed under administrative restriction. Bidding is temporarily frozen.',
+      });
+    }
     if (auction.status !== 'ACTIVE') {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'This auction is no longer active.' });

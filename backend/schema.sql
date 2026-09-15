@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS auctions (
     start_time            TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     end_time              TIMESTAMP WITH TIME ZONE NOT NULL,
     category              VARCHAR(100) DEFAULT 'General',
-    status                VARCHAR(50) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'CLOSED')),
+    status                VARCHAR(50) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'CLOSED', 'RESTRICTED')),
     winner_id             UUID REFERENCES users(id) ON DELETE SET NULL,
     image_url             TEXT,
     republished_at        TIMESTAMP WITH TIME ZONE,

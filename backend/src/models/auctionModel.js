@@ -9,7 +9,7 @@ const auctionModel = {
     const conditions = [];
     const params = [];
 
-    if (status && (status.toUpperCase() === 'ACTIVE' || status.toUpperCase() === 'CLOSED')) {
+    if (status && ['ACTIVE', 'CLOSED', 'RESTRICTED'].includes(status.toUpperCase())) {
       params.push(status.toUpperCase());
       conditions.push(`a.status = $${params.length}`);
     }
@@ -125,6 +125,17 @@ const auctionModel = {
     const result = await client.query(
       `UPDATE auctions SET status = 'CLOSED', winner_id = $1 WHERE id = $2 RETURNING *`,
       [winnerId, auctionId]
+    );
+    return result.rows[0];
+  },
+
+  /**
+   * Update the status of an auction (ACTIVE, CLOSED, RESTRICTED)
+   */
+  updateStatus: async (auctionId, newStatus) => {
+    const result = await pool.query(
+      'UPDATE auctions SET status = $1 WHERE id = $2 RETURNING *',
+      [newStatus, auctionId]
     );
     return result.rows[0];
   },

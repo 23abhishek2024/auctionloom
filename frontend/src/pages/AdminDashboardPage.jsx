@@ -18,6 +18,8 @@ import {
   X,
   ExternalLink,
   Lock,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -114,6 +116,27 @@ export const AdminDashboardPage = () => {
       await fetchAllAdminData();
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to delete auction');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Restrict / Resume Auction Toggle
+  const handleToggleAuctionStatus = async (auctionId, currentStatus, title) => {
+    const isRestricted = currentStatus === 'RESTRICTED';
+    const targetStatus = isRestricted ? 'ACTIVE' : 'RESTRICTED';
+    const actionLabel = isRestricted ? 'lift restriction & resume bidding' : 'place under administrative restriction (freeze bidding)';
+
+    if (!window.confirm(`Are you sure you want to ${actionLabel} for "${title}"?`)) {
+      return;
+    }
+
+    try {
+      setActionLoading(true);
+      await adminApi.updateAuctionStatus(auctionId, targetStatus);
+      await fetchAllAdminData();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to update auction status');
     } finally {
       setActionLoading(false);
     }
@@ -575,6 +598,8 @@ export const AdminDashboardPage = () => {
                         className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold font-mono ${
                           auc.status === 'ACTIVE'
                             ? 'bg-emerald-100 text-emerald-800'
+                            : auc.status === 'RESTRICTED'
+                            ? 'bg-amber-100 text-amber-800 border border-amber-300'
                             : 'bg-slate-100 text-slate-600'
                         }`}
                       >
@@ -585,14 +610,28 @@ export const AdminDashboardPage = () => {
                       {new Date(auc.end_time).toLocaleString()}
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => handleForceDeleteAuction(auc.id, auc.title)}
-                        disabled={actionLoading}
-                        className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors active:scale-95"
-                        title="Force Delete Auction"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => handleToggleAuctionStatus(auc.id, auc.status, auc.title)}
+                          disabled={actionLoading}
+                          className={`p-1.5 rounded-lg border transition-colors active:scale-95 cursor-pointer ${
+                            auc.status === 'RESTRICTED'
+                              ? 'text-emerald-600 hover:bg-emerald-50 border-emerald-200'
+                              : 'text-amber-600 hover:bg-amber-50 border-amber-200'
+                          }`}
+                          title={auc.status === 'RESTRICTED' ? 'Lift Restriction & Resume' : 'Restrict Auction (Freeze Bids)'}
+                        >
+                          {auc.status === 'RESTRICTED' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => handleForceDeleteAuction(auc.id, auc.title)}
+                          disabled={actionLoading}
+                          className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors active:scale-95 cursor-pointer"
+                          title="Force Delete Auction"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

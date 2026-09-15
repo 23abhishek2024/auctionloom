@@ -253,6 +253,26 @@ async function runVerification() {
   }, adminToken);
   assert('Phase 4', 'Admin bidding blocked by marketplace neutrality policy (403 Forbidden)', adminBidRes.status === 403);
 
+  // Admin Restriction Moderation Test
+  const restrictRes = await request('PUT', `/api/admin/auctions/${auctionId}/status`, {
+    status: 'RESTRICTED',
+    reason: 'Suspicious bidding pattern detected for compliance review.',
+  }, adminToken);
+  assert('Phase 4', 'Admin can place auction under RESTRICTED status (200 OK)', restrictRes.status === 200 && restrictRes.data.auction.status === 'RESTRICTED');
+
+  // Attempting to bid on restricted auction is rejected
+  const bidOnRestricted = await request('POST', '/api/bids', {
+    auction_id: auctionId,
+    amount: 550.00,
+  }, bidderToken);
+  assert('Phase 4', 'Bidding on RESTRICTED auction blocked by platform moderation (403 Forbidden)', bidOnRestricted.status === 403);
+
+  // Admin resumes auction
+  const resumeRes = await request('PUT', `/api/admin/auctions/${auctionId}/status`, {
+    status: 'ACTIVE',
+  }, adminToken);
+  assert('Phase 4', 'Admin can lift restriction and resume auction (200 OK)', resumeRes.status === 200 && resumeRes.data.auction.status === 'ACTIVE');
+
   // Bid below or equal to starting/current price rejection
   const lowBidRes = await request('POST', '/api/bids', {
     auction_id: auctionId,
