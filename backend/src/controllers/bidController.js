@@ -12,25 +12,36 @@ const { isUUID, isPositiveNumber } = require('../utils/validators');
  * to ensure no two bids can win the same auction simultaneously.
  */
 const placeBid = async (req, res, next) => {
-  const client = await pool.connect(); // Get a dedicated client for the transaction
+  const auctionId = req.params.id || req.body.auction_id;
+  const { amount } = req.body;
+
+  // ── 1. MARKETPLACE INTEGRITY CHECK ───────────────────────────
+  // Platform administrators are strictly forbidden from bidding to prevent
+  // conflicts of interest, shill bidding, and preserve marketplace trust.
+  if (req.user && req.user.role === 'admin') {
+    return res.status(403).json({
+      error: 'Platform administrators are restricted from placing bids to preserve marketplace integrity.',
+    });
+  }
+
+  // ── 2. INPUT VALIDATION (prior to pool connection) ───────────
+  if (!auctionId || amount === undefined || amount === null || amount === '') {
+    return res.status(400).json({ error: 'auction_id and amount are required.' });
+  }
+
+  if (!isUUID(auctionId)) {
+    return res.status(400).json({ error: 'Invalid auction ID format. Must be a valid UUID.' });
+  }
+
+  if (!isPositiveNumber(amount)) {
+    return res.status(400).json({ error: 'amount must be a positive number greater than 0.' });
+  }
+
+  const numericAmount = parseFloat(amount);
+  let client;
 
   try {
-    const auctionId = req.params.id || req.body.auction_id;
-    const { amount } = req.body;
-
-    if (!auctionId || amount === undefined || amount === null || amount === '') {
-      return res.status(400).json({ error: 'auction_id and amount are required.' });
-    }
-
-    if (!isUUID(auctionId)) {
-      return res.status(400).json({ error: 'Invalid auction ID format. Must be a valid UUID.' });
-    }
-
-    if (!isPositiveNumber(amount)) {
-      return res.status(400).json({ error: 'amount must be a positive number greater than 0.' });
-    }
-
-    const numericAmount = parseFloat(amount);
+    client = await pool.connect(); // Get a dedicated client for the transaction
 
     // ── BEGIN TRANSACTION ───────────────────────────────────────
     await client.query('BEGIN');
@@ -86,10 +97,14 @@ const placeBid = async (req, res, next) => {
 
     res.status(201).json({ bid: newBid });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+    }
     next(err);
   } finally {
-    client.release(); // Always release the client back to the pool
+    if (client) client.release(); // Always release the client back to the pool
   }
 };
 

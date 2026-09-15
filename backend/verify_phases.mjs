@@ -3,6 +3,7 @@ import http from 'http';
 import { io } from 'socket.io-client';
 import pg from 'pg';
 import fs from 'fs';
+import jwt from 'jsonwebtoken';
 
 const { Pool } = pg;
 
@@ -240,6 +241,17 @@ async function runVerification() {
     amount: 550.00,
   }, sellerToken);
   assert('Phase 4', 'Self-bidding blocked (seller cannot bid on own auction -> 400 Bad Request)', selfBidRes.status === 400);
+
+  // Admin bidding restriction (Marketplace Neutrality Policy)
+  const adminToken = jwt.sign(
+    { id: '11111111-1111-1111-1111-111111111111', email: 'admin@auctionloom.com', role: 'admin' },
+    process.env.JWT_SECRET || 'your-secret-key-min-32-chars-long!!'
+  );
+  const adminBidRes = await request('POST', '/api/bids', {
+    auction_id: auctionId,
+    amount: 550.00,
+  }, adminToken);
+  assert('Phase 4', 'Admin bidding blocked by marketplace neutrality policy (403 Forbidden)', adminBidRes.status === 403);
 
   // Bid below or equal to starting/current price rejection
   const lowBidRes = await request('POST', '/api/bids', {

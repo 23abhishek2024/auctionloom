@@ -236,6 +236,11 @@ export const AuctionDetailPage = () => {
       return;
     }
 
+    if (user?.role === 'admin') {
+      setError('Platform administrators are restricted from placing bids to preserve marketplace integrity.');
+      return;
+    }
+
     const numAmount = parseFloat(bidAmount);
     if (isNaN(numAmount) || numAmount <= parseFloat(auction.current_price)) {
       setError(`Bid must be strictly higher than $${auction.current_price}`);
@@ -266,6 +271,11 @@ export const AuctionDetailPage = () => {
   const handleInstantBid = async (inc) => {
     if (!isAuthenticated) {
       navigate('/login', { state: { from: `/auctions/${id}` } });
+      return;
+    }
+
+    if (user?.role === 'admin') {
+      setError('Platform administrators are restricted from placing bids to preserve marketplace integrity.');
       return;
     }
 
@@ -335,6 +345,7 @@ export const AuctionDetailPage = () => {
 
   // Derived state (calculated unconditionally before early returns)
   const isSeller = user?.id === auction?.seller_id;
+  const isAdmin = user?.role === 'admin';
   const highestBid = bids && bids.length > 0 ? bids[0] : null;
   const winnerName = auction?.winner_name
     ? formatDisplayName(auction.winner_name, auction.winner_email)
@@ -1073,6 +1084,20 @@ export const AuctionDetailPage = () => {
                 <p className="text-xs text-amber-800 font-mono">
                   You are the seller of this auction. Self-bidding is blocked by backend concurrency rules.
                 </p>
+              </div>
+            ) : isAdmin ? (
+              <div className="p-4 rounded-2xl bg-indigo-50/90 border border-indigo-200 text-center space-y-2 shadow-xs">
+                <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-indigo-900 font-mono">
+                  <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                  <span>PLATFORM NEUTRALITY POLICY</span>
+                </div>
+                <p className="text-xs text-indigo-700 font-mono leading-relaxed">
+                  Administrator accounts are restricted from placing bids to preserve marketplace integrity, prevent conflicts of interest, and protect buyer trust.
+                </p>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white rounded-full border border-indigo-200 text-[10px] font-mono text-indigo-800 font-semibold shadow-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Auditor Mode Active
+                </div>
               </div>
             ) : (
               <form onSubmit={handlePlaceBid} className="space-y-4">
