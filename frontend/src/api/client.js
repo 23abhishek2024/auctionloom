@@ -110,6 +110,12 @@ export const aiApi = {
   generate: (data) => api.post('/ai/generate', data, { timeout: 35000 }),
 };
 
+export const paymentApi = {
+  createOrder: (data) => api.post('/payments/razorpay/create-order', data),
+  verifyPayment: (data) => api.post('/payments/razorpay/verify', data),
+  getMyHistory: () => api.get('/payments/my-history'),
+};
+
 export const uploadApi = {
   uploadImage: (file) => {
     const formData = new FormData();

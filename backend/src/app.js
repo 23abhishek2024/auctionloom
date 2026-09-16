@@ -16,6 +16,7 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const commissionRoutes = require('./routes/commissionRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 const { getLeaderboard } = require('./controllers/userController');
 const path = require('path');
 
@@ -46,6 +47,7 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/commissions', commissionRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Public leaderboard endpoint aliases
 app.get('/api/analytics/leaderboard', getLeaderboard);
@@ -69,6 +71,7 @@ app.get('/', (req, res) => {
       leaderboard: '/api/leaderboard',
       admin: '/api/admin',
       commissions: '/api/commissions',
+      payments: '/api/payments',
       ai: '/api/ai/generate',
       upload: '/api/upload',
     },

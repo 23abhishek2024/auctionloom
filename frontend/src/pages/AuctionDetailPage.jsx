@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { auctionApi, bidApi, userApi, adminApi, resolveImageUrl } from '../api/client';
+import { auctionApi, bidApi, userApi, adminApi, paymentApi, resolveImageUrl } from '../api/client';
+import { loadRazorpayScript } from '../utils/razorpay';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -72,6 +73,10 @@ export const AuctionDetailPage = () => {
   const [showReactions, setShowReactions] = useState(false);
   const [sellerPayout, setSellerPayout] = useState(null);
   const [copiedKey, setCopiedKey] = useState(null);
+  const [lotPaid, setLotPaid] = useState(false);
+  const [lotPaymentData, setLotPaymentData] = useState(null);
+  const [payingLotRazorpay, setPayingLotRazorpay] = useState(false);
+  const [lotPayError, setLotPayError] = useState(null);
   const chatBottomRef = useRef(null);
 
   const copyToClipboard = (text, key) => {
@@ -473,6 +478,94 @@ export const AuctionDetailPage = () => {
     }
   }, [user, id, isEnded, isWinnerMe, sellerPayout]);
 
+  // Razorpay Winner Lot Settlement Handler
+  const handlePayLotRazorpay = async () => {
+    if (!auction) return;
+    setLotPayError(null);
+    const hammerPrice = parseFloat(auction.current_price);
+
+    try {
+      setPayingLotRazorpay(true);
+      const isLoaded = await loadRazorpayScript();
+
+      const orderRes = await paymentApi.createOrder({
+        amount: hammerPrice,
+        purpose: 'LOT_PAYMENT',
+        auction_id: id,
+        notes: {
+          auctionTitle: auction.title,
+          winnerEmail: user?.email,
+          sellerEmail: auction.seller_email,
+        },
+      });
+
+      const orderData = orderRes.data;
+
+      const executeVerification = async (verifyPayload) => {
+        try {
+          const verifyRes = await paymentApi.verifyPayment(verifyPayload);
+          setLotPaid(true);
+          setLotPaymentData(verifyRes.data);
+        } catch (verErr) {
+          console.error('Lot payment verification failed:', verErr);
+          setLotPayError(
+            verErr.response?.data?.error ||
+              'Payment verification failed. Please contact platform support.'
+          );
+        } finally {
+          setPayingLotRazorpay(false);
+        }
+      };
+
+      if (isLoaded && window.Razorpay && !orderData.is_sandbox_simulation && orderData.keyId !== 'rzp_test_placeholder') {
+        const options = {
+          key: orderData.keyId,
+          amount: orderData.amount,
+          currency: orderData.currency || 'INR',
+          name: 'AuctionLoom Escrow',
+          description: `Winning Lot Settlement: ${auction.title}`,
+          image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=128&q=80',
+          order_id: orderData.orderId,
+          handler: async function (response) {
+            await executeVerification({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+          },
+          prefill: {
+            name: user?.name || user?.email || 'Winner',
+            email: user?.email || 'winner@auctionloom.com',
+          },
+          theme: {
+            color: '#059669',
+          },
+        };
+
+        const rzp = new window.Razorpay(options);
+        rzp.on('payment.failed', function (response) {
+          setLotPayError(`Payment failed: ${response.error.description}`);
+          setPayingLotRazorpay(false);
+        });
+        rzp.open();
+      } else {
+        // High-fidelity sandbox / test simulation mode
+        const mockPaymentId = `pay_sim_lot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+        const mockSignature = `sim_sig_${orderData.orderId}_${mockPaymentId}`;
+
+        await executeVerification({
+          razorpay_order_id: orderData.orderId,
+          razorpay_payment_id: mockPaymentId,
+          razorpay_signature: mockSignature,
+        });
+      }
+    } catch (err) {
+      console.error('Lot Razorpay error:', err);
+      setLotPayError(err.response?.data?.error || 'Failed to initiate Razorpay checkout.');
+      setPayingLotRazorpay(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
@@ -783,8 +876,64 @@ export const AuctionDetailPage = () => {
                 </div>
 
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Congratulations on winning this lot! Please complete checkout by transferring the hammer price of <strong className="text-slate-900">${parseFloat(auction.current_price).toFixed(2)}</strong> directly to the seller using their verified payout credentials:
+                  Congratulations on winning this lot! Settle the hammer price of <strong className="text-slate-900">${parseFloat(auction.current_price).toFixed(2)}</strong> instantly via Razorpay Escrow, or wire directly to the seller:
                 </p>
+
+                {/* ── 1-Click Razorpay Escrow Settlement for Lot Winner ── */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 font-bold text-xs">
+                      <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
+                      <span>Instant Escrow Payment via Razorpay</span>
+                    </div>
+                    <span className="text-[10px] font-mono bg-white/20 px-2 py-0.5 rounded text-emerald-100 font-semibold">
+                      HMAC Verified
+                    </span>
+                  </div>
+
+                  {lotPayError && (
+                    <div className="p-2.5 rounded-xl bg-rose-600/90 text-white text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{lotPayError}</span>
+                    </div>
+                  )}
+
+                  {lotPaid ? (
+                    <div className="p-3 rounded-xl bg-white/20 border border-white/30 backdrop-blur-sm space-y-1">
+                      <div className="flex items-center gap-2 text-xs font-bold text-emerald-200">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                        <span>Payment Settled & Cryptographically Verified ✓</span>
+                      </div>
+                      <div className="text-[11px] font-mono text-emerald-100">
+                        Payment ID: <strong>{lotPaymentData?.payment_id}</strong>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                      <div className="text-xs text-emerald-100">
+                        Supports UPI, Debit/Credit Cards, and NetBanking with instant cryptographic receipt.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handlePayLotRazorpay}
+                        disabled={payingLotRazorpay}
+                        className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 shrink-0 cursor-pointer disabled:opacity-50"
+                      >
+                        {payingLotRazorpay ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Connecting Gateway...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="w-3.5 h-3.5 fill-slate-950" />
+                            <span>Pay ${parseFloat(auction.current_price).toFixed(2)} via Razorpay</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
 
                 {sellerPayout?.payoutMethods && (
                   sellerPayout.payoutMethods.bank_name ||

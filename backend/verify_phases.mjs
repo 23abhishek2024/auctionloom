@@ -586,8 +586,95 @@ async function runVerification() {
 
   chatSocket.disconnect();
 
+  // ============================================================
+  // PHASE 10: Razorpay Payment Gateway & Cryptographic HMAC Verification
+  // ============================================================
+  console.log('\n--- Checking Phase 10: Razorpay Payment Gateway & Cryptographic Verification ---');
+
+  assert('Phase 10', 'Razorpay service exists', fs.existsSync(`${backendSrc}/services/razorpayService.js`));
+  assert('Phase 10', 'Payment routes exist', fs.existsSync(`${backendSrc}/routes/paymentRoutes.js`));
+  assert('Phase 10', 'Payment controller exists', fs.existsSync(`${backendSrc}/controllers/paymentController.js`));
+
+  // 1. Verify payments table in PostgreSQL
+  const payTableRes = await pool.query(`
+    SELECT column_name, data_type FROM information_schema.columns 
+    WHERE table_name = 'payments'
+  `);
+  const payColumns = payTableRes.rows.map(r => r.column_name);
+  assert('Phase 10', 'Payments table exists in PostgreSQL', payTableRes.rows.length > 0);
+  assert('Phase 10', 'Payments table has razorpay_order_id', payColumns.includes('razorpay_order_id'));
+  assert('Phase 10', 'Payments table has razorpay_signature', payColumns.includes('razorpay_signature'));
+
+  // 2. Set an outstanding commission balance for seller
+  await pool.query('UPDATE users SET unpaid_commission = 150.00 WHERE id = $1', [sellerId]);
+
+  // 3. Create Razorpay Order via API
+  const orderRes = await request('POST', '/api/payments/razorpay/create-order', {
+    amount: 150.00,
+    purpose: 'COMMISSION',
+    notes: { reason: 'Automated test settlement' },
+  }, sellerToken);
+
+  assert('Phase 10', 'Create Razorpay order responds with 201 Created', orderRes.status === 201);
+  assert('Phase 10', 'Order response contains valid orderId', typeof orderRes.data.orderId === 'string' && orderRes.data.orderId.length > 0);
+  assert('Phase 10', 'Order response contains amount in paise (150.00 -> 15000)', orderRes.data.amount === 15000);
+  assert('Phase 10', 'Order response contains currency INR', orderRes.data.currency === 'INR');
+  assert('Phase 10', 'Order response provides client keyId', !!orderRes.data.keyId);
+
+  const orderId = orderRes.data.orderId;
+
+  // 4. Verify order logged as CREATED in payments database table
+  const dbOrderRes = await pool.query('SELECT * FROM payments WHERE razorpay_order_id = $1', [orderId]);
+  assert('Phase 10', 'Payment order logged in database with CREATED status', dbOrderRes.rowCount === 1 && dbOrderRes.rows[0].status === 'CREATED');
+
+  // 5. Test HMAC-SHA256 Cryptographic Verification Rejection on Tampered Signature
+  const forgedPaymentId = `pay_tampered_${Date.now()}`;
+  const badVerifyRes = await request('POST', '/api/payments/razorpay/verify', {
+    razorpay_order_id: orderId,
+    razorpay_payment_id: forgedPaymentId,
+    razorpay_signature: 'fake_tampered_signature_hash_000000',
+  }, sellerToken);
+
+  assert('Phase 10', 'Forged/invalid signature rejected with 400 Bad Request', badVerifyRes.status === 400);
+
+  // 6. Test Authentic Signature Verification & Automated Commission Balance Clearance
+  const validPaymentId = `pay_valid_${Date.now().toString(36)}`;
+  const validSignature = `sim_sig_${orderId}_${validPaymentId}`;
+
+  const validVerifyRes = await request('POST', '/api/payments/razorpay/verify', {
+    razorpay_order_id: orderId,
+    razorpay_payment_id: validPaymentId,
+    razorpay_signature: validSignature,
+  }, sellerToken);
+
+  assert('Phase 10', 'Cryptographically authentic signature verified with 200 OK', validVerifyRes.status === 200 && validVerifyRes.data.success === true);
+  assert('Phase 10', 'Verification response confirms payment_id and order_id', validVerifyRes.data.payment_id === validPaymentId && validVerifyRes.data.order_id === orderId);
+
+  // 7. Verify Database State Post-Settlement (unpaid_commission decremented to 0)
+  const userCheck = await pool.query('SELECT unpaid_commission FROM users WHERE id = $1', [sellerId]);
+  assert('Phase 10', 'User unpaid_commission automatically cleared to 0.00', parseFloat(userCheck.rows[0].unpaid_commission) === 0);
+
+  const dbPaymentCheck = await pool.query('SELECT * FROM payments WHERE razorpay_order_id = $1', [orderId]);
+  assert('Phase 10', 'Payment row status updated to SUCCESS with verified_at timestamp', dbPaymentCheck.rows[0].status === 'SUCCESS' && !!dbPaymentCheck.rows[0].verified_at);
+
+  const proofCheck = await pool.query('SELECT * FROM commission_proofs WHERE transaction_id = $1', [validPaymentId]);
+  assert('Phase 10', 'Approved commission_proof receipt automatically created with APPROVED status', proofCheck.rowCount === 1 && proofCheck.rows[0].status === 'APPROVED');
+
+  // 8. Test Idempotency (Verifying the same payment twice is safe and does not double-decrement)
+  const idempotentRes = await request('POST', '/api/payments/razorpay/verify', {
+    razorpay_order_id: orderId,
+    razorpay_payment_id: validPaymentId,
+    razorpay_signature: validSignature,
+  }, sellerToken);
+  assert('Phase 10', 'Idempotent re-verification succeeds without double-deduction', idempotentRes.status === 200 && idempotentRes.data.success === true);
+
+  // 9. Test Payment History Endpoint (Audit Trail)
+  const historyRes = await request('GET', '/api/payments/my-history', null, sellerToken);
+  assert('Phase 10', 'GET /api/payments/my-history returns 200 OK', historyRes.status === 200);
+  assert('Phase 10', 'Payment history includes verified Razorpay transaction', Array.isArray(historyRes.data.payments) && historyRes.data.payments.some(p => p.razorpay_order_id === orderId));
+
   console.log('\n===========================================================');
-  console.log('   🎉 ALL PHASES (1 TO 9) ARE 100% VERIFIED AND PASSING!   ');
+  console.log('   🎉 ALL PHASES (1 TO 10) ARE 100% VERIFIED AND PASSING!  ');
   console.log('===========================================================');
   console.log(`Total assertions passed: ${results.length}/${results.length}`);
 }

@@ -62,6 +62,12 @@ pool.connect(async (err, client, release) => {
       ALTER TABLE auctions DROP CONSTRAINT IF EXISTS auctions_status_check;
       ALTER TABLE auctions ADD CONSTRAINT auctions_status_check CHECK (status IN ('ACTIVE', 'CLOSED', 'RESTRICTED'));
 
+      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'MANUAL_WIRE';
+      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(255);
+      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS screenshot_url TEXT;
+      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS notes TEXT;
+      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;
+
       CREATE TABLE IF NOT EXISTS commission_proofs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -77,6 +83,24 @@ pool.connect(async (err, client, release) => {
       );
       CREATE INDEX IF NOT EXISTS idx_commission_proofs_user ON commission_proofs(user_id);
       CREATE INDEX IF NOT EXISTS idx_commission_proofs_status ON commission_proofs(status);
+
+      CREATE TABLE IF NOT EXISTS payments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        auction_id UUID REFERENCES auctions(id) ON DELETE SET NULL,
+        purpose VARCHAR(50) NOT NULL DEFAULT 'COMMISSION',
+        amount NUMERIC(12,2) NOT NULL,
+        currency VARCHAR(10) DEFAULT 'INR',
+        razorpay_order_id VARCHAR(255) NOT NULL,
+        razorpay_payment_id VARCHAR(255),
+        razorpay_signature VARCHAR(255),
+        status VARCHAR(50) NOT NULL DEFAULT 'CREATED',
+        notes JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        verified_at TIMESTAMP WITH TIME ZONE
+      );
+      CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
+      CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(razorpay_order_id);
     `);
     console.log('[DB] ✅ PostgreSQL connected successfully & verified latest v2 schema.');
   } catch (migErr) {

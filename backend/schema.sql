@@ -99,3 +99,25 @@ CREATE TABLE IF NOT EXISTS commission_proofs (
 CREATE INDEX IF NOT EXISTS idx_commission_proofs_status ON commission_proofs(status);
 CREATE INDEX IF NOT EXISTS idx_commission_proofs_user_id ON commission_proofs(user_id);
 
+-- ============================================================
+-- 6. PAYMENTS (Razorpay Orders & Gateway Audit Trail)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payments (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    auction_id          UUID REFERENCES auctions(id) ON DELETE SET NULL,
+    purpose             VARCHAR(50) NOT NULL DEFAULT 'COMMISSION',
+    amount              DECIMAL(12, 2) NOT NULL,
+    currency            VARCHAR(10) DEFAULT 'INR',
+    razorpay_order_id   VARCHAR(255) NOT NULL,
+    razorpay_payment_id VARCHAR(255),
+    razorpay_signature  VARCHAR(255),
+    status              VARCHAR(50) NOT NULL DEFAULT 'CREATED',
+    notes               JSONB DEFAULT '{}'::jsonb,
+    created_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    verified_at         TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(razorpay_order_id);
+
