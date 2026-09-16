@@ -31,9 +31,15 @@ export const RazorpayModal = ({
   const [cvv, setCvv] = useState('789');
   const [selectedBank, setSelectedBank] = useState('HDFC Bank');
 
-  if (!isOpen || !orderData) return null;
+  if (!isOpen) return null;
 
-  const amountInRupees = orderData.amountInRupees || (orderData.amount ? orderData.amount / 100 : 0);
+  const safeOrder = orderData || {
+    orderId: `order_sim_${Date.now().toString(36)}`,
+    amount: 1500000,
+    amountInRupees: 15000,
+  };
+
+  const amountInRupees = safeOrder.amountInRupees || (safeOrder.amount ? safeOrder.amount / 100 : 0);
   const formattedInr = new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
@@ -44,14 +50,15 @@ export const RazorpayModal = ({
     setProcessing(true);
     setSimulatedFailure(false);
 
-    // Simulate realistic 800ms gateway authorization latency
+    // Simulate realistic 600ms gateway authorization latency
     setTimeout(async () => {
+      const orderId = safeOrder.orderId || `order_sim_${Date.now().toString(36)}`;
       const mockPaymentId = `pay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      const mockSignature = `sim_sig_${orderData.orderId}_${mockPaymentId}`;
+      const mockSignature = `sim_sig_${orderId}_${mockPaymentId}`;
 
       try {
         await onSuccess({
-          razorpay_order_id: orderData.orderId,
+          razorpay_order_id: orderId,
           razorpay_payment_id: mockPaymentId,
           razorpay_signature: mockSignature,
         });
@@ -61,7 +68,7 @@ export const RazorpayModal = ({
         setProcessing(false);
         if (onFailure) onFailure(err);
       }
-    }, 900);
+    }, 600);
   };
 
   const handleSimulateFailure = () => {
@@ -72,11 +79,11 @@ export const RazorpayModal = ({
       if (onFailure) {
         onFailure(new Error('Payment was declined by customer issuing bank (Simulated Error)'));
       }
-    }, 700);
+    }, 600);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div
         className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200/80 transform transition-all animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
