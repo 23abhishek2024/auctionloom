@@ -33,13 +33,15 @@ export const RazorpayModal = ({
 
   if (!isOpen) return null;
 
-  const safeOrder = orderData || {
-    orderId: `order_sim_${Date.now().toString(36)}`,
-    amount: 1500000,
-    amountInRupees: 15000,
+  const safeOrder = {
+    orderId: orderData?.orderId || orderData?.order_id || orderData?.id || `order_sim_${Date.now().toString(36)}`,
+    amount: orderData?.amount || 1500000,
+    amountInRupees: orderData?.amountInRupees || (orderData?.amount ? orderData.amount / 100 : 15000),
+    currency: orderData?.currency || 'INR',
+    keyId: orderData?.keyId || 'rzp_test_placeholder',
   };
 
-  const amountInRupees = safeOrder.amountInRupees || (safeOrder.amount ? safeOrder.amount / 100 : 0);
+  const amountInRupees = safeOrder.amountInRupees;
   const formattedInr = new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
@@ -52,7 +54,7 @@ export const RazorpayModal = ({
 
     // Simulate realistic 600ms gateway authorization latency
     setTimeout(async () => {
-      const orderId = safeOrder.orderId || `order_sim_${Date.now().toString(36)}`;
+      const orderId = safeOrder.orderId;
       const mockPaymentId = `pay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
       const mockSignature = `sim_sig_${orderId}_${mockPaymentId}`;
 
@@ -83,9 +85,12 @@ export const RazorpayModal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md transition-all cursor-pointer"
+    >
       <div
-        className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200/80 transform transition-all animate-in zoom-in-95 duration-200"
+        className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 cursor-default"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Razorpay Authentic Header */}
@@ -108,7 +113,7 @@ export const RazorpayModal = ({
                   AuctionLoom Escrow Treasury
                 </h2>
                 <div className="text-[11px] font-mono text-slate-300">
-                  Order: <span className="text-indigo-200">{orderData.orderId}</span>
+                  Order: <span className="text-indigo-200">{safeOrder.orderId}</span>
                 </div>
               </div>
             </div>

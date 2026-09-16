@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { auctionApi, bidApi, userApi, adminApi, paymentApi, resolveImageUrl } from '../api/client';
-import { loadRazorpayScript } from '../utils/razorpay';
 import { RazorpayModal } from '../components/RazorpayModal';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
@@ -34,6 +33,7 @@ import {
   Pause,
   Play,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
