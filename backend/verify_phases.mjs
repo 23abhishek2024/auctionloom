@@ -587,91 +587,118 @@ async function runVerification() {
   chatSocket.disconnect();
 
   // ============================================================
-  // PHASE 10: Razorpay Payment Gateway & Cryptographic HMAC Verification
+  // PHASE 10: Production-Grade Wallet & Double-Entry Ledger System
   // ============================================================
-  console.log('\n--- Checking Phase 10: Razorpay Payment Gateway & Cryptographic Verification ---');
+  console.log('\n--- Checking Phase 10: Production-Grade Wallet & Double-Entry Ledger System ---');
 
-  assert('Phase 10', 'Razorpay service exists', fs.existsSync(`${backendSrc}/services/razorpayService.js`));
-  assert('Phase 10', 'Payment routes exist', fs.existsSync(`${backendSrc}/routes/paymentRoutes.js`));
-  assert('Phase 10', 'Payment controller exists', fs.existsSync(`${backendSrc}/controllers/paymentController.js`));
-
-  // 1. Verify payments table in PostgreSQL
-  const payTableRes = await pool.query(`
-    SELECT column_name, data_type FROM information_schema.columns 
-    WHERE table_name = 'payments'
+  // 1. Verify schema tables in PostgreSQL
+  const walletTableRes = await pool.query(`
+    SELECT column_name FROM information_schema.columns WHERE table_name = 'wallets'
   `);
-  const payColumns = payTableRes.rows.map(r => r.column_name);
-  assert('Phase 10', 'Payments table exists in PostgreSQL', payTableRes.rows.length > 0);
-  assert('Phase 10', 'Payments table has razorpay_order_id', payColumns.includes('razorpay_order_id'));
-  assert('Phase 10', 'Payments table has razorpay_signature', payColumns.includes('razorpay_signature'));
+  const walletColumns = walletTableRes.rows.map(r => r.column_name);
+  assert('Phase 10', 'Wallets table exists in PostgreSQL', walletTableRes.rows.length > 0);
+  assert('Phase 10', 'Wallets table has balance column', walletColumns.includes('balance'));
+  assert('Phase 10', 'Wallets table has version column for concurrency control', walletColumns.includes('version'));
 
-  // 2. Set an outstanding commission balance for seller
-  await pool.query('UPDATE users SET unpaid_commission = 150.00 WHERE id = $1', [sellerId]);
+  const txTableRes = await pool.query(`
+    SELECT column_name FROM information_schema.columns WHERE table_name = 'wallet_transactions'
+  `);
+  const txColumns = txTableRes.rows.map(r => r.column_name);
+  assert('Phase 10', 'wallet_transactions table exists for double-entry audit', txTableRes.rows.length > 0);
+  assert('Phase 10', 'wallet_transactions has idempotency_key column', txColumns.includes('idempotency_key'));
+  assert('Phase 10', 'wallet_transactions has balance_after column', txColumns.includes('balance_after'));
 
-  // 3. Create Razorpay Order via API
-  const orderRes = await request('POST', '/api/payments/razorpay/create-order', {
-    amount: 150.00,
-    purpose: 'COMMISSION',
-    notes: { reason: 'Automated test settlement' },
+  const payReqRes = await pool.query(`
+    SELECT column_name FROM information_schema.columns WHERE table_name = 'payment_requests'
+  `);
+  assert('Phase 10', 'payment_requests table exists for gateway abstraction', payReqRes.rows.length > 0);
+
+  // 2. Test GET /api/wallet
+  const initialWalletRes = await request('GET', '/api/wallet', null, bidderToken);
+  assert('Phase 10', 'GET /api/wallet returns 200 OK', initialWalletRes.status === 200);
+  assert('Phase 10', 'Wallet response includes wallet object with balance', typeof initialWalletRes.data?.data?.wallet?.balance === 'number');
+  assert('Phase 10', 'Wallet response includes transactions array', Array.isArray(initialWalletRes.data?.data?.transactions));
+
+  const startBalance = initialWalletRes.data.data.wallet.balance;
+
+  // 3. Test Top-Up Endpoint (POST /api/wallet/topup)
+  const topupRes = await request('POST', '/api/wallet/topup', {
+    amount: 500.00,
+    note: 'Automated test deposit',
+  }, bidderToken);
+  assert('Phase 10', 'POST /api/wallet/topup returns 200 OK', topupRes.status === 200);
+  assert('Phase 10', 'Top-up increments wallet balance by $500.00', parseFloat(topupRes.data?.data?.wallet?.balance) === Math.round((startBalance + 500.00) * 100) / 100);
+  assert('Phase 10', 'Top-up generates a completed TOPUP transaction record', topupRes.data?.data?.transaction?.type === 'TOPUP');
+
+  // 4. Test Overdraft Protection
+  const hugeAmount = topupRes.data.data.wallet.balance + 1000000;
+  const expensiveAucRes = await pool.query(
+    `INSERT INTO auctions (seller_id, title, starting_price, current_price, end_time, status, winner_id)
+     VALUES ($1, 'Mega Lot', $2, $2, NOW() - INTERVAL '1 hour', 'CLOSED', $3)
+     RETURNING *`,
+    [sellerId, hugeAmount, bidderId]
+  );
+  const expensiveAucId = expensiveAucRes.rows[0].id;
+
+  const overdraftRes = await request('POST', '/api/wallet/settle-lot', {
+    auctionId: expensiveAucId,
+  }, bidderToken);
+  assert('Phase 10', 'Overdraft attempt rejected with 400 Bad Request', overdraftRes.status === 400);
+  assert('Phase 10', 'Overdraft rejection provides INSUFFICIENT_FUNDS error code', overdraftRes.data?.code === 'INSUFFICIENT_FUNDS');
+
+  // 5. Test Atomic Escrow Lot Settlement (Winner -> Seller + Commission)
+  const settleAmount = 100.00;
+  const testAucRes = await pool.query(
+    `INSERT INTO auctions (seller_id, title, starting_price, current_price, end_time, status, winner_id)
+     VALUES ($1, 'Fine Art Lot', $2, $2, NOW() - INTERVAL '1 hour', 'CLOSED', $3)
+     RETURNING *`,
+    [sellerId, settleAmount, bidderId]
+  );
+  const testAucId = testAucRes.rows[0].id;
+
+  // Record seller and bidder start balances
+  const sellerWalletBefore = await request('GET', '/api/wallet', null, sellerToken);
+  const sellerStartBalance = sellerWalletBefore.data.data.wallet.balance;
+  const bidderWalletBefore = await request('GET', '/api/wallet', null, bidderToken);
+  const bidderStartBalance = bidderWalletBefore.data.data.wallet.balance;
+
+  const settleRes = await request('POST', '/api/wallet/settle-lot', {
+    auctionId: testAucId,
+  }, bidderToken);
+
+  assert('Phase 10', 'POST /api/wallet/settle-lot returns 200 OK', settleRes.status === 200);
+  assert('Phase 10', 'Settlement calculates 5% platform commission ($5.00 on $100.00)', settleRes.data?.data?.commission === 5.00);
+  assert('Phase 10', 'Settlement pays seller net amount ($95.00 on $100.00)', settleRes.data?.data?.sellerPayout === 95.00);
+
+  // 6. Verify Database Balances Post-Settlement
+  const bidderWalletAfter = await request('GET', '/api/wallet', null, bidderToken);
+  assert('Phase 10', 'Winner balance decremented by exactly hammer price ($100.00)', bidderWalletAfter.data.data.wallet.balance === Math.round((bidderStartBalance - 100.00) * 100) / 100);
+
+  const sellerWalletAfter = await request('GET', '/api/wallet', null, sellerToken);
+  assert('Phase 10', 'Seller balance credited by exactly net payout ($95.00)', sellerWalletAfter.data.data.wallet.balance === Math.round((sellerStartBalance + 95.00) * 100) / 100);
+
+  // 7. Verify Idempotency (settling the same auction again does not double-deduct)
+  const duplicateSettleRes = await request('POST', '/api/wallet/settle-lot', {
+    auctionId: testAucId,
+  }, bidderToken);
+  assert('Phase 10', 'Idempotent re-settlement returns 200 OK without double-deduction', duplicateSettleRes.status === 200);
+
+  const bidderWalletIdempotent = await request('GET', '/api/wallet', null, bidderToken);
+  assert('Phase 10', 'Idempotency invariant maintained (balance remained unchanged)', bidderWalletIdempotent.data.data.wallet.balance === bidderWalletAfter.data.data.wallet.balance);
+
+  // 8. Test Commission Settlement from Wallet (POST /api/wallet/settle-commission)
+  await pool.query('UPDATE users SET unpaid_commission = 50.00 WHERE id = $1', [sellerId]);
+  const commSettleRes = await request('POST', '/api/wallet/settle-commission', {
+    amount: 50.00,
   }, sellerToken);
+  assert('Phase 10', 'POST /api/wallet/settle-commission returns 200 OK', commSettleRes.status === 200);
+  assert('Phase 10', 'Seller unpaid_commission cleared to 0.00', commSettleRes.data?.data?.remainingUnpaid === 0);
 
-  assert('Phase 10', 'Create Razorpay order responds with 201 Created', orderRes.status === 201);
-  assert('Phase 10', 'Order response contains valid orderId', typeof orderRes.data.orderId === 'string' && orderRes.data.orderId.length > 0);
-  assert('Phase 10', 'Order response contains amount in paise (150.00 -> 15000)', orderRes.data.amount === 15000);
-  assert('Phase 10', 'Order response contains currency INR', orderRes.data.currency === 'INR');
-  assert('Phase 10', 'Order response provides client keyId', !!orderRes.data.keyId);
-
-  const orderId = orderRes.data.orderId;
-
-  // 4. Verify order logged as CREATED in payments database table
-  const dbOrderRes = await pool.query('SELECT * FROM payments WHERE razorpay_order_id = $1', [orderId]);
-  assert('Phase 10', 'Payment order logged in database with CREATED status', dbOrderRes.rowCount === 1 && dbOrderRes.rows[0].status === 'CREATED');
-
-  // 5. Test HMAC-SHA256 Cryptographic Verification Rejection on Tampered Signature
-  const forgedPaymentId = `pay_tampered_${Date.now()}`;
-  const badVerifyRes = await request('POST', '/api/payments/razorpay/verify', {
-    razorpay_order_id: orderId,
-    razorpay_payment_id: forgedPaymentId,
-    razorpay_signature: 'fake_tampered_signature_hash_000000',
-  }, sellerToken);
-
-  assert('Phase 10', 'Forged/invalid signature rejected with 400 Bad Request', badVerifyRes.status === 400);
-
-  // 6. Test Authentic Signature Verification & Automated Commission Balance Clearance
-  const validPaymentId = `pay_valid_${Date.now().toString(36)}`;
-  const validSignature = `sim_sig_${orderId}_${validPaymentId}`;
-
-  const validVerifyRes = await request('POST', '/api/payments/razorpay/verify', {
-    razorpay_order_id: orderId,
-    razorpay_payment_id: validPaymentId,
-    razorpay_signature: validSignature,
-  }, sellerToken);
-
-  assert('Phase 10', 'Cryptographically authentic signature verified with 200 OK', validVerifyRes.status === 200 && validVerifyRes.data.success === true);
-  assert('Phase 10', 'Verification response confirms payment_id and order_id', validVerifyRes.data.payment_id === validPaymentId && validVerifyRes.data.order_id === orderId);
-
-  // 7. Verify Database State Post-Settlement (unpaid_commission decremented to 0)
-  const userCheck = await pool.query('SELECT unpaid_commission FROM users WHERE id = $1', [sellerId]);
-  assert('Phase 10', 'User unpaid_commission automatically cleared to 0.00', parseFloat(userCheck.rows[0].unpaid_commission) === 0);
-
-  const dbPaymentCheck = await pool.query('SELECT * FROM payments WHERE razorpay_order_id = $1', [orderId]);
-  assert('Phase 10', 'Payment row status updated to SUCCESS with verified_at timestamp', dbPaymentCheck.rows[0].status === 'SUCCESS' && !!dbPaymentCheck.rows[0].verified_at);
-
-  const proofCheck = await pool.query('SELECT * FROM commission_proofs WHERE transaction_id = $1', [validPaymentId]);
-  assert('Phase 10', 'Approved commission_proof receipt automatically created with APPROVED status', proofCheck.rowCount === 1 && proofCheck.rows[0].status === 'APPROVED');
-
-  // 8. Test Idempotency (Verifying the same payment twice is safe and does not double-decrement)
-  const idempotentRes = await request('POST', '/api/payments/razorpay/verify', {
-    razorpay_order_id: orderId,
-    razorpay_payment_id: validPaymentId,
-    razorpay_signature: validSignature,
-  }, sellerToken);
-  assert('Phase 10', 'Idempotent re-verification succeeds without double-deduction', idempotentRes.status === 200 && idempotentRes.data.success === true);
-
-  // 9. Test Payment History Endpoint (Audit Trail)
-  const historyRes = await request('GET', '/api/payments/my-history', null, sellerToken);
-  assert('Phase 10', 'GET /api/payments/my-history returns 200 OK', historyRes.status === 200);
-  assert('Phase 10', 'Payment history includes verified Razorpay transaction', Array.isArray(historyRes.data.payments) && historyRes.data.payments.some(p => p.razorpay_order_id === orderId));
+  // 9. Verify Ledger History Audit Integrity
+  const finalLedgerRes = await request('GET', '/api/wallet', null, bidderToken);
+  const txs = finalLedgerRes.data?.data?.transactions;
+  assert('Phase 10', 'Double-entry ledger contains immutable audit records', Array.isArray(txs) && txs.length >= 2);
+  assert('Phase 10', 'Ledger tracks balance_after snapshot on every transaction', txs.every(t => typeof t.balanceAfter === 'number'));
 
   console.log('\n===========================================================');
   console.log('   🎉 ALL PHASES (1 TO 10) ARE 100% VERIFIED AND PASSING!  ');

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import { auctionApi, bidApi, userApi, adminApi, paymentApi, resolveImageUrl } from '../api/client';
-import { RazorpayModal } from '../components/RazorpayModal';
+import { useParams, useNavigate } from 'react-router-dom';
+import { auctionApi, bidApi, userApi, adminApi, walletApi, resolveImageUrl } from '../api/client';
+import { TopupModal } from '../components/TopupModal';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -10,6 +10,7 @@ import {
   TrendingUp,
   History,
   ShieldCheck,
+  Wallet,
   AlertCircle,
   CheckCircle2,
   ArrowLeft,
@@ -73,14 +74,56 @@ export const AuctionDetailPage = () => {
   const [activeReactions, setActiveReactions] = useState([]);
   const [showReactions, setShowReactions] = useState(false);
   const [sellerPayout, setSellerPayout] = useState(null);
-  const [copiedKey, setCopiedKey] = useState(null);
   const [lotPaid, setLotPaid] = useState(false);
   const [lotPaymentData, setLotPaymentData] = useState(null);
-  const [payingLotRazorpay, setPayingLotRazorpay] = useState(false);
-  const [lotPayError, setLotPayError] = useState(null);
-  const [checkoutOrder, setCheckoutOrder] = useState(null);
-  const [isRazorpayModalOpen, setIsRazorpayModalOpen] = useState(false);
   const chatBottomRef = useRef(null);
+
+  // Wallet & Settlement States
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [isTopupModalOpen, setIsTopupModalOpen] = useState(false);
+  const [topupDiffAmount, setTopupDiffAmount] = useState(1000);
+  const [settlingLot, setSettlingLot] = useState(false);
+  const [settleSuccess, setSettleSuccess] = useState(null);
+  const [settleError, setSettleError] = useState(null);
+
+  const fetchWallet = async () => {
+    if (!isAuthenticated) return;
+    try {
+      const res = await walletApi.getWallet();
+      if (res.data?.data?.wallet) {
+        setWalletBalance(parseFloat(res.data.data.wallet.balance || 0));
+      }
+    } catch (err) {
+      console.warn('Could not load wallet:', err.message);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchWallet();
+    }
+    const handleUpdate = () => fetchWallet();
+    window.addEventListener('wallet_updated', handleUpdate);
+    return () => window.removeEventListener('wallet_updated', handleUpdate);
+  }, [isAuthenticated]);
+
+  const handleSettleLot = async () => {
+    try {
+      setSettlingLot(true);
+      setSettleError(null);
+      const res = await walletApi.settleLot({ auctionId: id });
+      setSettleSuccess(res.data?.data || res.data?.message || 'Lot successfully settled from wallet!');
+      setLotPaid(true);
+      setLotPaymentData(res.data?.data);
+      await fetchWallet();
+      window.dispatchEvent(new Event('wallet_updated'));
+    } catch (err) {
+      console.error('Settlement error:', err);
+      setSettleError(err.response?.data?.error || 'Failed to settle lot from wallet.');
+    } finally {
+      setSettlingLot(false);
+    }
+  };
 
   const copyToClipboard = (text, key) => {
     if (!text) return;
@@ -481,101 +524,7 @@ export const AuctionDetailPage = () => {
     }
   }, [user, id, isEnded, isWinnerMe, sellerPayout]);
 
-  useEffect(() => {
-    if (user && id && isWinnerMe) {
-      paymentApi.getMyHistory()
-        .then((res) => {
-          const match = res.data?.payments?.find(
-            (p) => p.auction_id === id && p.purpose === 'LOT_PAYMENT' && p.status === 'SUCCESS'
-          );
-          if (match) {
-            setLotPaid(true);
-            setLotPaymentData({
-              payment_id: match.razorpay_payment_id || match.id,
-              order_id: match.razorpay_order_id,
-            });
-          }
-        })
-        .catch(() => {});
-    }
-  }, [user, id, isWinnerMe]);
 
-  // Execute cryptographic signature verification with backend
-  const executeLotVerification = async (verifyPayload) => {
-    try {
-      setPayingLotRazorpay(true);
-      const verifyRes = await paymentApi.verifyPayment(verifyPayload);
-      setLotPaid(true);
-      setLotPayError(null);
-      setLotPaymentData(verifyRes.data);
-      setSuccessMsg('✅ Payment successfully settled and cryptographically verified via Razorpay!');
-      setTimeout(() => setSuccessMsg(null), 5000);
-      return verifyRes.data;
-    } catch (verErr) {
-      console.warn('Backend payment verification fallback:', verErr);
-      // Ensure smooth demo completion if backend is offline or network drops
-      const fallbackPayment = {
-        payment_id: verifyPayload.razorpay_payment_id || `pay_sim_${Date.now().toString(36)}`,
-        order_id: verifyPayload.razorpay_order_id,
-        is_simulated: true,
-      };
-      setLotPaid(true);
-      setLotPayError(null);
-      setLotPaymentData(fallbackPayment);
-      setSuccessMsg('✅ Payment settled and verified (Sandbox mode)!');
-      setTimeout(() => setSuccessMsg(null), 5000);
-      return fallbackPayment;
-    } finally {
-      setPayingLotRazorpay(false);
-    }
-  };
-
-  // Razorpay Winner Lot Settlement Handler
-  const handlePayLotRazorpay = async () => {
-    if (!auction) return;
-
-    if (!isAuthenticated || !user) {
-      alert('Please log in as the winning bidder to settle payment for this lot.');
-      navigate('/login', { state: { from: `/auctions/${id}` } });
-      return;
-    }
-
-    setLotPayError(null);
-    setPayingLotRazorpay(true);
-    const hammerPrice = parseFloat(auction.current_price);
-
-    try {
-      const orderRes = await paymentApi.createOrder({
-        amount: hammerPrice,
-        purpose: 'LOT_PAYMENT',
-        auction_id: id,
-        notes: {
-          auctionTitle: auction.title,
-          winnerEmail: user?.email,
-          sellerEmail: auction.seller_email,
-        },
-      });
-
-      const orderData = orderRes.data;
-      setCheckoutOrder(orderData);
-      setIsRazorpayModalOpen(true);
-    } catch (err) {
-      console.warn('Backend createOrder error, using instant fallback order:', err);
-      // Guaranteed instant fallback order so modal opens 100% of the time with zero delay
-      const fallbackOrder = {
-        orderId: `order_sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
-        amount: Math.round(hammerPrice * 100),
-        amountInRupees: hammerPrice,
-        currency: 'INR',
-        keyId: 'rzp_test_placeholder',
-        purpose: 'LOT_PAYMENT',
-      };
-      setCheckoutOrder(fallbackOrder);
-      setIsRazorpayModalOpen(true);
-    } finally {
-      setPayingLotRazorpay(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -873,6 +822,113 @@ export const AuctionDetailPage = () => {
               )}
             </div>
 
+            {/* ── 1-CLICK DOUBLE-ENTRY WALLET ESCROW SETTLEMENT CONSOLE ── */}
+            {isWinnerMe && (
+              <div className="rounded-3xl p-6 bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 text-white shadow-xl border border-indigo-700/50 relative overflow-hidden space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-400/30">
+                      <Wallet className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                        <span>Platform Escrow Wallet Settlement</span>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono uppercase font-bold border border-emerald-400/30">
+                          Instant
+                        </span>
+                      </h3>
+                      <p className="text-xs text-indigo-200/80">
+                        Settle the hammer price directly using your platform wallet with zero banking delay.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Settle Success Alert */}
+                {(settleSuccess || lotPaid) && (
+                  <div className="p-4 rounded-2xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-xs flex items-center gap-3">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <div>
+                      <strong className="font-bold text-white block">Lot Successfully Settled via Platform Escrow!</strong>
+                      <span>Hammer price of ${parseFloat(auction.current_price).toFixed(2)} transferred to seller. Platform commission recorded.</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Settle Error Alert */}
+                {settleError && (
+                  <div className="p-4 rounded-2xl bg-rose-950/80 border border-rose-500/50 text-rose-200 text-xs flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+                    <span>{settleError}</span>
+                  </div>
+                )}
+
+                {/* Balance vs Hammer Price Overview */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="p-3.5 rounded-2xl bg-white/10 border border-white/15">
+                    <span className="text-[11px] font-mono text-indigo-200 uppercase font-semibold block">Your Wallet Balance</span>
+                    <span className="text-xl font-extrabold font-mono text-emerald-400">
+                      ${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-white/10 border border-white/15">
+                    <span className="text-[11px] font-mono text-indigo-200 uppercase font-semibold block">Hammer Price to Settle</span>
+                    <span className="text-xl font-extrabold font-mono text-white">
+                      ${parseFloat(auction.current_price).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                {!settleSuccess && !lotPaid && (
+                  <div>
+                    {walletBalance >= parseFloat(auction.current_price) ? (
+                      <button
+                        type="button"
+                        onClick={handleSettleLot}
+                        disabled={settlingLot}
+                        className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-sm shadow-lg shadow-emerald-500/25 transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        {settlingLot ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                            <span>Executing Atomic Settlement...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="w-4 h-4 fill-slate-950" />
+                            <span>⚡ Settle Lot from Wallet (${parseFloat(auction.current_price).toFixed(2)})</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="text-xs text-amber-300 flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl font-mono">
+                          <AlertTriangle className="w-4 h-4 shrink-0" />
+                          <span>
+                            Insufficient wallet balance. You need $
+                            {(parseFloat(auction.current_price) - walletBalance).toFixed(2)} more to complete this settlement.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const diff = Math.ceil(parseFloat(auction.current_price) - walletBalance);
+                            setTopupDiffAmount(diff > 0 ? diff : 1000);
+                            setIsTopupModalOpen(true);
+                          }}
+                          className="w-full py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm shadow-md transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Wallet className="w-4 h-4" />
+                          <span>Top Up Wallet Now (+${Math.max(1, Math.ceil(parseFloat(auction.current_price) - walletBalance)).toLocaleString()})</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Seller Payout Coordinates for Winning Bidder */}
             {isWinnerMe && (
               <div className="rounded-3xl p-6 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-400 shadow-lg animate-fade-in space-y-4">
@@ -887,64 +943,10 @@ export const AuctionDetailPage = () => {
                 </div>
 
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Congratulations on winning this lot! Settle the hammer price of <strong className="text-slate-900">${parseFloat(auction.current_price).toFixed(2)}</strong> instantly via Razorpay Escrow, or wire directly to the seller:
+                  Congratulations on winning this lot! Settle the hammer price of <strong className="text-slate-900">${parseFloat(auction.current_price).toFixed(2)}</strong> directly to the seller using their payment coordinates below:
                 </p>
 
-                {/* ── 1-Click Razorpay Escrow Settlement for Lot Winner ── */}
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 font-bold text-xs">
-                      <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
-                      <span>Instant Escrow Payment via Razorpay</span>
-                    </div>
-                    <span className="text-[10px] font-mono bg-white/20 px-2 py-0.5 rounded text-emerald-100 font-semibold">
-                      HMAC Verified
-                    </span>
-                  </div>
 
-                  {!lotPaid && lotPayError && (
-                    <div className="p-2.5 rounded-xl bg-rose-600/90 text-white text-xs flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                      <span>{lotPayError}</span>
-                    </div>
-                  )}
-
-                  {lotPaid ? (
-                    <div className="p-3 rounded-xl bg-white/20 border border-white/30 backdrop-blur-sm space-y-1">
-                      <div className="flex items-center gap-2 text-xs font-bold text-emerald-200">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                        <span>Payment Settled & Cryptographically Verified ✓</span>
-                      </div>
-                      <div className="text-[11px] font-mono text-emerald-100">
-                        Payment ID: <strong>{lotPaymentData?.payment_id}</strong>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
-                      <div className="text-xs text-emerald-100">
-                        Supports UPI, Debit/Credit Cards, and NetBanking with instant cryptographic receipt.
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handlePayLotRazorpay}
-                        disabled={payingLotRazorpay}
-                        className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 shrink-0 cursor-pointer disabled:opacity-50"
-                      >
-                        {payingLotRazorpay ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Connecting Gateway...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Zap className="w-3.5 h-3.5 fill-slate-950" />
-                            <span>Pay ${parseFloat(auction.current_price).toFixed(2)} via Razorpay</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-                </div>
 
                 {sellerPayout?.payoutMethods && (
                   sellerPayout.payoutMethods.bank_name ||
@@ -1620,15 +1622,19 @@ export const AuctionDetailPage = () => {
 
       </div>
 
-      {/* Interactive Razorpay Checkout Modal (UPI, Cards, NetBanking) */}
-      <RazorpayModal
-        isOpen={isRazorpayModalOpen}
-        onClose={() => setIsRazorpayModalOpen(false)}
-        orderData={checkoutOrder}
-        onSuccess={executeLotVerification}
-        onFailure={(err) => setLotPayError(err?.message || 'Payment simulation failed')}
-      />
 
+
+      {/* Instant Top-Up Modal */}
+      <TopupModal
+        isOpen={isTopupModalOpen}
+        onClose={() => setIsTopupModalOpen(false)}
+        onSuccess={() => {
+          fetchWallet();
+          window.dispatchEvent(new Event('wallet_updated'));
+        }}
+        initialAmount={topupDiffAmount}
+        currentBalance={walletBalance}
+      />
     </div>
   );
 };

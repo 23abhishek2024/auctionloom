@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { commissionApi, paymentApi, resolveImageUrl } from '../api/client';
-import { loadRazorpayScript } from '../utils/razorpay';
-import { RazorpayModal } from '../components/RazorpayModal';
+import { commissionApi, walletApi, resolveImageUrl } from '../api/client';
+import { TopupModal } from '../components/TopupModal';
 import { useAuth } from '../context/AuthContext';
 import {
   DollarSign,
@@ -15,26 +14,25 @@ import {
   FileText,
   CreditCard,
   RefreshCw,
+  Wallet,
   Zap,
-  Sparkles,
-  ExternalLink,
-  ShieldAlert,
-  Layers,
+  AlertTriangle,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
 
 export const SubmitCommissionPage = () => {
   const { user } = useAuth();
   const [unpaidCommission, setUnpaidCommission] = useState(0);
   const [proofs, setProofs] = useState([]);
-  const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [payingRazorpay, setPayingRazorpay] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
-  const [checkoutOrder, setCheckoutOrder] = useState(null);
-  const [isRazorpayModalOpen, setIsRazorpayModalOpen] = useState(false);
+
+  // Wallet State
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [settlingCommission, setSettlingCommission] = useState(false);
+  const [isTopupModalOpen, setIsTopupModalOpen] = useState(false);
+  const [topupDiffAmount, setTopupDiffAmount] = useState(500);
 
   // Manual Upload Form State
   const [amount, setAmount] = useState('');
@@ -42,27 +40,21 @@ export const SubmitCommissionPage = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-  // Razorpay instant settlement amount state
-  const [razorpayAmount, setRazorpayAmount] = useState('');
-
   const fetchCommissionData = async () => {
     try {
       setLoading(true);
-      const [proofsRes, paymentsRes] = await Promise.all([
+      const [proofsRes, walletRes] = await Promise.all([
         commissionApi.getMyProofs(),
-        paymentApi.getMyHistory().catch(() => ({ data: { payments: [] } })),
+        walletApi.getWallet().catch(() => ({ data: { data: { wallet: { balance: 0 } } } })),
       ]);
 
       const unpaid = proofsRes.data.unpaidCommission || 0;
       setUnpaidCommission(unpaid);
       setProofs(proofsRes.data.proofs || []);
-      setPayments(paymentsRes.data?.payments || []);
+      setWalletBalance(parseFloat(walletRes.data?.data?.wallet?.balance || 0));
 
       if (unpaid > 0) {
         setAmount(unpaid.toString());
-        setRazorpayAmount(unpaid.toString());
-      } else {
-        setRazorpayAmount('10.00');
       }
     } catch (err) {
       console.error('Failed to load commission data:', err);
@@ -73,6 +65,9 @@ export const SubmitCommissionPage = () => {
 
   useEffect(() => {
     fetchCommissionData();
+    const handleWalletUpdated = () => fetchCommissionData();
+    window.addEventListener('wallet_updated', handleWalletUpdated);
+    return () => window.removeEventListener('wallet_updated', handleWalletUpdated);
   }, []);
 
   const handleFileChange = (e) => {
@@ -83,73 +78,28 @@ export const SubmitCommissionPage = () => {
     }
   };
 
-  // Execute cryptographic signature verification for commission
-  const executeCommissionVerification = async (verifyPayload) => {
+  // 1-Click Instant Commission Settlement from Wallet
+  const handleSettleFromWallet = async () => {
     try {
-      setPayingRazorpay(true);
-      const verifyRes = await paymentApi.verifyPayment(verifyPayload);
+      setSettlingCommission(true);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      const res = await walletApi.settleCommission({ amount: unpaidCommission });
       setSuccessMessage(
-        `⚡ Instant Settlement Success! Payment ID: ${verifyRes.data.payment_id}. Your unpaid balance was cleared automatically.`
+        `⚡ Commission Cleared! Successfully settled $${parseFloat(res.data?.data?.paidAmount || unpaidCommission).toFixed(2)} from your platform wallet.`
       );
-      setUnpaidCommission(verifyRes.data.unpaid_commission || 0);
+      window.dispatchEvent(new Event('wallet_updated'));
       await fetchCommissionData();
-      return verifyRes.data;
-    } catch (verErr) {
-      console.error('Verification failed:', verErr);
-      const msg = verErr.response?.data?.error || 'Payment signature verification failed. Please contact platform support.';
-      setErrorMessage(msg);
-      throw new Error(msg);
-    } finally {
-      setPayingRazorpay(false);
-    }
-  };
-
-  // ── 1. Razorpay 1-Click Instant Settlement (Zero Admin Wait) ──
-  const handleRazorpaySettlement = async () => {
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    const payVal = parseFloat(razorpayAmount);
-    if (isNaN(payVal) || payVal <= 0) {
-      setErrorMessage('Please enter a valid amount to settle via Razorpay.');
-      return;
-    }
-
-    try {
-      setPayingRazorpay(true);
-
-      // Create order on AuctionLoom Backend
-      const orderRes = await paymentApi.createOrder({
-        amount: payVal,
-        purpose: 'COMMISSION',
-        notes: {
-          userEmail: user?.email,
-          reason: 'Commission settlement',
-        },
-      });
-
-      const orderData = orderRes.data;
-      setCheckoutOrder(orderData);
-      setIsRazorpayModalOpen(true);
     } catch (err) {
-      console.warn('Backend commission createOrder error, launching interactive modal with fallback order:', err);
-      // Fallback sandbox order so modal opens 100% of the time with zero delay
-      const fallbackOrder = {
-        orderId: `order_sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
-        amount: Math.round(payVal * 100),
-        amountInRupees: payVal,
-        currency: 'INR',
-        keyId: 'rzp_test_placeholder',
-        purpose: 'COMMISSION',
-      };
-      setCheckoutOrder(fallbackOrder);
-      setIsRazorpayModalOpen(true);
+      console.error('Failed to settle commission from wallet:', err);
+      setErrorMessage(err.response?.data?.error || 'Failed to settle commission from wallet.');
     } finally {
-      setPayingRazorpay(false);
+      setSettlingCommission(false);
     }
   };
 
-  // ── 2. Manual Upload Receipt Proof ──────────────────────────
+  // Manual Upload Receipt Proof
   const handleSubmitProof = async (e) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -217,7 +167,7 @@ export const SubmitCommissionPage = () => {
 
       {/* Balance Status Banner */}
       <div
-        className={`rounded-3xl p-6 sm:p-8 mb-10 border shadow-lg relative overflow-hidden flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 ${
+        className={`rounded-3xl p-6 sm:p-8 mb-8 border shadow-lg relative overflow-hidden flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 ${
           unpaidCommission > 0
             ? 'bg-gradient-to-r from-rose-50 to-orange-50 border-rose-200'
             : 'bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200'
@@ -236,7 +186,7 @@ export const SubmitCommissionPage = () => {
           </div>
           <p className="text-xs text-slate-600 mt-1 max-w-xl">
             {unpaidCommission > 0
-              ? 'You have an outstanding commission balance. Use the instant 1-Click Razorpay gateway below for instant automatic clearance, or upload a manual wire receipt.'
+              ? 'You have an outstanding commission balance. Settle instantly using your platform wallet balance below, or submit a wire/UPI receipt.'
               : 'Your account is in excellent standing. You have zero pending platform fees and are free to list unlimited auctions!'}
           </p>
         </div>
@@ -252,94 +202,83 @@ export const SubmitCommissionPage = () => {
         )}
       </div>
 
-      {/* ── RECOMMENDED: Instant 1-Click Razorpay Settlement Gateway ── */}
-      <div className="mb-12 rounded-3xl bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 text-white p-6 sm:p-8 shadow-2xl relative overflow-hidden border border-indigo-700/50">
-        <div className="absolute -top-16 -right-16 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-16 -left-16 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="relative z-10">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/30 border border-indigo-400/30 text-indigo-200 text-xs font-mono font-semibold">
-              <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" /> Instant 1-Click Clearance (Zero Waiting Time)
+      {/* ── 1-CLICK INSTANT WALLET SETTLEMENT CONSOLE ── */}
+      {unpaidCommission > 0 && (
+        <div className="mb-10 rounded-3xl bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 text-white p-6 sm:p-8 shadow-2xl border border-indigo-700/50 relative overflow-hidden space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-400/30">
+                <Wallet className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <span>1-Click Platform Wallet Settlement</span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold uppercase border border-emerald-400/30">
+                    Instant Clearance
+                  </span>
+                </h2>
+                <p className="text-xs text-indigo-200/80">
+                  Deduct platform fee directly from your platform balance with zero administrator waiting time.
+                </p>
+              </div>
             </div>
-            <div className="inline-flex items-center gap-1.5 text-xs text-indigo-200 font-mono">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Cryptographic HMAC-SHA256 Verified</span>
+
+            <div className="text-right font-mono">
+              <span className="text-[10px] uppercase font-bold text-indigo-300 block">Available Balance</span>
+              <span className="text-lg font-extrabold text-emerald-400">
+                ${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-center">
-            <div className="lg:col-span-2 space-y-3">
-              <h2 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-                Pay via Razorpay Payment Gateway
-              </h2>
-              <p className="text-xs sm:text-sm text-indigo-100/80 leading-relaxed max-w-xl">
-                Settle your platform fees instantly using <strong>UPI (Google Pay, PhonePe, Paytm), Debit/Credit Cards, or NetBanking</strong>. 
-                Our backend automatically verifies Razorpay's cryptographic signature and clears your account balance immediately without waiting for manual administrator review.
-              </p>
-
-              {/* Supported payment badges */}
-              <div className="flex flex-wrap items-center gap-2 pt-2">
-                <span className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/15 text-[11px] font-mono font-medium text-indigo-200">
-                  ⚡ Instant UPI
-                </span>
-                <span className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/15 text-[11px] font-mono font-medium text-indigo-200">
-                  💳 Visa / Mastercard / RuPay
-                </span>
-                <span className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/15 text-[11px] font-mono font-medium text-indigo-200">
-                  🏛️ 50+ NetBanking Banks
-                </span>
-              </div>
-            </div>
-
-            {/* Pay Action Card */}
-            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/20 space-y-4 shadow-xl">
-              <div>
-                <label className="block text-[11px] font-mono uppercase tracking-wider text-indigo-200 mb-1 font-semibold">
-                  Amount to Settle (USD)
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono font-bold text-indigo-300">$</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="1"
-                    value={razorpayAmount}
-                    onChange={(e) => setRazorpayAmount(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full pl-8 pr-3 py-2 rounded-xl bg-white/20 border border-white/30 text-white font-mono font-bold text-base placeholder-indigo-300 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                  />
-                </div>
-              </div>
-
+          <div className="pt-2">
+            {walletBalance >= unpaidCommission ? (
               <button
                 type="button"
-                onClick={handleRazorpaySettlement}
-                disabled={payingRazorpay}
-                className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm shadow-lg shadow-emerald-500/30 transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                onClick={handleSettleFromWallet}
+                disabled={settlingCommission}
+                className="w-full sm:w-auto py-3.5 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-sm shadow-lg shadow-emerald-500/25 transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                {payingRazorpay ? (
+                {settlingCommission ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
-                    <span>Processing Secure Gateway...</span>
+                    <span>Settling from Wallet...</span>
                   </>
                 ) : (
                   <>
                     <Zap className="w-4 h-4 fill-slate-950" />
-                    <span>Pay ${parseFloat(razorpayAmount || 0).toFixed(2)} via Razorpay</span>
+                    <span>⚡ Pay ${unpaidCommission.toFixed(2)} from Wallet Balance</span>
                   </>
                 )}
               </button>
-
-              <div className="text-[10px] text-center text-indigo-200/70 font-mono">
-                Supports live Razorpay checkout + simulated sandbox for offline testing
+            ) : (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+                <div className="flex items-center gap-2.5 text-xs text-amber-200 font-mono">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    Your wallet has ${walletBalance.toFixed(2)}. You need $
+                    {(unpaidCommission - walletBalance).toFixed(2)} more to clear your fee.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const diff = Math.ceil(unpaidCommission - walletBalance);
+                    setTopupDiffAmount(diff > 0 ? diff : 500);
+                    setIsTopupModalOpen(true);
+                  }}
+                  className="py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition-all active:scale-[0.99] flex items-center gap-2 cursor-pointer shrink-0"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  <span>Top Up Wallet (+${Math.max(1, Math.ceil(unpaidCommission - walletBalance)).toLocaleString()})</span>
+                </button>
               </div>
-            </div>
+            )}
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Payment Coordinates & Upload Form Grid (Legacy Manual Option) */}
+      {/* Payment Coordinates & Upload Form Grid (Manual Option) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
         {/* Platform Payment Coordinates */}
         <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 space-y-6">
@@ -398,60 +337,57 @@ export const SubmitCommissionPage = () => {
 
         {/* Upload Proof Form */}
         <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8">
-          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-2">
-            <Upload className="w-5 h-5 text-indigo-600" /> Manual Bank Wire / Screenshot Upload
+          <h2 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2">
+            <Upload className="w-5 h-5 text-indigo-600" /> Submit Wire / UPI Receipt
           </h2>
           <p className="text-xs text-slate-500 mb-6">
-            Attach a screenshot or PDF receipt of your manual wire. Administrators will inspect and approve your receipt.
+            Upload your payment transaction confirmation or screenshot for admin approval.
           </p>
 
           <form onSubmit={handleSubmitProof} className="space-y-4">
-            {/* Amount */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Amount Paid (USD)
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Amount Paid ($ USD) <span className="text-rose-500">*</span>
               </label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400">$</span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-slate-400 font-bold">$</span>
                 <input
                   type="number"
                   step="0.01"
-                  min="1"
+                  min="0.01"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0.00"
+                  className="w-full pl-8 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   required
-                  className="w-full pl-8 pr-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
                 />
               </div>
             </div>
 
-            {/* Note / Transaction Ref */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Transaction Reference / Comment
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Transaction Notes / Reference UTR
               </label>
               <input
                 type="text"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder="e.g. Wire Ref # 1234567890 / Auction Commission"
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
+                placeholder="e.g. UTR 423984920492 / IMPS wire sent from Chase"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
 
-            {/* Receipt Screenshot Upload */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Transfer Receipt Screenshot
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Proof Screenshot / Receipt <span className="text-rose-500">*</span>
               </label>
-              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-4 text-center hover:border-indigo-400 transition-colors bg-slate-50/50">
+              <div className="border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-2xl p-4 text-center transition-colors cursor-pointer bg-slate-50/50">
                 {previewUrl ? (
                   <div className="space-y-2">
                     <img
                       src={previewUrl}
                       alt="Preview"
-                      className="max-h-36 mx-auto rounded-lg border border-slate-200 object-contain shadow-sm"
+                      className="max-h-40 mx-auto rounded-lg object-contain shadow-sm border border-slate-200"
                     />
                     <button
                       type="button"
@@ -459,20 +395,18 @@ export const SubmitCommissionPage = () => {
                         setSelectedFile(null);
                         setPreviewUrl(null);
                       }}
-                      className="text-xs text-rose-600 hover:underline font-medium cursor-pointer"
+                      className="text-xs text-rose-600 font-semibold hover:underline"
                     >
-                      Change File
+                      Remove & choose another file
                     </button>
                   </div>
                 ) : (
                   <label className="cursor-pointer block py-4">
-                    <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                    <span className="text-xs font-bold text-indigo-600 hover:underline block">
+                    <Upload className="w-8 h-8 mx-auto text-slate-400 mb-2" />
+                    <span className="text-xs font-semibold text-indigo-600 hover:underline">
                       Click to upload receipt image
                     </span>
-                    <span className="text-[11px] text-slate-400 font-mono block mt-1">
-                      PNG, JPG, WEBP up to 5MB
-                    </span>
+                    <p className="text-[11px] text-slate-400 mt-1">PNG, JPG, or WEBP up to 5MB</p>
                     <input
                       type="file"
                       accept="image/*"
@@ -502,73 +436,16 @@ export const SubmitCommissionPage = () => {
         </div>
       </div>
 
-      {/* ── Razorpay Gateway Transaction Receipts Audit Table ── */}
-      {payments.length > 0 && (
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 mb-10">
-          <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <Zap className="w-5 h-5 text-emerald-600" /> Verified Razorpay Gateway Transactions
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
-                  <th className="py-3 px-4">Order ID</th>
-                  <th className="py-3 px-4">Payment ID</th>
-                  <th className="py-3 px-4">Purpose</th>
-                  <th className="py-3 px-4">Amount</th>
-                  <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {payments.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50/70">
-                    <td className="py-3 px-4 font-mono text-xs text-slate-700">
-                      {p.razorpay_order_id}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-xs text-indigo-600 font-semibold">
-                      {p.razorpay_payment_id || '—'}
-                    </td>
-                    <td className="py-3 px-4 text-xs font-semibold text-slate-600">
-                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100">
-                        {p.purpose}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 font-bold font-mono text-emerald-600">
-                      ${parseFloat(p.amount).toFixed(2)}
-                    </td>
-                    <td className="py-3 px-4 text-xs font-mono text-slate-500">
-                      {new Date(p.created_at).toLocaleString()}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold font-mono ${
-                          p.status === 'SUCCESS'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {p.status === 'SUCCESS' ? 'VERIFIED ✓' : p.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       {/* Manual Proof History Table */}
       <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8">
         <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-          <FileText className="w-5 h-5 text-indigo-600" /> Manual Payment Proofs History
+          <FileText className="w-5 h-5 text-indigo-600" /> Payment Proofs History
         </h2>
 
         {proofs.length === 0 ? (
           <div className="py-12 text-center text-slate-400">
             <Clock className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-            <p className="text-sm font-semibold text-slate-600">No manual payment receipts submitted yet</p>
+            <p className="text-sm font-semibold text-slate-600">No payment receipts submitted yet</p>
             <p className="text-xs text-slate-400 mt-0.5">Your submitted proofs will appear here with live verification status.</p>
           </div>
         ) : (
@@ -601,8 +478,8 @@ export const SubmitCommissionPage = () => {
                           />
                         </a>
                       ) : (
-                        <div className="w-12 h-12 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center font-bold text-xs">
-                          RZP
+                        <div className="w-12 h-12 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 flex items-center justify-center font-bold text-xs">
+                          PROOF
                         </div>
                       )}
                     </td>
@@ -636,13 +513,16 @@ export const SubmitCommissionPage = () => {
         )}
       </div>
 
-      {/* Interactive Razorpay Checkout Modal (UPI, Cards, NetBanking) */}
-      <RazorpayModal
-        isOpen={isRazorpayModalOpen}
-        onClose={() => setIsRazorpayModalOpen(false)}
-        orderData={checkoutOrder}
-        onSuccess={executeCommissionVerification}
-        onFailure={(err) => setErrorMessage(err?.message || 'Payment simulation failed')}
+      {/* Topup Modal */}
+      <TopupModal
+        isOpen={isTopupModalOpen}
+        onClose={() => setIsTopupModalOpen(false)}
+        onSuccess={() => {
+          fetchCommissionData();
+          window.dispatchEvent(new Event('wallet_updated'));
+        }}
+        initialAmount={topupDiffAmount}
+        currentBalance={walletBalance}
       />
     </div>
   );

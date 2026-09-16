@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio, Pencil, LayoutDashboard, Trophy, ShieldAlert, DollarSign, HelpCircle } from 'lucide-react';
+import { walletApi } from '../api/client';
+import { TopupModal } from './TopupModal';
+import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio, Pencil, LayoutDashboard, Trophy, ShieldAlert, DollarSign, HelpCircle, Wallet, Zap } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
 export const Navbar = () => {
@@ -13,6 +15,31 @@ export const Navbar = () => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [savingName, setSavingName] = useState(false);
+
+  // Wallet State
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [isTopupOpen, setIsTopupOpen] = useState(false);
+
+  const fetchWallet = async () => {
+    if (!isAuthenticated) return;
+    try {
+      const res = await walletApi.getWallet();
+      if (res.data?.data?.wallet) {
+        setWalletBalance(parseFloat(res.data.data.wallet.balance || 0));
+      }
+    } catch (err) {
+      console.warn('Could not load wallet in navbar:', err.message);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchWallet();
+    }
+    const handleWalletUpdated = () => fetchWallet();
+    window.addEventListener('wallet_updated', handleWalletUpdated);
+    return () => window.removeEventListener('wallet_updated', handleWalletUpdated);
+  }, [isAuthenticated]);
 
   const handleLogout = () => {
     logout();
@@ -144,6 +171,22 @@ export const Navbar = () => {
           <div className="flex items-center gap-3">
             {isAuthenticated ? (
               <div className="flex items-center gap-3">
+                {/* Wallet Balance Pill & Quick Top-Up */}
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 shadow-xs">
+                  <Wallet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="text-xs font-mono font-extrabold tracking-tight">
+                    ${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsTopupOpen(true)}
+                    className="ml-1 px-2 py-0.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95 cursor-pointer shadow-xs"
+                    title="Instant Wallet Top-Up"
+                  >
+                    + Top Up
+                  </button>
+                </div>
+
                 {/* User info & role badge - Links to My Hub */}
                 <Link
                   to="/my-hub"
@@ -252,6 +295,16 @@ export const Navbar = () => {
           </div>
         </div>
       )}
+      {/* Top Up Wallet Modal */}
+      <TopupModal
+        isOpen={isTopupOpen}
+        onClose={() => setIsTopupOpen(false)}
+        onSuccess={(w) => {
+          if (w) setWalletBalance(parseFloat(w.balance || 0));
+          window.dispatchEvent(new Event('wallet_updated'));
+        }}
+        currentBalance={walletBalance}
+      />
     </nav>
   );
 };

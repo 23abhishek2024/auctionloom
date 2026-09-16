@@ -100,24 +100,60 @@ CREATE INDEX IF NOT EXISTS idx_commission_proofs_status ON commission_proofs(sta
 CREATE INDEX IF NOT EXISTS idx_commission_proofs_user_id ON commission_proofs(user_id);
 
 -- ============================================================
--- 6. PAYMENTS (Razorpay Orders & Gateway Audit Trail)
+-- 6. WALLETS (Production-Grade Double-Entry Balance Store)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS payments (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    auction_id          UUID REFERENCES auctions(id) ON DELETE SET NULL,
-    purpose             VARCHAR(50) NOT NULL DEFAULT 'COMMISSION',
-    amount              DECIMAL(12, 2) NOT NULL,
-    currency            VARCHAR(10) DEFAULT 'INR',
-    razorpay_order_id   VARCHAR(255) NOT NULL,
-    razorpay_payment_id VARCHAR(255),
-    razorpay_signature  VARCHAR(255),
-    status              VARCHAR(50) NOT NULL DEFAULT 'CREATED',
-    notes               JSONB DEFAULT '{}'::jsonb,
-    created_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    verified_at         TIMESTAMP WITH TIME ZONE
+CREATE TABLE IF NOT EXISTS wallets (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id         UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    balance         DECIMAL(12, 2) NOT NULL DEFAULT 0.00 CHECK (balance >= 0),
+    currency        VARCHAR(3) NOT NULL DEFAULT 'USD',
+    version         INT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
-CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(razorpay_order_id);
+CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets(user_id);
+
+-- ============================================================
+-- 7. WALLET_TRANSACTIONS (Immutable Double-Entry Ledger)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS wallet_transactions (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    wallet_id       UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
+    type            VARCHAR(50) NOT NULL CHECK (type IN ('TOPUP', 'SETTLEMENT_DEBIT', 'SETTLEMENT_CREDIT', 'COMMISSION', 'WITHDRAWAL')),
+    amount          DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
+    balance_after   DECIMAL(12, 2) NOT NULL,
+    reference_type  VARCHAR(50) CHECK (reference_type IN ('AUCTION', 'TOPUP_REQUEST', 'COMMISSION_REQUEST', 'PAYOUT_REQUEST', 'MANUAL')),
+    reference_id    UUID,
+    idempotency_key VARCHAR(255) UNIQUE,
+    status          VARCHAR(50) NOT NULL DEFAULT 'COMPLETED' CHECK (status IN ('PENDING', 'COMPLETED', 'FAILED')),
+    metadata        JSONB DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_wallet_id ON wallet_transactions(wallet_id);
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_created_at ON wallet_transactions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_idempotency ON wallet_transactions(idempotency_key);
+
+-- ============================================================
+-- 8. PAYMENT_REQUESTS (Gateway-Ready Abstraction Layer)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payment_requests (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    wallet_id           UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
+    amount              DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
+    currency            VARCHAR(3) NOT NULL DEFAULT 'USD',
+    type                VARCHAR(50) NOT NULL CHECK (type IN ('TOPUP', 'PAYOUT')),
+    provider            VARCHAR(50) NOT NULL DEFAULT 'INTERNAL', -- 'INTERNAL', 'RAZORPAY', 'STRIPE' later
+    provider_order_id   VARCHAR(255),                            -- null for INTERNAL, real gateway order ID later
+    provider_payment_id VARCHAR(255),
+    provider_signature  VARCHAR(255),
+    status              VARCHAR(50) NOT NULL DEFAULT 'CREATED' CHECK (status IN ('CREATED', 'PENDING', 'VERIFIED', 'COMPLETED', 'FAILED', 'CANCELLED')),
+    metadata            JSONB DEFAULT '{}'::jsonb,
+    created_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    verified_at         TIMESTAMP WITH TIME ZONE,
+    updated_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_requests_wallet ON payment_requests(wallet_id);
 

@@ -106,14 +106,16 @@ export const commissionApi = {
   getMyProofs: () => api.get('/commissions/my-proofs'),
 };
 
-export const aiApi = {
-  generate: (data) => api.post('/ai/generate', data, { timeout: 35000 }),
+export const walletApi = {
+  getWallet: () => api.get('/wallet'),
+  topup: (data) => api.post('/wallet/topup', data),
+  settleLot: (data) => api.post('/wallet/settle-lot', data),
+  settleCommission: (data) => api.post('/wallet/settle-commission', data),
+  withdraw: (data) => api.post('/wallet/withdraw', data),
 };
 
-export const paymentApi = {
-  createOrder: (data) => api.post('/payments/razorpay/create-order', data),
-  verifyPayment: (data) => api.post('/payments/razorpay/verify', data),
-  getMyHistory: () => api.get('/payments/my-history'),
+export const aiApi = {
+  generate: (data) => api.post('/ai/generate', data, { timeout: 35000 }),
 };
 
 export const uploadApi = {

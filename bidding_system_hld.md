@@ -257,8 +257,7 @@ This architecture rigorously implements the concepts mastered in your syllabus:
 *   **Frontend**: **ReactJS** (Component architecture, `useState`/`useEffect` hooks, API calling via Axios). *(Note: Next.js is explicitly excluded as requested).*
 *   **Backend Application**: **Node.js with Express.js**. Adheres strictly to the **MVC Pattern**. Utilizes the **Cluster module** to scale horizontally across CPU cores.
 *   **Express Middlewares**: Deeply integrated custom middlewares for **JWT Authentication**, Authorization (Role checks), **Rate Limiting** (System Design), and Centralized **Logging**.
-*   **Database**: **PostgreSQL** (Relational SQL). Implements advanced concurrency controls (`SELECT ... FOR UPDATE SKIP LOCKED`), joins, and aggregations.
-*   **Payment Gateway & Escrow Settlement**: **Razorpay with HMAC-SHA256** cryptographic signature verification. Implements a Two-Step Escrow model with Instant UPI (QR/VPA), Credit/Debit Cards, NetBanking, and automated audit ledger recording.
+*   **Production-Grade Wallet & Double-Entry Ledger**: Complete internal financial ledger isolated within `walletService.js`. Enforces ACID pessimistic row-locking (`SELECT FOR UPDATE`), zero-overdraft invariants (`balance >= 0`), idempotency deduplication, and 1-click atomic escrow lot settlement.
 *   **Media Storage & Uploads**: **Multer** multipart stream processor with MIME type validation and local static CDN delivery for auction lot imagery.
 *   **Generative AI**: **Isolated Basic Prompt Engineering** for an optional "AI Auction Assistant". Calls standard LLM APIs directly without complex framework overhead. Built as a decoupled final feature.
 *   **Real-time Communication**: **Socket.IO** for instantaneous, bi-directional WebSocket broadcasting of price updates, live room chat, and interactive reaction emojis.

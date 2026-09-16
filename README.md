@@ -6,10 +6,10 @@
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-4.x-010101?logo=socket.io&logoColor=white)](https://socket.io/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Razorpay](https://img.shields.io/badge/Razorpay-HMAC_SHA256-02042B?logo=razorpay&logoColor=blue)](https://razorpay.com/)
 [![Multer](https://img.shields.io/badge/Multer-Image_Uploads-E0234E)](https://github.com/expressjs/multer)
 [![Google Gemini](https://img.shields.io/badge/Gemini_AI-3.6_Flash-8E75B2?logo=google&logoColor=white)](https://deepmind.google/technologies/gemini/)
-[![Test Suite](https://img.shields.io/badge/Tests-98%2F98_Passing-brightgreen)](https://github.com/23abhishek2024/auctionloom)
+[![Wallet Ledger](https://img.shields.io/badge/Wallet-Double--Entry_Ledger-10B981)](https://github.com/23abhishek2024/auctionloom)
+[![Test Suite](https://img.shields.io/badge/Tests-103%2F103_Passing-brightgreen)](https://github.com/23abhishek2024/auctionloom)
 
 [![Live Website](https://img.shields.io/badge/Live_Demo-auctionloom.vercel.app-00C7B7?logo=vercel&logoColor=white)](https://auctionloom.vercel.app/)
 [![API Status](https://img.shields.io/badge/API_Status-Online-brightgreen?logo=render&logoColor=white)](https://primebid-backend-e971.onrender.com/health)
@@ -20,7 +20,7 @@
 
 **AuctionLoom** is a production-grade, distributed real-time auction platform engineered to handle high concurrency, eliminate race conditions (preventing double-bids), and process auction conclusions asynchronously. 
 
-Built strictly following the **MVC (Model-View-Controller)** pattern, **PostgreSQL Pessimistic Row Locking (`SELECT FOR UPDATE`)**, **Distributed Job Queues (`FOR UPDATE SKIP LOCKED`)**, **Bi-directional WebSockets (Socket.IO)**, **Two-Phase Escrow Settlement via Razorpay (HMAC-SHA256)**, **Multer Multipart Image Processing**, and an **Isolated AI Appraisal Assistant (Google Gemini 3.6 Flash)**.
+Built strictly following the **MVC (Model-View-Controller)** pattern, **PostgreSQL Pessimistic Row Locking (`SELECT FOR UPDATE`)**, **Distributed Job Queues (`FOR UPDATE SKIP LOCKED`)**, **Bi-directional WebSockets (Socket.IO)**, **Production-Grade Double-Entry Wallet Ledger**, **Multer Multipart Image Processing**, and an **Isolated AI Appraisal Assistant (Google Gemini 3.6 Flash)**.
 
 ---
 
@@ -41,7 +41,6 @@ graph TD
         
         Controllers --> Models[Data Access Models]
         Controllers -.-> AIService[Gemini AI Assistant<br/>Structured JSON Output]
-        Controllers -.-> RazorpayService[Razorpay Service<br/>HMAC-SHA256 Verification]
         Controllers -.-> MulterPipeline[Multer Engine<br/>Disk Storage & MIME Checks]
         Controllers --> Sockets
     end
@@ -54,7 +53,7 @@ graph TD
 
     %% Database Layer
     subgraph PostgreSQL 15 Storage
-        DB[(PostgreSQL Cluster<br/>Users, Auctions, Bids, Jobs,<br/>Payments, Commission Proofs)]
+        DB[(PostgreSQL Cluster<br/>Users, Auctions, Bids, Jobs,<br/>Commission Proofs)]
     end
 
     %% Data Connections
@@ -62,7 +61,6 @@ graph TD
     Scheduler -->|Inserts CLOSE_AUCTION Jobs| DB
     JobWorker -->|Pulls Jobs Safely| DB
     Sockets -->|Broadcasts PRICE_UPDATE / CHAT| Clients
-    RazorpayService -->|Settles Audited Transactions| DB
 ```
 
 ---
@@ -83,12 +81,13 @@ In high-frequency auctions, two bidders often submit identical or split-second c
 - **The Scheduler**: Scans for active auctions where `end_time <= NOW()` and queues `CLOSE_AUCTION` jobs into the `jobs` table.
 - **The Worker**: Polls using **`SELECT * FROM jobs WHERE status = 'PENDING' FOR UPDATE SKIP LOCKED LIMIT 1`**. Multiple worker processes can run in parallel without ever duplicating or double-processing jobs.
 
-### 4. Two-Phase Razorpay Escrow Settlement with HMAC-SHA256 Verification
-- Implements the industry-standard two-step escrow payment flow:
-  1. **Order Creation (`POST /api/payments/razorpay/create-order`)**: The server initializes an order record in PostgreSQL with status `CREATED`.
-  2. **Multi-Modal Checkout**: Interactive client modal supporting Instant UPI (QR/VPA), Credit/Debit Cards, and NetBanking.
-  3. **Cryptographic Signature Verification (`POST /api/payments/razorpay/verify`)**: Validates the payload server-side using **HMAC-SHA256** hash verification (`order_id | payment_id` signed with server secret) to prevent tampering.
-  4. **Idempotent Settlement Ledger**: Transitions payment status to `SUCCESS`, clears platform commissions or marks the lot settled, and logs an immutable audit trail.
+### 4. Production-Grade Wallet & Double-Entry Ledger Architecture
+- Implements an enterprise financial ledger following strict double-entry accounting:
+  1. **Strict Service Boundary**: All balance modifications are strictly encapsulated inside `walletService.js` (no direct SQL column updates).
+  2. **ACID Row Locking (`SELECT FOR UPDATE`)**: Eliminates race conditions and concurrency collisions during simultaneous top-ups, bids, and settlements.
+  3. **Zero-Overdraft Invariant (`CHECK balance >= 0`)**: Database and service-level constraints reject any debit exceeding available funds (`INSUFFICIENT_FUNDS`).
+  4. **Idempotency Deduplication**: Every transaction requires an `idempotency_key UNIQUE`, guaranteeing retried requests never double-credit or double-debit.
+  5. **1-Click Atomic Settlement**: When an auction concludes, the winner settles the hammer price with 1 click; the winner is debited, the seller is credited (net of 5% platform commission), and audit snapshots are recorded in a single database transaction.
 
 ### 5. Multer Multipart Image Processing & Local CDN Pipeline
 - High-performance multipart image upload engine (`multer.diskStorage`).
@@ -98,7 +97,7 @@ In high-frequency auctions, two bidders often submit identical or split-second c
 ### 6. Platform Moderation & Real-Time Administrative Hold
 - Super Administrators can immediately freeze suspicious auctions (`RESTRICTED` status).
 - The state change broadcasts instantly via WebSocket (`AUCTION_STATUS_CHANGED`), freezing bidding client-side and server-side.
-- Administrative force-deletion ensures cascading database cleanup across bids, jobs, and payments.
+- Administrative force-deletion ensures cascading database cleanup across bids, jobs, and audits.
 
 ### 7. AI Auction Assistant (Google Gemini)
 - Integrated Google Gemini (`gemini-3.6-flash`) with structured JSON schema prompt engineering.
@@ -118,12 +117,12 @@ aution-bid/
 ├── backend/
 │   ├── src/
 │   │   ├── controllers/      # authController, auctionController, bidController, aiController,
-│   │   │                     # paymentController, commissionController, uploadController
+│   │   │                     # commissionController, walletController, uploadController
 │   │   ├── models/           # userModel, auctionModel, bidModel
 │   │   ├── routes/           # authRoutes, auctionRoutes, bidRoutes, aiRoutes,
-│   │   │                     # paymentRoutes, commissionRoutes, uploadRoutes, adminRoutes
+│   │   │                     # commissionRoutes, walletRoutes, uploadRoutes, adminRoutes
 │   │   ├── middlewares/      # logger.js, auth.js (RBAC), rateLimiter.js, multer.js
-│   │   ├── services/         # socketService.js, aiService.js, razorpayService.js
+│   │   ├── services/         # socketService.js, aiService.js, walletService.js, topupService.js
 │   │   ├── workers/          # jobWorker.js, scheduler.js
 │   │   ├── db.js             # PostgreSQL connection pool with cloud SSL support
 │   │   ├── app.js            # Express application initialization & middleware chain
@@ -131,15 +130,15 @@ aution-bid/
 │   ├── scripts/
 │   │   ├── migrate.js        # Automated schema bootstrap script (npm run migrate)
 │   │   └── reset_and_seed.js # Database reset and demo seed script (npm run seed)
-│   ├── schema.sql            # Core PostgreSQL schema DDL (Users, Auctions, Bids, Jobs, Payments)
+│   ├── schema.sql            # Core PostgreSQL schema DDL (Users, Auctions, Bids, Jobs, Wallets)
 │   ├── Dockerfile            # Production Node.js Alpine container
-│   └── verify_phases.mjs     # 98-assertion automated end-to-end test suite (npm test)
+│   └── verify_phases.mjs     # 103-assertion automated end-to-end test suite (npm test)
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── api/client.js     # Axios client with JWT interceptors & error handlers
+│   │   ├── api/client.js     # Axios client with JWT interceptors & walletApi
 │   │   ├── context/          # AuthContext.jsx, SocketContext.jsx
-│   │   ├── components/       # Navbar, AuctionCard, RazorpayModal, ProtectedRoute
+│   │   ├── components/       # Navbar, AuctionCard, TopupModal, ProtectedRoute
 │   │   ├── pages/            # Dashboard, AuctionDetail (Live Room), CreateAuction,
 │   │   │                     # SubmitCommissionPage, AdminDashboardPage, Login, Register
 │   │   └── App.jsx           # React Router client-side routing
@@ -224,12 +223,12 @@ npm test
 [Phase 7]  ✅ PASS - React 19 Frontend & Real-Time Contexts verified
 [Phase 8]  ✅ PASS - Google Gemini AI Auction Assistant verified
 [Phase 9]  ✅ PASS - Multer Image Upload & Socket.IO Live Room Chat verified
-[Phase 10] ✅ PASS - Razorpay Payment Gateway & HMAC-SHA256 Cryptographic Verification verified
+[Phase 10] ✅ PASS - Production-Grade Wallet & Double-Entry Ledger System verified
 
 ===========================================================
    🎉 ALL PHASES (1 TO 10) ARE 100% VERIFIED AND PASSING!  
 ===========================================================
-Total assertions passed: 98/98
+Total assertions passed: 103/103
 ```
 
 ---
@@ -263,7 +262,7 @@ All test accounts use the password: **`password123`** (or `test@123` depending o
 | **Admin** | `admin@gmail.com` | `password123` | Platform Administrator | Restrict/Freeze auctions, delete lots, review proofs |
 | **Test1** | `test1@gmail.com` | `password123` | Auctioneer / Seller | Create auctions, upload images, AI appraisals |
 | **Test2** | `test2@gmail.com` | `password123` | Auctioneer / Seller | Create auctions, upload images, AI appraisals |
-| **Test3** | `test3@gmail.com` | `password123` | Member / Winner | Place bids, test Razorpay escrow settlements |
+| **Test3** | `test3@gmail.com` | `password123` | Member / Winner | Place bids, win lots, view seller payout coordinates |
 | **Test4** | `test4@gmail.com` | `password123` | Member / Bidder | Place bids, real-time live room chat |
 | **Test5** | `test5@gmail.com` | `password123` | Member / Bidder | Place bids, real-time reactions |
 

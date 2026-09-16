@@ -60,6 +60,33 @@ async function resetAndSeed() {
 
     console.log('✅ [Reset & Seed] Seeded users:', Object.keys(usersMap));
 
+    // 4b. Seed Funded Wallets ($10,000.00 balance for every user)
+    console.log('💰 [Reset & Seed] Initializing and funding user wallets ($10,000.00 each)...');
+    for (const uName of Object.keys(usersMap)) {
+      const user = usersMap[uName];
+      const walletRes = await client.query(
+        `INSERT INTO wallets (user_id, balance, currency, version)
+         VALUES ($1, 10000.00, 'USD', 1)
+         ON CONFLICT (user_id) DO UPDATE SET balance = 10000.00
+         RETURNING *`,
+        [user.id]
+      );
+      const wallet = walletRes.rows[0];
+
+      await client.query(
+        `INSERT INTO wallet_transactions 
+         (wallet_id, type, amount, balance_after, reference_type, idempotency_key, status, metadata)
+         VALUES ($1, 'TOPUP', 10000.00, 10000.00, 'MANUAL', $2, 'COMPLETED', $3)
+         ON CONFLICT (idempotency_key) DO NOTHING`,
+        [
+          wallet.id,
+          `seed_topup_${user.id}`,
+          JSON.stringify({ note: 'Initial platform onboarding demo grant' })
+        ]
+      );
+    }
+    console.log('✅ [Reset & Seed] All user wallets funded with $10,000.00.');
+
     // 5. Seed Realistic Luxury Auctions
     console.log('🏷️  [Reset & Seed] Creating curated luxury auctions...');
     const now = Date.now();
