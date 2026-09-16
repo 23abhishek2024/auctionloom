@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { auctionApi, bidApi, userApi, adminApi, walletApi, resolveImageUrl } from '../api/client';
 import { TopupModal } from '../components/TopupModal';
 import { useSocket } from '../context/SocketContext';
@@ -74,6 +74,7 @@ export const AuctionDetailPage = () => {
   const [activeReactions, setActiveReactions] = useState([]);
   const [showReactions, setShowReactions] = useState(false);
   const [sellerPayout, setSellerPayout] = useState(null);
+  const [copiedKey, setCopiedKey] = useState(null);
   const [lotPaid, setLotPaid] = useState(false);
   const [lotPaymentData, setLotPaymentData] = useState(null);
   const chatBottomRef = useRef(null);
