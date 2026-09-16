@@ -506,6 +506,7 @@ export const AuctionDetailPage = () => {
       setPayingLotRazorpay(true);
       const verifyRes = await paymentApi.verifyPayment(verifyPayload);
       setLotPaid(true);
+      setLotPayError(null);
       setLotPaymentData(verifyRes.data);
       setSuccessMsg('✅ Payment successfully settled and cryptographically verified via Razorpay!');
       setTimeout(() => setSuccessMsg(null), 5000);
@@ -519,6 +520,7 @@ export const AuctionDetailPage = () => {
         is_simulated: true,
       };
       setLotPaid(true);
+      setLotPayError(null);
       setLotPaymentData(fallbackPayment);
       setSuccessMsg('✅ Payment settled and verified (Sandbox mode)!');
       setTimeout(() => setSuccessMsg(null), 5000);
@@ -900,7 +902,7 @@ export const AuctionDetailPage = () => {
                     </span>
                   </div>
 
-                  {lotPayError && (
+                  {!lotPaid && lotPayError && (
                     <div className="p-2.5 rounded-xl bg-rose-600/90 text-white text-xs flex items-center gap-2">
                       <AlertCircle className="w-4 h-4 shrink-0" />
                       <span>{lotPayError}</span>
