@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { commissionApi, paymentApi, resolveImageUrl } from '../api/client';
 import { loadRazorpayScript } from '../utils/razorpay';
+import { RazorpayModal } from '../components/RazorpayModal';
 import { useAuth } from '../context/AuthContext';
 import {
   DollarSign,
@@ -32,6 +33,8 @@ export const SubmitCommissionPage = () => {
   const [payingRazorpay, setPayingRazorpay] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [checkoutOrder, setCheckoutOrder] = useState(null);
+  const [isRazorpayModalOpen, setIsRazorpayModalOpen] = useState(false);
 
   // Manual Upload Form State
   const [amount, setAmount] = useState('');
@@ -80,6 +83,27 @@ export const SubmitCommissionPage = () => {
     }
   };
 
+  // Execute cryptographic signature verification for commission
+  const executeCommissionVerification = async (verifyPayload) => {
+    try {
+      setPayingRazorpay(true);
+      const verifyRes = await paymentApi.verifyPayment(verifyPayload);
+      setSuccessMessage(
+        `⚡ Instant Settlement Success! Payment ID: ${verifyRes.data.payment_id}. Your unpaid balance was cleared automatically.`
+      );
+      setUnpaidCommission(verifyRes.data.unpaid_commission || 0);
+      await fetchCommissionData();
+      return verifyRes.data;
+    } catch (verErr) {
+      console.error('Verification failed:', verErr);
+      const msg = verErr.response?.data?.error || 'Payment signature verification failed. Please contact platform support.';
+      setErrorMessage(msg);
+      throw new Error(msg);
+    } finally {
+      setPayingRazorpay(false);
+    }
+  };
+
   // ── 1. Razorpay 1-Click Instant Settlement (Zero Admin Wait) ──
   const handleRazorpaySettlement = async () => {
     setErrorMessage(null);
@@ -108,71 +132,51 @@ export const SubmitCommissionPage = () => {
       });
 
       const orderData = orderRes.data;
+      setCheckoutOrder(orderData);
 
-      // Verification executor
-      const executeVerification = async (verifyPayload) => {
+      // Step C: Try official Razorpay checkout modal if live keys exist
+      if (isLoaded && window.Razorpay && orderData.keyId && orderData.keyId !== 'rzp_test_placeholder') {
         try {
-          const verifyRes = await paymentApi.verifyPayment(verifyPayload);
-          setSuccessMessage(
-            `⚡ Instant Settlement Success! Payment ID: ${verifyRes.data.payment_id}. Your unpaid balance was cleared automatically.`
-          );
-          setUnpaidCommission(verifyRes.data.unpaid_commission || 0);
-          await fetchCommissionData();
-        } catch (verErr) {
-          console.error('Verification failed:', verErr);
-          setErrorMessage(
-            verErr.response?.data?.error ||
-              'Payment signature verification failed. Please contact platform support.'
-          );
-        } finally {
+          const options = {
+            key: orderData.keyId,
+            amount: orderData.amount, // in paise
+            currency: orderData.currency || 'INR',
+            name: 'AuctionLoom Escrow',
+            description: `Instant Platform Commission Clearance ($${payVal.toFixed(2)})`,
+            image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=128&q=80',
+            order_id: orderData.orderId,
+            handler: async function (response) {
+              await executeCommissionVerification({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              });
+            },
+            prefill: {
+              name: user?.name || user?.email || 'Valued User',
+              email: user?.email || 'bidder@auctionloom.com',
+            },
+            theme: {
+              color: '#4f46e5',
+            },
+          };
+
+          const rzp = new window.Razorpay(options);
+          rzp.on('payment.failed', function (response) {
+            setErrorMessage(`Payment failed: ${response.error.description}`);
+            setPayingRazorpay(false);
+          });
+          rzp.open();
           setPayingRazorpay(false);
+          return;
+        } catch (popupErr) {
+          console.warn('Official popup blocked, using interactive Razorpay modal:', popupErr);
         }
-      };
-
-      // Step C: Open Razorpay Checkout Modal (or Sandbox Auto-Simulation)
-      if (isLoaded && window.Razorpay && !orderData.is_sandbox_simulation && orderData.keyId !== 'rzp_test_placeholder') {
-        const options = {
-          key: orderData.keyId,
-          amount: orderData.amount, // in paise
-          currency: orderData.currency || 'INR',
-          name: 'AuctionLoom Escrow',
-          description: `Instant Platform Commission Clearance ($${payVal.toFixed(2)})`,
-          image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=128&q=80',
-          order_id: orderData.orderId,
-          handler: async function (response) {
-            await executeVerification({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            });
-          },
-          prefill: {
-            name: user?.name || user?.email || 'Valued User',
-            email: user?.email || 'bidder@auctionloom.com',
-          },
-          theme: {
-            color: '#4f46e5',
-          },
-        };
-
-        const rzp = new window.Razorpay(options);
-        rzp.on('payment.failed', function (response) {
-          setErrorMessage(`Payment failed: ${response.error.description}`);
-          setPayingRazorpay(false);
-        });
-        rzp.open();
-      } else {
-        // High-fidelity sandbox / test simulation mode
-        // Generates valid simulation token accepted by backend razorpayService
-        const mockPaymentId = `pay_sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-        const mockSignature = `sim_sig_${orderData.orderId}_${mockPaymentId}`;
-
-        await executeVerification({
-          razorpay_order_id: orderData.orderId,
-          razorpay_payment_id: mockPaymentId,
-          razorpay_signature: mockSignature,
-        });
       }
+
+      // Always open our interactive Razorpay Checkout Modal (supports live demo & sandbox)
+      setIsRazorpayModalOpen(true);
+      setPayingRazorpay(false);
     } catch (err) {
       console.error('Razorpay initiation error:', err);
       setErrorMessage(
@@ -669,6 +673,15 @@ export const SubmitCommissionPage = () => {
           </div>
         )}
       </div>
+
+      {/* Interactive Razorpay Checkout Modal (UPI, Cards, NetBanking) */}
+      <RazorpayModal
+        isOpen={isRazorpayModalOpen}
+        onClose={() => setIsRazorpayModalOpen(false)}
+        orderData={checkoutOrder}
+        onSuccess={executeCommissionVerification}
+        onFailure={(err) => setErrorMessage(err?.message || 'Payment simulation failed')}
+      />
     </div>
   );
 };

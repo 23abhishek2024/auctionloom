@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { auctionApi, bidApi, userApi, adminApi, paymentApi, resolveImageUrl } from '../api/client';
 import { loadRazorpayScript } from '../utils/razorpay';
+import { RazorpayModal } from '../components/RazorpayModal';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -77,6 +78,8 @@ export const AuctionDetailPage = () => {
   const [lotPaymentData, setLotPaymentData] = useState(null);
   const [payingLotRazorpay, setPayingLotRazorpay] = useState(false);
   const [lotPayError, setLotPayError] = useState(null);
+  const [checkoutOrder, setCheckoutOrder] = useState(null);
+  const [isRazorpayModalOpen, setIsRazorpayModalOpen] = useState(false);
   const chatBottomRef = useRef(null);
 
   const copyToClipboard = (text, key) => {
@@ -469,7 +472,7 @@ export const AuctionDetailPage = () => {
     )
   );
 
-  // Hook 5: Winner settlement payout instructions
+  // Hook 5: Winner settlement payout instructions & previous payment verification check
   useEffect(() => {
     if (user && id && isEnded && isWinnerMe && !sellerPayout) {
       userApi.getSellerPayoutForWinner(id)
@@ -477,6 +480,45 @@ export const AuctionDetailPage = () => {
         .catch(() => {});
     }
   }, [user, id, isEnded, isWinnerMe, sellerPayout]);
+
+  useEffect(() => {
+    if (user && id && isWinnerMe) {
+      paymentApi.getMyHistory()
+        .then((res) => {
+          const match = res.data?.payments?.find(
+            (p) => p.auction_id === id && p.purpose === 'LOT_PAYMENT' && p.status === 'SUCCESS'
+          );
+          if (match) {
+            setLotPaid(true);
+            setLotPaymentData({
+              payment_id: match.razorpay_payment_id || match.id,
+              order_id: match.razorpay_order_id,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [user, id, isWinnerMe]);
+
+  // Execute cryptographic signature verification with backend
+  const executeLotVerification = async (verifyPayload) => {
+    try {
+      setPayingLotRazorpay(true);
+      const verifyRes = await paymentApi.verifyPayment(verifyPayload);
+      setLotPaid(true);
+      setLotPaymentData(verifyRes.data);
+      setSuccessMsg('✅ Payment successfully settled and cryptographically verified via Razorpay!');
+      setTimeout(() => setSuccessMsg(null), 5000);
+      return verifyRes.data;
+    } catch (verErr) {
+      console.error('Lot payment verification failed:', verErr);
+      const msg = verErr.response?.data?.error || 'Payment verification failed. Please contact platform support.';
+      setLotPayError(msg);
+      throw new Error(msg);
+    } finally {
+      setPayingLotRazorpay(false);
+    }
+  };
 
   // Razorpay Winner Lot Settlement Handler
   const handlePayLotRazorpay = async () => {
@@ -500,65 +542,51 @@ export const AuctionDetailPage = () => {
       });
 
       const orderData = orderRes.data;
+      setCheckoutOrder(orderData);
 
-      const executeVerification = async (verifyPayload) => {
+      // If live keys exist on server, attempt standard Razorpay modal
+      if (isLoaded && window.Razorpay && orderData.keyId && orderData.keyId !== 'rzp_test_placeholder') {
         try {
-          const verifyRes = await paymentApi.verifyPayment(verifyPayload);
-          setLotPaid(true);
-          setLotPaymentData(verifyRes.data);
-        } catch (verErr) {
-          console.error('Lot payment verification failed:', verErr);
-          setLotPayError(
-            verErr.response?.data?.error ||
-              'Payment verification failed. Please contact platform support.'
-          );
-        } finally {
+          const options = {
+            key: orderData.keyId,
+            amount: orderData.amount,
+            currency: orderData.currency || 'INR',
+            name: 'AuctionLoom Escrow',
+            description: `Winning Lot Settlement: ${auction.title}`,
+            image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=128&q=80',
+            order_id: orderData.orderId,
+            handler: async function (response) {
+              await executeLotVerification({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              });
+            },
+            prefill: {
+              name: user?.name || user?.email || 'Winner',
+              email: user?.email || 'winner@auctionloom.com',
+            },
+            theme: {
+              color: '#059669',
+            },
+          };
+
+          const rzp = new window.Razorpay(options);
+          rzp.on('payment.failed', function (response) {
+            setLotPayError(`Payment failed: ${response.error.description}`);
+            setPayingLotRazorpay(false);
+          });
+          rzp.open();
           setPayingLotRazorpay(false);
+          return;
+        } catch (popupErr) {
+          console.warn('Official popup blocked, using interactive Razorpay modal:', popupErr);
         }
-      };
-
-      if (isLoaded && window.Razorpay && !orderData.is_sandbox_simulation && orderData.keyId !== 'rzp_test_placeholder') {
-        const options = {
-          key: orderData.keyId,
-          amount: orderData.amount,
-          currency: orderData.currency || 'INR',
-          name: 'AuctionLoom Escrow',
-          description: `Winning Lot Settlement: ${auction.title}`,
-          image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=128&q=80',
-          order_id: orderData.orderId,
-          handler: async function (response) {
-            await executeVerification({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            });
-          },
-          prefill: {
-            name: user?.name || user?.email || 'Winner',
-            email: user?.email || 'winner@auctionloom.com',
-          },
-          theme: {
-            color: '#059669',
-          },
-        };
-
-        const rzp = new window.Razorpay(options);
-        rzp.on('payment.failed', function (response) {
-          setLotPayError(`Payment failed: ${response.error.description}`);
-          setPayingLotRazorpay(false);
-        });
-        rzp.open();
-      } else {
-        // High-fidelity sandbox / test simulation mode
-        const mockPaymentId = `pay_sim_lot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-        const mockSignature = `sim_sig_${orderData.orderId}_${mockPaymentId}`;
-
-        await executeVerification({
-          razorpay_order_id: orderData.orderId,
-          razorpay_payment_id: mockPaymentId,
-          razorpay_signature: mockSignature,
-        });
       }
+
+      // Always open our interactive Razorpay Checkout Modal (supports live demo & sandbox)
+      setIsRazorpayModalOpen(true);
+      setPayingLotRazorpay(false);
     } catch (err) {
       console.error('Lot Razorpay error:', err);
       setLotPayError(err.response?.data?.error || 'Failed to initiate Razorpay checkout.');
@@ -1608,6 +1636,15 @@ export const AuctionDetailPage = () => {
         </div>
 
       </div>
+
+      {/* Interactive Razorpay Checkout Modal (UPI, Cards, NetBanking) */}
+      <RazorpayModal
+        isOpen={isRazorpayModalOpen}
+        onClose={() => setIsRazorpayModalOpen(false)}
+        orderData={checkoutOrder}
+        onSuccess={executeLotVerification}
+        onFailure={(err) => setLotPayError(err?.message || 'Payment simulation failed')}
+      />
 
     </div>
   );
