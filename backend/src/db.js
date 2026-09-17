@@ -66,7 +66,11 @@ pool.connect(async (err, client, release) => {
       ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(255);
       ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS screenshot_url TEXT;
       ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS notes TEXT;
+      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS comment TEXT;
+      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS proof_url TEXT;
       ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;
+      ALTER TABLE commission_proofs ALTER COLUMN screenshot_url DROP NOT NULL;
+      ALTER TABLE commission_proofs ALTER COLUMN proof_url DROP NOT NULL;
 
       CREATE TABLE IF NOT EXISTS commission_proofs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

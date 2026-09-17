@@ -159,18 +159,25 @@ const settleCommission = async (req, res) => {
       [remainingUnpaid, req.user.id]
     );
 
-    // 4. Log approved proof in commission_proofs
-    await client.query(
-      `INSERT INTO commission_proofs (user_id, amount, comment, proof_url, status, admin_notes)
-       VALUES ($1, $2, $3, $4, 'APPROVED', $5)`,
-      [
-        req.user.id,
-        payAmount,
-        'Direct 1-Click Settlement via Platform Wallet',
-        'wallet://internal-balance',
-        `Automated debit of $${payAmount.toFixed(2)} from user wallet`,
-      ]
-    );
+    // 4. Log approved proof in commission_proofs (non-critical auxiliary audit)
+    try {
+      await client.query(
+        `INSERT INTO commission_proofs (user_id, amount, comment, proof_url, notes, screenshot_url, status, admin_notes)
+         VALUES ($1, $2, $3, $4, $5, $6, 'APPROVED', $7)
+         ON CONFLICT DO NOTHING`,
+        [
+          req.user.id,
+          payAmount,
+          'Direct 1-Click Settlement via Platform Wallet',
+          'wallet://internal-balance',
+          'Direct 1-Click Settlement via Platform Wallet',
+          'wallet://internal-balance',
+          `Automated debit of $${payAmount.toFixed(2)} from user wallet`,
+        ]
+      );
+    } catch (proofErr) {
+      console.warn('[WalletController] Notice: commission_proofs log bypassed non-critically:', proofErr.message);
+    }
 
     await client.query('COMMIT');
 

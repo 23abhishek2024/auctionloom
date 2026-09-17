@@ -357,19 +357,25 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       [commission, auctionId]
     );
 
-    // 5. Automatically log approved commission proof for platform accounting
-    await client.query(
-      `INSERT INTO commission_proofs (user_id, amount, comment, proof_url, status, admin_notes)
-       VALUES ($1, $2, $3, $4, 'APPROVED', $5)
-       ON CONFLICT DO NOTHING`,
-      [
-        sellerId,
-        commission,
-        `Automated 5% platform fee for Lot: ${auction.title}`,
-        'wallet://internal-escrow',
-        `Settled via internal double-entry wallet (Auction ${auctionId})`,
-      ]
-    );
+    // 5. Automatically log approved commission proof for platform accounting (non-critical auxiliary audit)
+    try {
+      await client.query(
+        `INSERT INTO commission_proofs (user_id, amount, comment, proof_url, notes, screenshot_url, status, admin_notes)
+         VALUES ($1, $2, $3, $4, $5, $6, 'APPROVED', $7)
+         ON CONFLICT DO NOTHING`,
+        [
+          sellerId,
+          commission,
+          `Automated 5% platform fee for Lot: ${auction.title}`,
+          'wallet://internal-escrow',
+          `Automated 5% platform fee for Lot: ${auction.title}`,
+          'wallet://internal-escrow',
+          `Settled via internal double-entry wallet (Auction ${auctionId})`,
+        ]
+      );
+    } catch (proofErr) {
+      console.warn('[WalletService] Notice: commission_proofs log bypassed non-critically:', proofErr.message);
+    }
 
     await client.query('COMMIT');
 
