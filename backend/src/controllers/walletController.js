@@ -12,8 +12,24 @@ const getTransactions = async (req, res) => {
     const offset = (page - 1) * limit;
     const typeFilter = req.query.type ? req.query.type.toUpperCase() : null;
 
-    const conditions = ['wt.wallet_id = $1'];
+    let walletCondition = 'wt.wallet_id = $1';
     const params = [wallet.id];
+
+    if (req.user.role === 'admin') {
+      const treasuryRes = await pool.query(
+        'SELECT id FROM wallets WHERE user_id = $1',
+        [walletService.PLATFORM_TREASURY_USER_ID]
+      );
+      const treasuryWalletId = treasuryRes.rows[0]?.id;
+      if (treasuryWalletId && treasuryWalletId !== wallet.id) {
+        params.push(treasuryWalletId);
+        walletCondition = `(wt.wallet_id = $1 OR wt.wallet_id = $${params.length} OR wt.type = 'COMMISSION')`;
+      } else {
+        walletCondition = `(wt.wallet_id = $1 OR wt.type = 'COMMISSION')`;
+      }
+    }
+
+    const conditions = [walletCondition];
     if (typeFilter) {
       params.push(typeFilter);
       conditions.push(`wt.type = $${params.length}`);
@@ -47,6 +63,18 @@ const getTransactions = async (req, res) => {
       ),
     ]);
 
+    let platformSummary = null;
+    if (req.user.role === 'admin') {
+      const commAgg = await pool.query(`
+        SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
+        FROM wallet_transactions WHERE type = 'COMMISSION'
+      `);
+      platformSummary = {
+        totalCommissionEarned: parseFloat(commAgg.rows[0]?.total_comm || 0),
+        totalCommissionTransitions: parseInt(commAgg.rows[0]?.count_comm || 0),
+      };
+    }
+
     const total = countRes.rows[0].total;
     return res.status(200).json({
       success: true,
@@ -56,6 +84,7 @@ const getTransactions = async (req, res) => {
           balance: parseFloat(wallet.balance),
           currency: wallet.currency,
         },
+        platformSummary,
         transactions: txRes.rows.map((r) => ({
           id: r.id,
           type: r.type,
@@ -93,6 +122,19 @@ const getTransactions = async (req, res) => {
 const getWallet = async (req, res) => {
   try {
     const summary = await walletService.getWalletSummary(req.user.id);
+    if (req.user.role === 'admin') {
+      const commAgg = await pool.query(`
+        SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
+        FROM wallet_transactions WHERE type = 'COMMISSION'
+      `);
+      const treasuryRes = await pool.query(
+        'SELECT balance FROM wallets WHERE user_id = $1',
+        [walletService.PLATFORM_TREASURY_USER_ID]
+      );
+      summary.treasuryBalance = parseFloat(treasuryRes.rows[0]?.balance || 0);
+      summary.totalCommissionEarned = parseFloat(commAgg.rows[0]?.total_comm || 0);
+      summary.totalCommissionTransitions = parseInt(commAgg.rows[0]?.count_comm || 0);
+    }
     return res.status(200).json({
       success: true,
       data: summary,
@@ -253,6 +295,40 @@ const settleCommission = async (req, res) => {
       metadata: { note: 'Platform commission settlement from wallet' },
       client,
     });
+
+    // 2b. Credit Platform Treasury Wallet and Primary Admin with the received commission payment!
+    const treasuryId = walletService.PLATFORM_TREASURY_USER_ID;
+    const primaryAdminId = await walletService.getPrimaryAdminUserId(client);
+
+    if (treasuryId) {
+      await walletService.creditWallet({
+        userId: treasuryId,
+        amount: payAmount,
+        type: 'COMMISSION',
+        referenceType: 'COMMISSION_REQUEST',
+        idempotencyKey: `treasury_comm_recv_${req.user.id}_${Date.now()}`,
+        metadata: {
+          note: `Platform commission payment received from seller`,
+          sellerId: req.user.id,
+        },
+        client,
+      });
+    }
+
+    if (primaryAdminId && primaryAdminId !== treasuryId) {
+      await walletService.creditWallet({
+        userId: primaryAdminId,
+        amount: payAmount,
+        type: 'COMMISSION',
+        referenceType: 'COMMISSION_REQUEST',
+        idempotencyKey: `admin_comm_recv_${req.user.id}_${Date.now()}`,
+        metadata: {
+          note: `Admin commission payment received from seller`,
+          sellerId: req.user.id,
+        },
+        client,
+      });
+    }
 
     // 3. Decrement user's unpaid commission
     const remainingUnpaid = Math.max(0, Math.round((unpaid - payAmount) * 100) / 100);

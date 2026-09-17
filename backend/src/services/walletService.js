@@ -18,6 +18,19 @@ class InsufficientFundsError extends Error {
 
 const PLATFORM_TREASURY_USER_ID = '00000000-0000-0000-0000-000000000000';
 
+async function getPrimaryAdminUserId(client = null) {
+  const db = client || pool;
+  try {
+    const res = await db.query(
+      "SELECT id FROM users WHERE role = 'admin' AND email != 'treasury@auctionloom.internal' ORDER BY created_at ASC LIMIT 1"
+    );
+    return res.rows[0]?.id || null;
+  } catch (err) {
+    console.error('[walletService.getPrimaryAdminUserId] Error:', err);
+    return null;
+  }
+}
+
 /**
  * Get existing wallet or create one atomically if missing.
  */
@@ -399,7 +412,7 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       client,
     });
 
-    // 4. Credit Platform Treasury Wallet (5% Platform Commission)
+    // 4. Credit Platform Treasury Wallet & Primary Admin Wallet (5% Platform Commission)
     let platformWallet = null;
     if (commission > 0) {
       const platformKey = `${idempotencyPrefix || 'lot'}_platform_fee_${auctionId}`;
@@ -420,6 +433,28 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
         client,
       });
       platformWallet = platformCreditResult.wallet;
+
+      // Also mirror credit to primary human admin's wallet so their live balance updates and shows the transition
+      const primaryAdminId = await getPrimaryAdminUserId(client);
+      if (primaryAdminId && primaryAdminId !== PLATFORM_TREASURY_USER_ID) {
+        const adminKey = `${idempotencyPrefix || 'lot'}_admin_comm_${auctionId}`;
+        await creditWallet({
+          userId: primaryAdminId,
+          amount: commission,
+          type: 'COMMISSION',
+          referenceType: 'AUCTION',
+          referenceId: auctionId,
+          idempotencyKey: adminKey,
+          metadata: {
+            note: `Admin commission (+5%) received from "${auction.title}"`,
+            auctionTitle: auction.title,
+            sellerId,
+            winnerId,
+            hammerPrice: numericPrice,
+          },
+          client,
+        });
+      }
     }
 
     // 5. Mark auction as settled and record timestamp in platform records
@@ -526,6 +561,7 @@ async function getWalletSummary(userId) {
 
 module.exports = {
   PLATFORM_TREASURY_USER_ID,
+  getPrimaryAdminUserId,
   InsufficientFundsError,
   getOrCreateWallet,
   creditWallet,

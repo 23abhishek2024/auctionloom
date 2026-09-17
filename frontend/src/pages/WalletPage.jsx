@@ -70,15 +70,28 @@ const TX_CONFIG = {
   },
 };
 
-const getConfig = (type) =>
-  TX_CONFIG[type] || {
-    label: type,
-    color: 'bg-slate-50 text-slate-600 border-slate-200',
-    dot: 'bg-slate-400',
-    icon: Zap,
-    sign: '',
-    amountColor: 'text-slate-700',
-  };
+const getConfig = (type, isAdmin = false) => {
+  if (type === 'COMMISSION' && isAdmin) {
+    return {
+      label: 'Commission Received (+5%)',
+      color: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      dot: 'bg-emerald-500',
+      icon: TrendingUp,
+      sign: '+',
+      amountColor: 'text-emerald-600',
+    };
+  }
+  return (
+    TX_CONFIG[type] || {
+      label: type,
+      color: 'bg-slate-50 text-slate-600 border-slate-200',
+      dot: 'bg-slate-400',
+      icon: Zap,
+      sign: '',
+      amountColor: 'text-slate-700',
+    }
+  );
+};
 
 const formatDate = (iso) => {
   if (!iso) return '\u2014';
@@ -101,7 +114,7 @@ const TYPE_FILTER_OPTIONS = [
 ];
 
 export const WalletPage = () => {
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
 
   const [walletInfo, setWalletInfo] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -238,6 +251,31 @@ export const WalletPage = () => {
           </div>
         </div>
 
+        {/* Admin Commission Inflow Banner */}
+        {user?.role === 'admin' && (
+          <div className="mb-8 p-6 rounded-3xl bg-gradient-to-r from-emerald-950 via-slate-900 to-indigo-950 border border-emerald-500/30 text-white shadow-xl flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400">
+                <TrendingUp className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold">Admin Platform Revenue</span>
+                <h3 className="text-xl font-bold text-white">5% Commission Inflows Active</h3>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Platform commission transitions from all concluded auctions and seller payments are linked to your admin ledger.
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/admin"
+              className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-950/40 transition-all flex items-center gap-2"
+            >
+              Admin Dashboard
+              <ArrowUpRight className="w-4 h-4" />
+            </Link>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="flex items-center gap-3 mb-5 flex-wrap">
           <Filter className="w-4 h-4 text-slate-400 shrink-0" />
@@ -297,7 +335,7 @@ export const WalletPage = () => {
 
               <div className="divide-y divide-slate-100">
                 {transactions.map((tx) => {
-                  const cfg = getConfig(tx.type);
+                  const cfg = getConfig(tx.type, user?.role === 'admin');
                   const Icon = cfg.icon;
                   return (
                     <div

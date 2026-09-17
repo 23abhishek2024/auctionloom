@@ -59,6 +59,15 @@ const getAdminMetrics = async (req, res, next) => {
       WHERE user_id = '00000000-0000-0000-0000-000000000000'
     `);
 
+    const adminWalletRes = await pool.query(`
+      SELECT w.balance, u.email
+      FROM wallets w
+      JOIN users u ON u.id = w.user_id
+      WHERE u.role = 'admin' AND u.email != 'treasury@auctionloom.internal'
+      ORDER BY u.created_at ASC
+      LIMIT 1
+    `);
+
     const pendingProofsRes = await pool.query(`
       SELECT COUNT(*)::int AS pending_proofs_count
       FROM commission_proofs
@@ -79,6 +88,8 @@ const getAdminMetrics = async (req, res, next) => {
         accruedCommission: parseFloat(commissionRes.rows[0].accrued_commission || 0),
         collectedCommission: parseFloat(collectedRes.rows[0].collected_commission || 0),
         treasuryBalance: parseFloat(treasuryRes.rows[0]?.treasury_balance || 0),
+        adminWalletBalance: parseFloat(adminWalletRes.rows[0]?.balance || 0),
+        adminEmail: adminWalletRes.rows[0]?.email || 'admin@gmail.com',
         pendingProofsCount: pendingProofsRes.rows[0].pending_proofs_count || 0,
         totalBids: totalBidsRes.rows[0].total_bids || 0,
       },

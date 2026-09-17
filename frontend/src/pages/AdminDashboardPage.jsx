@@ -310,10 +310,10 @@ export const AdminDashboardPage = () => {
           </p>
         </div>
 
-        {/* Platform 5% Commission */}
+        {/* Platform 5% Commission & Admin Wallet */}
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-mono font-semibold uppercase tracking-wider">Platform Revenue (5%)</span>
+            <span className="text-xs font-mono font-semibold uppercase tracking-wider">Admin Commission Received</span>
             <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
               <TrendingUp className="w-5 h-5" />
             </div>
@@ -321,14 +321,18 @@ export const AdminDashboardPage = () => {
           <div className="text-2xl font-extrabold text-emerald-600 font-mono">
             ${metrics?.collectedCommission?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}
           </div>
-          <p className="text-xs text-slate-500 mt-1 flex items-center justify-between">
-            <span>${metrics?.accruedCommission?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'} total accrued</span>
-            {metrics?.treasuryBalance !== undefined && metrics.treasuryBalance > 0 && (
-              <span className="text-emerald-600 font-bold font-mono">
-                ${metrics.treasuryBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} liquid
+          <div className="text-xs text-slate-500 mt-2 flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span>Admin Live Wallet:</span>
+              <span className="text-emerald-700 font-bold font-mono bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                ${(metrics?.adminWalletBalance ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} USD
               </span>
-            )}
-          </p>
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>Platform Treasury:</span>
+              <span className="font-mono text-slate-600 font-semibold">${(metrics?.treasuryBalance ?? 0).toFixed(2)} liquid</span>
+            </div>
+          </div>
         </div>
 
         {/* Registered Users */}
@@ -364,61 +368,6 @@ export const AdminDashboardPage = () => {
         </div>
       </div>
 
-      {/* Monthly Financial Chart (Visual SVG Bar Graph) */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 mb-10">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">Monthly Revenue & Commission Ledger</h2>
-            <p className="text-xs text-slate-500">Gross settled marketplace volume vs. platform 5% fee collection</p>
-          </div>
-          <div className="flex items-center gap-4 text-xs font-mono">
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm bg-indigo-600" /> Gross Volume
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm bg-emerald-500" /> Platform Fee (5%)
-            </span>
-          </div>
-        </div>
-
-        {/* Responsive Bar Chart Rendering */}
-        <div className="h-64 flex items-end gap-3 sm:gap-6 pt-6 border-b border-slate-200 pb-2">
-          {revenueChart.map((m, idx) => {
-            const maxVal = Math.max(...revenueChart.map((d) => d.grossVolume), 10000);
-            const volumeHeight = Math.max(12, Math.round((m.grossVolume / maxVal) * 190));
-            const commHeight = Math.max(8, Math.round((m.commission / (maxVal * 0.1)) * 90));
-
-            return (
-              <div key={idx} className="flex-1 flex flex-col items-center gap-2 group relative">
-                {/* Tooltip */}
-                <div className="absolute -top-16 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none bg-slate-900 text-white text-[11px] p-2 rounded-lg shadow-xl whitespace-nowrap z-20 font-mono">
-                  <div>Volume: ${m.grossVolume.toLocaleString()}</div>
-                  <div className="text-emerald-400">Commission: ${m.commission.toLocaleString()}</div>
-                  <div className="text-slate-400">{m.auctionsCount} items closed</div>
-                </div>
-
-                {/* Bars */}
-                <div className="w-full flex items-end justify-center gap-1">
-                  <div
-                    style={{ height: `${volumeHeight}px` }}
-                    className="w-1/2 max-w-[28px] bg-gradient-to-t from-indigo-700 to-indigo-500 rounded-t-md transition-all group-hover:brightness-110"
-                  />
-                  <div
-                    style={{ height: `${commHeight}px` }}
-                    className="w-1/2 max-w-[18px] bg-gradient-to-t from-emerald-600 to-emerald-400 rounded-t-md transition-all group-hover:brightness-110"
-                  />
-                </div>
-
-                {/* Month Label */}
-                <span className="text-[11px] text-slate-500 font-mono font-medium truncate w-full text-center">
-                  {m.month.split(' ')[0]}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Operations Tab Bar */}
       <div className="flex border-b border-slate-200 mb-6 gap-2">
         <button
@@ -430,7 +379,7 @@ export const AdminDashboardPage = () => {
           }`}
         >
           <TrendingUp className="w-4 h-4" />
-          Commission & Transactions
+          Admin Commission &amp; Money Transitions
         </button>
 
         <button
@@ -877,10 +826,12 @@ export const AdminDashboardPage = () => {
               </button>
             </div>
 
-            <div className="text-xs text-slate-500 font-mono flex items-center gap-2">
-              <span>Platform Treasury:</span>
-              <span className="font-bold text-emerald-600 font-mono bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
-                ${(metrics?.treasuryBalance ?? commTxSummary?.treasuryBalance ?? 0).toFixed(2)} USD Liquid
+            <div className="text-xs text-slate-500 font-mono flex items-center gap-3 flex-wrap">
+              <span className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 px-3 py-1 rounded-xl font-bold">
+                Admin Wallet: ${(metrics?.adminWalletBalance ?? 0).toFixed(2)} USD
+              </span>
+              <span className="flex items-center gap-1.5 bg-indigo-50 text-indigo-800 border border-indigo-200 px-3 py-1 rounded-xl font-bold">
+                Treasury: ${(metrics?.treasuryBalance ?? commTxSummary?.treasuryBalance ?? 0).toFixed(2)} USD Liquid
               </span>
             </div>
           </div>
@@ -894,10 +845,11 @@ export const AdminDashboardPage = () => {
               </p>
             </div>
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-              <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Treasury Wallet Balance</p>
+              <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Admin Wallet Balance</p>
               <p className="text-2xl font-extrabold text-indigo-600 font-mono">
-                ${(metrics?.treasuryBalance ?? commTxSummary?.treasuryBalance ?? 0).toFixed(2)}
+                ${(metrics?.adminWalletBalance ?? 0).toFixed(2)}
               </p>
+              <p className="text-[10px] text-slate-400 font-mono mt-0.5">{metrics?.adminEmail || 'admin@gmail.com'}</p>
             </div>
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
               <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Gross Settled Volume</p>
@@ -1007,13 +959,13 @@ export const AdminDashboardPage = () => {
                   <table className="w-full text-left">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
-                        <th className="py-3 px-4">Date & Time</th>
-                        <th className="py-3 px-4">Transition Channel</th>
+                        <th className="py-3 px-4">Date &amp; Time</th>
+                        <th className="py-3 px-4">Money Transition</th>
                         <th className="py-3 px-4">Auction / Reference</th>
                         <th className="py-3 px-4">From Whom (Seller)</th>
                         <th className="py-3 px-4">Winning Buyer</th>
                         <th className="py-3 px-4 text-right">Hammer Price</th>
-                        <th className="py-3 px-4 text-right text-emerald-700">Commission (5%)</th>
+                        <th className="py-3 px-4 text-right text-emerald-700">Admin Received (+5%)</th>
                         <th className="py-3 px-4 text-center">Status</th>
                       </tr>
                     </thead>
@@ -1055,8 +1007,8 @@ export const AdminDashboardPage = () => {
                             ${tx.grossAmount.toFixed(2)}
                           </td>
                           <td className="py-3 px-4 text-right">
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold font-mono">
-                              +${tx.commission.toFixed(2)}
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-extrabold font-mono shadow-sm">
+                              +${tx.commission.toFixed(2)} USD
                             </span>
                           </td>
                           <td className="py-3 px-4 text-center">
@@ -1176,6 +1128,61 @@ export const AdminDashboardPage = () => {
               </div>
             </div>
           )}
+
+          {/* Monthly Financial Chart (Visual SVG Bar Graph) */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 mt-10">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Monthly Revenue &amp; Commission Ledger</h2>
+                <p className="text-xs text-slate-500">Gross settled marketplace volume vs. platform 5% fee collection</p>
+              </div>
+              <div className="flex items-center gap-4 text-xs font-mono">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-indigo-600" /> Gross Volume
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-emerald-500" /> Platform Fee (5%)
+                </span>
+              </div>
+            </div>
+
+            {/* Responsive Bar Chart Rendering */}
+            <div className="h-64 flex items-end gap-3 sm:gap-6 pt-6 border-b border-slate-200 pb-2">
+              {revenueChart.map((m, idx) => {
+                const maxVal = Math.max(...revenueChart.map((d) => d.grossVolume), 10000);
+                const volumeHeight = Math.max(12, Math.round((m.grossVolume / maxVal) * 190));
+                const commHeight = Math.max(8, Math.round((m.commission / (maxVal * 0.1)) * 90));
+
+                return (
+                  <div key={idx} className="flex-1 flex flex-col items-center gap-2 group relative">
+                    {/* Tooltip */}
+                    <div className="absolute -top-16 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none bg-slate-900 text-white text-[11px] p-2 rounded-lg shadow-xl whitespace-nowrap z-20 font-mono">
+                      <div>Volume: ${m.grossVolume.toLocaleString()}</div>
+                      <div className="text-emerald-400">Commission: ${m.commission.toLocaleString()}</div>
+                      <div className="text-slate-400">{m.auctionsCount} items closed</div>
+                    </div>
+
+                    {/* Bars */}
+                    <div className="w-full flex items-end justify-center gap-1">
+                      <div
+                        style={{ height: `${volumeHeight}px` }}
+                        className="w-1/2 max-w-[28px] bg-gradient-to-t from-indigo-700 to-indigo-500 rounded-t-md transition-all group-hover:brightness-110"
+                      />
+                      <div
+                        style={{ height: `${commHeight}px` }}
+                        className="w-1/2 max-w-[18px] bg-gradient-to-t from-emerald-600 to-emerald-400 rounded-t-md transition-all group-hover:brightness-110"
+                      />
+                    </div>
+
+                    {/* Month Label */}
+                    <span className="text-[11px] text-slate-500 font-mono font-medium truncate w-full text-center">
+                      {m.month.split(' ')[0]}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>
