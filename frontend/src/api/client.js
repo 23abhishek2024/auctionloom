@@ -97,6 +97,7 @@ export const adminApi = {
   updateProofStatus: (id, status, notes) =>
     api.put(`/admin/commission-proofs/${id}/status`, { status, admin_notes: notes }),
   getCommissionLedger: (params) => api.get('/admin/commission-ledger', { params }),
+  getCommissionTransactions: (params) => api.get('/admin/commission-transactions', { params }),
 };
 
 export const commissionApi = {

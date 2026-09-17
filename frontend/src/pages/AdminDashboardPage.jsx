@@ -36,13 +36,20 @@ export const AdminDashboardPage = () => {
   const [proofs, setProofs] = useState([]);
   const [auctions, setAuctions] = useState([]);
 
-  const [activeTab, setActiveTab] = useState('proofs'); // 'proofs', 'users', 'auctions', 'commission'
+  const [activeTab, setActiveTab] = useState('commission'); // 'commission', 'proofs', 'users', 'auctions'
   const [proofStatusFilter, setProofStatusFilter] = useState('PENDING'); // 'PENDING', 'APPROVED', 'REJECTED', 'ALL'
   const [userSearch, setUserSearch] = useState('');
   const [auctionSearch, setAuctionSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [selectedProofModal, setSelectedProofModal] = useState(null);
+
+  // Commission Sub-Tab & State
+  const [commTab, setCommTab] = useState('transactions'); // 'transactions' | 'ledger'
+  const [commTransactions, setCommTransactions] = useState([]);
+  const [commTxSummary, setCommTxSummary] = useState(null);
+  const [commTxPag, setCommTxPag] = useState({ page: 1, totalPages: 1, total: 0 });
+  const [commTxType, setCommTxType] = useState('ALL');
 
   // Commission Ledger State
   const [commRows, setCommRows] = useState([]);
@@ -91,6 +98,29 @@ export const AdminDashboardPage = () => {
     }
   }, [proofStatusFilter]);
 
+  // Commission Transactions Fetch
+  const fetchCommissionTransactions = useCallback(async (opts = {}) => {
+    setCommLoading(true);
+    try {
+      const res = await adminApi.getCommissionTransactions({
+        page: opts.page ?? commPage,
+        limit: 20,
+        search: commSearch || undefined,
+        type: commTxType !== 'ALL' ? commTxType : undefined,
+        from: commFrom || undefined,
+        to: commTo || undefined,
+      });
+      const d = res.data.data;
+      setCommTransactions(d.transactions || []);
+      setCommTxSummary(d.summary || null);
+      setCommTxPag(d.pagination || { page: 1, totalPages: 1, total: 0 });
+    } catch (err) {
+      console.error('[AdminDashboard] Commission transactions fetch error:', err);
+    } finally {
+      setCommLoading(false);
+    }
+  }, [commPage, commSearch, commTxType, commFrom, commTo]);
+
   // Commission Ledger Fetch
   const fetchCommissionLedger = useCallback(async (opts = {}) => {
     setCommLoading(true);
@@ -122,19 +152,26 @@ export const AdminDashboardPage = () => {
 
   useEffect(() => {
     if (activeTab === 'commission' && user?.role === 'admin') {
-      fetchCommissionLedger();
+      if (commTab === 'transactions') {
+        fetchCommissionTransactions();
+      } else {
+        fetchCommissionLedger();
+      }
     }
-  }, [activeTab, fetchCommissionLedger]);
+  }, [activeTab, commTab, fetchCommissionTransactions, fetchCommissionLedger]);
 
   const handleCommPageChange = (p) => {
     setCommPage(p);
-    fetchCommissionLedger({ page: p });
+    if (commTab === 'transactions') {
+      fetchCommissionTransactions({ page: p });
+    } else {
+      fetchCommissionLedger({ page: p });
+    }
   };
 
   const handleCommExportCsv = () => {
     const params = new URLSearchParams({
       format: 'csv',
-      groupBySeller: commGrouped,
       ...(commSearch ? { search: commSearch } : {}),
       ...(commFrom ? { from: commFrom } : {}),
       ...(commTo ? { to: commTo } : {}),
@@ -142,13 +179,19 @@ export const AdminDashboardPage = () => {
     const token = localStorage.getItem('token');
     const rawBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
     const base = rawBase.match(/https?:\/\/[^\s\r\n]+/)?.[0]?.replace(/\/+$/, '') || 'http://localhost:5000/api';
-    const url = `${base}/admin/commission-ledger?${params.toString()}`;
+    const endpoint = commTab === 'transactions' ? 'commission-transactions' : 'commission-ledger';
+    if (commTab === 'ledger') {
+      params.append('groupBySeller', commGrouped);
+    } else if (commTxType !== 'ALL') {
+      params.append('type', commTxType);
+    }
+    const url = `${base}/admin/${endpoint}?${params.toString()}`;
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.blob())
       .then((blob) => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = commGrouped ? 'commission_by_seller.csv' : 'commission_ledger.csv';
+        a.download = commTab === 'transactions' ? 'commission_transactions.csv' : (commGrouped ? 'commission_by_seller.csv' : 'commission_ledger.csv');
         a.click();
       })
       .catch(() => alert('CSV export failed. Please try again.'));
@@ -379,6 +422,18 @@ export const AdminDashboardPage = () => {
       {/* Operations Tab Bar */}
       <div className="flex border-b border-slate-200 mb-6 gap-2">
         <button
+          onClick={() => setActiveTab('commission')}
+          className={`pb-3 px-4 font-bold text-sm transition-all flex items-center gap-2 border-b-2 ${
+            activeTab === 'commission'
+              ? 'border-emerald-600 text-emerald-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" />
+          Commission & Transactions
+        </button>
+
+        <button
           onClick={() => setActiveTab('proofs')}
           className={`pb-3 px-4 font-bold text-sm transition-all flex items-center gap-2 border-b-2 ${
             activeTab === 'proofs'
@@ -387,7 +442,7 @@ export const AdminDashboardPage = () => {
           }`}
         >
           <Clock className="w-4 h-4" />
-          Commission Receipts
+          Legacy Wire Receipts
           {metrics?.pendingProofsCount > 0 && (
             <span className="px-2 py-0.5 rounded-full text-xs bg-amber-500 text-white font-mono">
               {metrics.pendingProofsCount}
@@ -417,18 +472,6 @@ export const AdminDashboardPage = () => {
         >
           <Gavel className="w-4 h-4" />
           Auction Inventory ({auctions.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('commission')}
-          className={`pb-3 px-4 font-bold text-sm transition-all flex items-center gap-2 border-b-2 ${
-            activeTab === 'commission'
-              ? 'border-emerald-600 text-emerald-600'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <TrendingUp className="w-4 h-4" />
-          Commission Analytics
         </button>
       </div>
 
@@ -800,31 +843,77 @@ export const AdminDashboardPage = () => {
         </div>
       )}
 
-      {/* TAB 4: COMMISSION LEDGER */}
+      {/* TAB 1: COMMISSION & TRANSACTIONS */}
       {activeTab === 'commission' && (
         <div className="space-y-6">
+          {/* Sub-Tab Switcher: Live Transactions Feed vs. Ledger */}
+          <div className="flex items-center justify-between flex-wrap gap-3 pb-2 border-b border-slate-200">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setCommTab('transactions'); setCommPage(1); }}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  commTab === 'transactions'
+                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <TrendingUp className="w-3.5 h-3.5" />
+                Live Commission Transactions Feed
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${commTab === 'transactions' ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                  {commTxSummary?.totalTransactions || commTransactions.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => { setCommTab('ledger'); setCommPage(1); }}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  commTab === 'ledger'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <DollarSign className="w-3.5 h-3.5" />
+                Auction & Seller Ledger
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-500 font-mono flex items-center gap-2">
+              <span>Platform Treasury:</span>
+              <span className="font-bold text-emerald-600 font-mono bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                ${(metrics?.treasuryBalance ?? commTxSummary?.treasuryBalance ?? 0).toFixed(2)} USD Liquid
+              </span>
+            </div>
+          </div>
 
           {/* KPI Summary Cards */}
-          {commSummary && !commGrouped && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">All-Time Commission</p>
-                <p className="text-2xl font-extrabold text-emerald-600 font-mono">${commSummary.totalCommission.toFixed(2)}</p>
-              </div>
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">This Month</p>
-                <p className="text-2xl font-extrabold text-indigo-600 font-mono">${commSummary.monthCommission.toFixed(2)}</p>
-              </div>
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Settled Auctions</p>
-                <p className="text-2xl font-extrabold text-slate-800 font-mono">{commSummary.totalAuctions}</p>
-              </div>
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Avg per Auction</p>
-                <p className="text-2xl font-extrabold text-amber-600 font-mono">${commSummary.avgCommission.toFixed(2)}</p>
-              </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Total Platform Commission</p>
+              <p className="text-2xl font-extrabold text-emerald-600 font-mono">
+                ${(commTxSummary?.totalCommission ?? metrics?.collectedCommission ?? 0).toFixed(2)}
+              </p>
             </div>
-          )}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Treasury Wallet Balance</p>
+              <p className="text-2xl font-extrabold text-indigo-600 font-mono">
+                ${(metrics?.treasuryBalance ?? commTxSummary?.treasuryBalance ?? 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Gross Settled Volume</p>
+              <p className="text-2xl font-extrabold text-slate-800 font-mono">
+                ${(metrics?.totalVolume || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Commission Transitions</p>
+              <p className="text-2xl font-extrabold text-amber-600 font-mono">
+                {commTab === 'transactions' 
+                  ? (commTxSummary?.totalTransactions || commTransactions.length) 
+                  : (commSummary?.totalAuctions || 0)}
+              </p>
+            </div>
+          </div>
 
           {/* Filter Bar */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
@@ -835,12 +924,30 @@ export const AdminDashboardPage = () => {
                   type="text"
                   value={commSearch}
                   onChange={(e) => setCommSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && fetchCommissionLedger({ page: 1 })}
-                  placeholder="Auction, seller, or winner..."
+                  onKeyDown={(e) => e.key === 'Enter' && (commTab === 'transactions' ? fetchCommissionTransactions({ page: 1 }) : fetchCommissionLedger({ page: 1 }))}
+                  placeholder="Search by auction title, seller, buyer, or ID..."
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                   id="comm-search-input"
                 />
               </div>
+
+              {commTab === 'transactions' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Channel / Type</label>
+                  <select
+                    value={commTxType}
+                    onChange={(e) => { setCommTxType(e.target.value); setCommPage(1); }}
+                    className="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:border-indigo-400 font-mono"
+                    id="comm-type-filter"
+                  >
+                    <option value="ALL">All Sources</option>
+                    <option value="AUCTION_ESCROW">Auction Escrow (5%)</option>
+                    <option value="WALLET_DIRECT">Direct Wallet Payment</option>
+                    <option value="MANUAL_WIRE">Manual Bank Wire</option>
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">From</label>
                 <input type="date" value={commFrom} onChange={(e) => setCommFrom(e.target.value)}
@@ -851,21 +958,30 @@ export const AdminDashboardPage = () => {
                 <input type="date" value={commTo} onChange={(e) => setCommTo(e.target.value)}
                   className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-indigo-400" id="comm-to-date" />
               </div>
-              <button onClick={() => { setCommPage(1); fetchCommissionLedger({ page: 1 }); }}
-                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold shadow hover:bg-indigo-700 transition-all cursor-pointer" id="comm-apply-filter">
+              <button 
+                onClick={() => { setCommPage(1); commTab === 'transactions' ? fetchCommissionTransactions({ page: 1 }) : fetchCommissionLedger({ page: 1 }); }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold shadow hover:bg-indigo-700 transition-all cursor-pointer" id="comm-apply-filter"
+              >
                 Apply
               </button>
-              <button onClick={() => { setCommSearch(''); setCommFrom(''); setCommTo(''); setCommPage(1); }}
-                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-sm font-medium hover:bg-slate-200 transition-all cursor-pointer">
+              <button 
+                onClick={() => { setCommSearch(''); setCommFrom(''); setCommTo(''); setCommTxType('ALL'); setCommPage(1); }}
+                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-sm font-medium hover:bg-slate-200 transition-all cursor-pointer"
+              >
                 Clear
               </button>
             </div>
+
             <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
-              <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
-                <input type="checkbox" checked={commGrouped} onChange={(e) => { setCommGrouped(e.target.checked); setCommPage(1); }}
-                  className="w-4 h-4 rounded accent-indigo-600" id="comm-group-by-seller" />
-                Group by Seller
-              </label>
+              {commTab === 'ledger' ? (
+                <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+                  <input type="checkbox" checked={commGrouped} onChange={(e) => { setCommGrouped(e.target.checked); setCommPage(1); }}
+                    className="w-4 h-4 rounded accent-indigo-600" id="comm-group-by-seller" />
+                  Group by Seller
+                </label>
+              ) : (
+                <span className="text-xs text-slate-400 font-mono">Real-time immutable double-entry platform commission transitions</span>
+              )}
               <button onClick={handleCommExportCsv}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-medium hover:bg-emerald-100 transition-all cursor-pointer" id="comm-export-csv">
                 <Download className="w-3.5 h-3.5" /> Export CSV
@@ -873,83 +989,174 @@ export const AdminDashboardPage = () => {
             </div>
           </div>
 
-          {/* Ledger Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            {commLoading ? (
-              <div className="p-8 space-y-3">
-                {[...Array(4)].map((_, i) => (<div key={i} className="h-10 bg-slate-100 rounded-xl animate-pulse" />))}
-              </div>
-            ) : commRows.length === 0 ? (
-              <div className="py-16 text-center text-slate-400">
-                <DollarSign className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                <p className="font-semibold text-slate-600">No commission records found</p>
-                <p className="text-xs mt-1">Settle a lot to see data here.</p>
-              </div>
-            ) : commGrouped ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
-                      <th className="py-3 px-4">Seller</th>
-                      <th className="py-3 px-4">Auctions</th>
-                      <th className="py-3 px-4">Total Volume</th>
-                      <th className="py-3 px-4 text-emerald-700">Total Commission</th>
-                      <th className="py-3 px-4">Last Settlement</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {commRows.map((r) => (
-                      <tr key={r.sellerId} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-4"><p className="text-sm font-semibold text-slate-800">{r.sellerName}</p><p className="text-xs text-slate-400 font-mono">{r.sellerEmail}</p></td>
-                        <td className="py-3 px-4 text-sm font-mono text-slate-700">{r.auctionsCount}</td>
-                        <td className="py-3 px-4 text-sm font-mono text-slate-700">${r.totalVolume.toFixed(2)}</td>
-                        <td className="py-3 px-4 text-sm font-bold font-mono text-emerald-700">${r.totalCommission.toFixed(2)}</td>
-                        <td className="py-3 px-4 text-xs text-slate-400">{r.lastSettlement ? new Date(r.lastSettlement).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+          {/* Table: LIVE TRANSACTIONS FEED vs. LEDGER */}
+          {commTab === 'transactions' ? (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              {commLoading ? (
+                <div className="p-8 space-y-3">
+                  {[...Array(4)].map((_, i) => (<div key={i} className="h-10 bg-slate-100 rounded-xl animate-pulse" />))}
+                </div>
+              ) : commTransactions.length === 0 ? (
+                <div className="py-16 text-center text-slate-400">
+                  <DollarSign className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                  <p className="font-semibold text-slate-600">No commission transactions found</p>
+                  <p className="text-xs mt-1">When an auction settles or a commission is paid, money movements appear here immediately.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                        <th className="py-3 px-4">Date & Time</th>
+                        <th className="py-3 px-4">Transition Channel</th>
+                        <th className="py-3 px-4">Auction / Reference</th>
+                        <th className="py-3 px-4">From Whom (Seller)</th>
+                        <th className="py-3 px-4">Winning Buyer</th>
+                        <th className="py-3 px-4 text-right">Hammer Price</th>
+                        <th className="py-3 px-4 text-right text-emerald-700">Commission (5%)</th>
+                        <th className="py-3 px-4 text-center">Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
-                      <th className="py-3 px-4">Auction</th>
-                      <th className="py-3 px-4">Seller</th>
-                      <th className="py-3 px-4">Winner</th>
-                      <th className="py-3 px-4">Hammer Price</th>
-                      <th className="py-3 px-4 text-emerald-700">Commission 5%</th>
-                      <th className="py-3 px-4">Settled At</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {commRows.map((r) => (
-                      <tr key={r.auctionId} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-4"><p className="text-sm font-semibold text-slate-800 max-w-[200px] truncate" title={r.auctionTitle}>{r.auctionTitle}</p><p className="text-xs font-mono text-slate-400">{r.auctionId?.slice(0, 8)}…</p></td>
-                        <td className="py-3 px-4"><p className="text-sm text-slate-700">{r.sellerName}</p><p className="text-xs text-slate-400 font-mono">{r.sellerEmail}</p></td>
-                        <td className="py-3 px-4"><p className="text-sm text-slate-700">{r.winnerName}</p><p className="text-xs text-slate-400 font-mono">{r.winnerEmail}</p></td>
-                        <td className="py-3 px-4 text-sm font-mono font-semibold text-slate-800">${r.hammerPrice.toFixed(2)}</td>
-                        <td className="py-3 px-4"><span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold font-mono">+${r.commission.toFixed(2)}</span></td>
-                        <td className="py-3 px-4 text-xs text-slate-400 whitespace-nowrap">{r.settledAt ? new Date(r.settledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {commTransactions.map((tx) => (
+                        <tr key={tx.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-4 whitespace-nowrap text-xs text-slate-500 font-mono">
+                            {new Date(tx.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}{' '}
+                            <span className="text-slate-400">{new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono uppercase ${
+                              tx.type === 'AUCTION_ESCROW'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : tx.type === 'WALLET_DIRECT'
+                                ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                                : 'bg-purple-100 text-purple-800 border border-purple-200'
+                            }`}>
+                              {tx.type === 'AUCTION_ESCROW' ? 'Auction Escrow 5%' : tx.type === 'WALLET_DIRECT' ? 'Wallet Payment' : 'Bank Wire'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="text-sm font-semibold text-slate-800 max-w-[200px] truncate" title={tx.auctionTitle}>
+                              {tx.auctionTitle}
+                            </p>
+                            <p className="text-[10px] font-mono text-slate-400">
+                              TX: {tx.id?.slice(0, 8)}…
+                            </p>
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="text-sm text-slate-700 font-medium">{tx.sellerName}</p>
+                            <p className="text-xs text-slate-400 font-mono">{tx.sellerEmail}</p>
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="text-sm text-slate-700">{tx.winnerName || '—'}</p>
+                            <p className="text-xs text-slate-400 font-mono">{tx.winnerEmail || '—'}</p>
+                          </td>
+                          <td className="py-3 px-4 text-right text-sm font-mono font-semibold text-slate-700">
+                            ${tx.grossAmount.toFixed(2)}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold font-mono">
+                              +${tx.commission.toFixed(2)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold font-mono">
+                              <Check className="w-3 h-3" /> {tx.status || 'COMPLETED'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* LEDGER TABLE */
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              {commLoading ? (
+                <div className="p-8 space-y-3">
+                  {[...Array(4)].map((_, i) => (<div key={i} className="h-10 bg-slate-100 rounded-xl animate-pulse" />))}
+                </div>
+              ) : commRows.length === 0 ? (
+                <div className="py-16 text-center text-slate-400">
+                  <DollarSign className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                  <p className="font-semibold text-slate-600">No commission records found</p>
+                  <p className="text-xs mt-1">Settle a lot to see data here.</p>
+                </div>
+              ) : commGrouped ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                        <th className="py-3 px-4">Seller</th>
+                        <th className="py-3 px-4">Auctions</th>
+                        <th className="py-3 px-4">Total Volume</th>
+                        <th className="py-3 px-4 text-emerald-700">Total Commission</th>
+                        <th className="py-3 px-4">Last Settlement</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {commRows.map((r) => (
+                        <tr key={r.sellerId} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-4"><p className="text-sm font-semibold text-slate-800">{r.sellerName}</p><p className="text-xs text-slate-400 font-mono">{r.sellerEmail}</p></td>
+                          <td className="py-3 px-4 text-sm font-mono text-slate-700">{r.auctionsCount}</td>
+                          <td className="py-3 px-4 text-sm font-mono text-slate-700">${r.totalVolume.toFixed(2)}</td>
+                          <td className="py-3 px-4 text-sm font-bold font-mono text-emerald-700">${r.totalCommission.toFixed(2)}</td>
+                          <td className="py-3 px-4 text-xs text-slate-400">{r.lastSettlement ? new Date(r.lastSettlement).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                        <th className="py-3 px-4">Auction</th>
+                        <th className="py-3 px-4">Seller</th>
+                        <th className="py-3 px-4">Winner</th>
+                        <th className="py-3 px-4 text-right">Hammer Price</th>
+                        <th className="py-3 px-4 text-right text-emerald-700">Commission 5%</th>
+                        <th className="py-3 px-4">Settled At</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {commRows.map((r) => (
+                        <tr key={r.auctionId} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-4"><p className="text-sm font-semibold text-slate-800 max-w-[200px] truncate" title={r.auctionTitle}>{r.auctionTitle}</p><p className="text-xs font-mono text-slate-400">{r.auctionId?.slice(0, 8)}…</p></td>
+                          <td className="py-3 px-4"><p className="text-sm text-slate-700">{r.sellerName}</p><p className="text-xs text-slate-400 font-mono">{r.sellerEmail}</p></td>
+                          <td className="py-3 px-4"><p className="text-sm text-slate-700">{r.winnerName}</p><p className="text-xs text-slate-400 font-mono">{r.winnerEmail}</p></td>
+                          <td className="py-3 px-4 text-right text-sm font-mono font-semibold text-slate-800">${r.hammerPrice.toFixed(2)}</td>
+                          <td className="py-3 px-4 text-right"><span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold font-mono">+${r.commission.toFixed(2)}</span></td>
+                          <td className="py-3 px-4 text-xs text-slate-400 whitespace-nowrap">{r.settledAt ? new Date(r.settledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Pagination */}
-          {!commLoading && !commGrouped && commPag.totalPages > 1 && (
+          {!commLoading && (
             <div className="flex items-center justify-between">
-              <p className="text-xs text-slate-500 font-mono">Page {commPag.page} of {commPag.totalPages} &middot; {commPag.total} records</p>
+              <p className="text-xs text-slate-500 font-mono">
+                Page {commTab === 'transactions' ? commTxPag.page : commPag.page} of {commTab === 'transactions' ? commTxPag.totalPages : commPag.totalPages} &middot;{' '}
+                {commTab === 'transactions' ? commTxPag.total : commPag.total} records
+              </p>
               <div className="flex items-center gap-2">
-                <button onClick={() => handleCommPageChange(commPage - 1)} disabled={commPage <= 1} id="comm-prev-page"
-                  className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                <button 
+                  onClick={() => handleCommPageChange(commPage - 1)} 
+                  disabled={commPage <= 1} 
+                  id="comm-prev-page"
+                  className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                {Array.from({ length: Math.min(5, commPag.totalPages) }, (_, i) => {
+                {Array.from({ length: Math.min(5, commTab === 'transactions' ? commTxPag.totalPages : commPag.totalPages) }, (_, i) => {
                   const p = i + 1;
                   return (
                     <button key={p} onClick={() => handleCommPageChange(p)} id={`comm-page-${p}`}
@@ -958,8 +1165,12 @@ export const AdminDashboardPage = () => {
                       }`}>{p}</button>
                   );
                 })}
-                <button onClick={() => handleCommPageChange(commPage + 1)} disabled={commPage >= commPag.totalPages} id="comm-next-page"
-                  className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                <button 
+                  onClick={() => handleCommPageChange(commPage + 1)} 
+                  disabled={commPage >= (commTab === 'transactions' ? commTxPag.totalPages : commPag.totalPages)} 
+                  id="comm-next-page"
+                  className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>

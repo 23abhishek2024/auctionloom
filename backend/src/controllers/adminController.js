@@ -566,6 +566,273 @@ const getCommissionLedger = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /api/admin/commission-transactions
+ * Returns unified transaction-level platform commission entries from wallet and legacy proofs
+ */
+const getCommissionTransactions = async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page || '1'));
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20')));
+    const offset = (page - 1) * limit;
+    const search = (req.query.search || '').trim();
+    const type = (req.query.type || 'ALL').toUpperCase();
+    const from = req.query.from || null;
+    const to = req.query.to || null;
+    const format = (req.query.format || 'json').toLowerCase();
+
+    let baseQuery = `
+      WITH unified_commissions AS (
+        SELECT 
+          wt.id::text AS id,
+          wt.created_at AS date,
+          CASE 
+            WHEN wt.reference_type = 'AUCTION' THEN 'AUCTION_ESCROW'
+            ELSE 'WALLET_DIRECT'
+          END AS type,
+          wt.amount::numeric AS commission,
+          COALESCE((wt.metadata->>'hammerPrice')::numeric, a.current_price, (wt.amount * 20))::numeric AS gross_amount,
+          COALESCE(wt.metadata->>'auctionTitle', a.title, 'Direct Wallet Commission Payment') AS auction_title,
+          a.id::text AS auction_id,
+          COALESCE(seller.name, split_part(seller.email, '@', 1), payer.name, split_part(payer.email, '@', 1), 'Seller') AS seller_name,
+          COALESCE(seller.email, payer.email) AS seller_email,
+          COALESCE(winner.name, split_part(winner.email, '@', 1), 'Buyer') AS winner_name,
+          winner.email AS winner_email,
+          'WALLET' AS method,
+          wt.status AS status
+        FROM wallet_transactions wt
+        LEFT JOIN wallets w ON w.id = wt.wallet_id
+        LEFT JOIN users payer ON payer.id = w.user_id
+        LEFT JOIN auctions a ON a.id = wt.reference_id
+        LEFT JOIN users seller ON seller.id = a.seller_id
+        LEFT JOIN users winner ON winner.id = a.winner_id
+        WHERE wt.type = 'COMMISSION'
+
+        UNION ALL
+
+        SELECT
+          a.id::text AS id,
+          COALESCE(a.settled_at, a.updated_at, a.created_at) AS date,
+          'AUCTION_ESCROW' AS type,
+          COALESCE(NULLIF(a.commission_amount, 0), ROUND(a.current_price * 0.05, 2))::numeric AS commission,
+          a.current_price::numeric AS gross_amount,
+          a.title AS auction_title,
+          a.id::text AS auction_id,
+          COALESCE(seller.name, split_part(seller.email, '@', 1), 'Seller') AS seller_name,
+          seller.email AS seller_email,
+          COALESCE(winner.name, split_part(winner.email, '@', 1), 'Buyer') AS winner_name,
+          winner.email AS winner_email,
+          'PLATFORM_ESCROW' AS method,
+          'COMPLETED' AS status
+        FROM auctions a
+        JOIN users seller ON seller.id = a.seller_id
+        JOIN users winner ON winner.id = a.winner_id
+        WHERE a.is_settled = TRUE 
+          AND a.id NOT IN (SELECT reference_id FROM wallet_transactions WHERE reference_type = 'AUCTION' AND reference_id IS NOT NULL)
+
+        UNION ALL
+
+        SELECT
+          p.id::text AS id,
+          p.created_at AS date,
+          'MANUAL_WIRE' AS type,
+          p.amount::numeric AS commission,
+          (p.amount * 20)::numeric AS gross_amount,
+          COALESCE(p.comment, 'Bank Wire Commission Receipt') AS auction_title,
+          NULL AS auction_id,
+          COALESCE(u.name, split_part(u.email, '@', 1), 'Seller') AS seller_name,
+          u.email AS seller_email,
+          '—' AS winner_name,
+          NULL AS winner_email,
+          'MANUAL_WIRE' AS method,
+          p.status AS status
+        FROM commission_proofs p
+        JOIN users u ON u.id = p.user_id
+        WHERE p.status = 'APPROVED' AND (p.payment_method IS NULL OR p.payment_method = 'MANUAL_WIRE')
+      )
+      SELECT * FROM unified_commissions
+    `;
+
+    const conditions = [];
+    const params = [];
+
+    if (type !== 'ALL' && ['AUCTION_ESCROW', 'WALLET_DIRECT', 'MANUAL_WIRE'].includes(type)) {
+      params.push(type);
+      conditions.push(`type = $${params.length}`);
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      const idx = params.length;
+      conditions.push(`(auction_title ILIKE $${idx} OR seller_name ILIKE $${idx} OR seller_email ILIKE $${idx} OR winner_name ILIKE $${idx} OR winner_email ILIKE $${idx})`);
+    }
+
+    if (from) {
+      params.push(from);
+      conditions.push(`date >= $${params.length}::date`);
+    }
+
+    if (to) {
+      params.push(to);
+      conditions.push(`date <= ($${params.length}::date + INTERVAL '1 day')`);
+    }
+
+    const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+
+    // Summary query
+    const summaryRes = await pool.query(`
+      WITH unified_commissions AS (
+        SELECT 
+          wt.id::text AS id,
+          wt.created_at AS date,
+          wt.amount::numeric AS commission
+        FROM wallet_transactions wt
+        WHERE wt.type = 'COMMISSION'
+
+        UNION ALL
+
+        SELECT
+          a.id::text AS id,
+          COALESCE(a.settled_at, a.updated_at, a.created_at) AS date,
+          COALESCE(NULLIF(a.commission_amount, 0), ROUND(a.current_price * 0.05, 2))::numeric AS commission
+        FROM auctions a
+        WHERE a.is_settled = TRUE 
+          AND a.id NOT IN (SELECT reference_id FROM wallet_transactions WHERE reference_type = 'AUCTION' AND reference_id IS NOT NULL)
+
+        UNION ALL
+
+        SELECT
+          p.id::text AS id,
+          p.created_at AS date,
+          p.amount::numeric AS commission
+        FROM commission_proofs p
+        WHERE p.status = 'APPROVED' AND (p.payment_method IS NULL OR p.payment_method = 'MANUAL_WIRE')
+      )
+      SELECT 
+        COALESCE(SUM(commission), 0)::numeric AS total_commission,
+        COUNT(*)::int AS total_transactions,
+        COALESCE((SELECT balance FROM wallets WHERE user_id = '00000000-0000-0000-0000-000000000000'), 0)::numeric AS treasury_balance
+      FROM unified_commissions
+    `);
+
+    // Count query
+    const countRes = await pool.query(
+      `WITH unified_commissions AS (
+        SELECT 
+          wt.id::text AS id,
+          wt.created_at AS date,
+          CASE 
+            WHEN wt.reference_type = 'AUCTION' THEN 'AUCTION_ESCROW'
+            ELSE 'WALLET_DIRECT'
+          END AS type,
+          wt.amount::numeric AS commission,
+          COALESCE(wt.metadata->>'auctionTitle', a.title, 'Direct Wallet Commission Payment') AS auction_title,
+          COALESCE(seller.name, split_part(seller.email, '@', 1), payer.name, split_part(payer.email, '@', 1), 'Seller') AS seller_name,
+          COALESCE(seller.email, payer.email) AS seller_email,
+          COALESCE(winner.name, split_part(winner.email, '@', 1), 'Buyer') AS winner_name,
+          winner.email AS winner_email
+        FROM wallet_transactions wt
+        LEFT JOIN wallets w ON w.id = wt.wallet_id
+        LEFT JOIN users payer ON payer.id = w.user_id
+        LEFT JOIN auctions a ON a.id = wt.reference_id
+        LEFT JOIN users seller ON seller.id = a.seller_id
+        LEFT JOIN users winner ON winner.id = a.winner_id
+        WHERE wt.type = 'COMMISSION'
+
+        UNION ALL
+
+        SELECT
+          a.id::text AS id,
+          COALESCE(a.settled_at, a.updated_at, a.created_at) AS date,
+          'AUCTION_ESCROW' AS type,
+          COALESCE(NULLIF(a.commission_amount, 0), ROUND(a.current_price * 0.05, 2))::numeric AS commission,
+          a.title AS auction_title,
+          COALESCE(seller.name, split_part(seller.email, '@', 1), 'Seller') AS seller_name,
+          seller.email AS seller_email,
+          COALESCE(winner.name, split_part(winner.email, '@', 1), 'Buyer') AS winner_name,
+          winner.email AS winner_email
+        FROM auctions a
+        JOIN users seller ON seller.id = a.seller_id
+        JOIN users winner ON winner.id = a.winner_id
+        WHERE a.is_settled = TRUE 
+          AND a.id NOT IN (SELECT reference_id FROM wallet_transactions WHERE reference_type = 'AUCTION' AND reference_id IS NOT NULL)
+
+        UNION ALL
+
+        SELECT
+          p.id::text AS id,
+          p.created_at AS date,
+          'MANUAL_WIRE' AS type,
+          p.amount::numeric AS commission,
+          COALESCE(p.comment, 'Bank Wire Commission Receipt') AS auction_title,
+          COALESCE(u.name, split_part(u.email, '@', 1), 'Seller') AS seller_name,
+          u.email AS seller_email,
+          '—' AS winner_name,
+          NULL AS winner_email
+        FROM commission_proofs p
+        JOIN users u ON u.id = p.user_id
+        WHERE p.status = 'APPROVED' AND (p.payment_method IS NULL OR p.payment_method = 'MANUAL_WIRE')
+      )
+      SELECT COUNT(*)::int AS total FROM unified_commissions ${whereClause}`,
+      params
+    );
+
+    // Data query
+    const dataRes = await pool.query(
+      `${baseQuery} ${whereClause} ORDER BY date DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
+    );
+
+    const total = countRes.rows[0].total;
+    const summary = summaryRes.rows[0];
+    const transactions = dataRes.rows.map(r => ({
+      id: r.id,
+      date: r.date,
+      type: r.type,
+      commission: parseFloat(r.commission || 0),
+      grossAmount: parseFloat(r.gross_amount || 0),
+      auctionTitle: r.auction_title,
+      auctionId: r.auction_id,
+      sellerName: r.seller_name,
+      sellerEmail: r.seller_email,
+      winnerName: r.winner_name,
+      winnerEmail: r.winner_email,
+      method: r.method,
+      status: r.status,
+    }));
+
+    if (format === 'csv') {
+      const header = 'Transaction ID,Date,Type,Auction Title,Seller Name,Seller Email,Winner Name,Winner Email,Gross Amount ($),Commission ($),Status';
+      const csvRows = transactions.map(r => 
+        `"${r.id}","${new Date(r.date).toISOString()}","${r.type}","${r.auctionTitle.replace(/"/g, '""')}","${r.sellerName.replace(/"/g, '""')}","${r.sellerEmail || ''}","${r.winnerName || ''}","${r.winnerEmail || ''}",${r.grossAmount.toFixed(2)},${r.commission.toFixed(2)},"${r.status}"`
+      );
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="commission_transactions.csv"');
+      return res.send([header, ...csvRows].join('\n'));
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        summary: {
+          totalCommission: parseFloat(summary.total_commission),
+          totalTransactions: summary.total_transactions,
+          treasuryBalance: parseFloat(summary.treasury_balance),
+        },
+        transactions,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit) || 1,
+        }
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getAdminMetrics,
   getRevenueChart,
@@ -576,4 +843,5 @@ module.exports = {
   getAllPaymentProofs,
   updatePaymentProofStatus,
   getCommissionLedger,
+  getCommissionTransactions,
 };
