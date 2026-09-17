@@ -39,16 +39,24 @@ const getAdminMetrics = async (req, res, next) => {
     // 4. Commission metrics
     const commissionRes = await pool.query(`
       SELECT 
-        COALESCE(SUM(commission_amount), 0)::numeric AS accrued_commission
+        COALESCE(SUM(CASE WHEN commission_amount > 0 THEN commission_amount ELSE ROUND(current_price * 0.05, 2) END), 0)::numeric AS accrued_commission
       FROM auctions
-      WHERE commission_calculated = TRUE
+      WHERE status = 'CLOSED' AND winner_id IS NOT NULL
     `);
 
     const collectedRes = await pool.query(`
       SELECT 
-        COALESCE(SUM(amount), 0)::numeric AS collected_commission
-      FROM commission_proofs
-      WHERE status = 'APPROVED'
+        (
+          COALESCE((SELECT SUM(COALESCE(NULLIF(commission_amount, 0), ROUND(current_price * 0.05, 2))) FROM auctions WHERE is_settled = TRUE), 0) +
+          COALESCE((SELECT SUM(amount) FROM wallet_transactions WHERE type = 'COMMISSION' AND reference_type != 'AUCTION' AND status = 'COMPLETED'), 0) +
+          COALESCE((SELECT SUM(amount) FROM commission_proofs WHERE status = 'APPROVED' AND (payment_method IS NULL OR payment_method = 'MANUAL_WIRE')), 0)
+        )::numeric AS collected_commission
+    `);
+
+    const treasuryRes = await pool.query(`
+      SELECT COALESCE(balance, 0)::numeric AS treasury_balance
+      FROM wallets
+      WHERE user_id = '00000000-0000-0000-0000-000000000000'
     `);
 
     const pendingProofsRes = await pool.query(`
@@ -70,6 +78,7 @@ const getAdminMetrics = async (req, res, next) => {
         userBreakdown: userCountsRes.rows[0],
         accruedCommission: parseFloat(commissionRes.rows[0].accrued_commission || 0),
         collectedCommission: parseFloat(collectedRes.rows[0].collected_commission || 0),
+        treasuryBalance: parseFloat(treasuryRes.rows[0]?.treasury_balance || 0),
         pendingProofsCount: pendingProofsRes.rows[0].pending_proofs_count || 0,
         totalBids: totalBidsRes.rows[0].total_bids || 0,
       },
@@ -91,7 +100,7 @@ const getRevenueChart = async (req, res, next) => {
         DATE_TRUNC('month', created_at) AS month_date,
         COUNT(id)::int AS auction_count,
         COALESCE(SUM(current_price), 0)::numeric AS gross_volume,
-        COALESCE(SUM(commission_amount), 0)::numeric AS platform_commission
+        COALESCE(SUM(CASE WHEN commission_amount > 0 THEN commission_amount ELSE ROUND(current_price * 0.05, 2) END), 0)::numeric AS platform_commission
       FROM auctions
       WHERE status = 'CLOSED' AND winner_id IS NOT NULL
       GROUP BY DATE_TRUNC('month', created_at), TO_CHAR(created_at, 'Mon YYYY')
@@ -432,7 +441,7 @@ const getCommissionLedger = async (req, res, next) => {
            COALESCE(seller.name, seller.email) AS seller_name,
            seller.email         AS seller_email,
            COUNT(a.id)::int     AS auctions_count,
-           SUM(a.commission_amount)::numeric AS total_commission,
+           SUM(COALESCE(NULLIF(a.commission_amount, 0), ROUND(a.current_price * 0.05, 2)))::numeric AS total_commission,
            SUM(a.current_price)::numeric     AS total_volume,
            MIN(COALESCE(a.settled_at, a.updated_at, a.created_at)) AS first_settlement,
            MAX(COALESCE(a.settled_at, a.updated_at, a.created_at)) AS last_settlement
@@ -476,7 +485,7 @@ const getCommissionLedger = async (req, res, next) => {
            a.id                  AS auction_id,
            a.title               AS auction_title,
            a.current_price       AS hammer_price,
-           a.commission_amount   AS commission,
+           COALESCE(NULLIF(a.commission_amount, 0), ROUND(a.current_price * 0.05, 2)) AS commission,
            COALESCE(a.settled_at, a.updated_at, a.created_at) AS settled_at,
            COALESCE(seller.name, seller.email) AS seller_name,
            seller.email          AS seller_email,
@@ -501,10 +510,10 @@ const getCommissionLedger = async (req, res, next) => {
       // Global summary (ignoring pagination/search filters)
       pool.query(`
         SELECT
-          COALESCE(SUM(commission_amount), 0)::numeric AS total_commission,
-          COALESCE(SUM(CASE WHEN COALESCE(settled_at, updated_at, created_at) >= date_trunc('month', NOW()) THEN commission_amount ELSE 0 END), 0)::numeric AS month_commission,
+          COALESCE(SUM(COALESCE(NULLIF(commission_amount, 0), ROUND(current_price * 0.05, 2))), 0)::numeric AS total_commission,
+          COALESCE(SUM(CASE WHEN COALESCE(settled_at, updated_at, created_at) >= date_trunc('month', NOW()) THEN COALESCE(NULLIF(commission_amount, 0), ROUND(current_price * 0.05, 2)) ELSE 0 END), 0)::numeric AS month_commission,
           COUNT(*)::int AS total_auctions,
-          COALESCE(AVG(commission_amount), 0)::numeric AS avg_commission
+          COALESCE(AVG(COALESCE(NULLIF(commission_amount, 0), ROUND(current_price * 0.05, 2))), 0)::numeric AS avg_commission
         FROM auctions
         WHERE is_settled = TRUE AND winner_id IS NOT NULL
       `),

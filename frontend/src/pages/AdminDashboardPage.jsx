@@ -278,8 +278,13 @@ export const AdminDashboardPage = () => {
           <div className="text-2xl font-extrabold text-emerald-600 font-mono">
             ${metrics?.collectedCommission?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            ${metrics?.accruedCommission?.toLocaleString() || '0.00'} total accrued fees
+          <p className="text-xs text-slate-500 mt-1 flex items-center justify-between">
+            <span>${metrics?.accruedCommission?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'} total accrued</span>
+            {metrics?.treasuryBalance !== undefined && metrics.treasuryBalance > 0 && (
+              <span className="text-emerald-600 font-bold font-mono">
+                ${metrics.treasuryBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} liquid
+              </span>
+            )}
           </p>
         </div>
 
