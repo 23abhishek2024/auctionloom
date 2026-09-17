@@ -317,6 +317,10 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
     }
     const auction = auctionRes.rows[0];
 
+    if (auction.is_settled) {
+      throw new Error('This auction lot has already been settled via platform escrow.');
+    }
+
     // 2. Debit Winner
     const debitKey = `${idempotencyPrefix || 'lot'}_debit_${auctionId}`;
     const debitResult = await debitWallet({
@@ -329,6 +333,14 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       metadata: { auctionTitle: auction.title, sellerId, commission },
       client,
     });
+
+    if (debitResult.alreadyProcessed) {
+      await client.query(
+        `UPDATE auctions SET is_settled = true, settled_at = COALESCE(settled_at, NOW()), updated_at = NOW() WHERE id = $1`,
+        [auctionId]
+      );
+      throw new Error('This auction lot settlement has already been processed.');
+    }
 
     // 3. Credit Seller (net of commission)
     const creditKey = `${idempotencyPrefix || 'lot'}_credit_${auctionId}`;
@@ -348,16 +360,27 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       client,
     });
 
-    // 4. Mark commission settled in platform records
+    // 4. Mark auction as settled and record timestamp in platform records
     await client.query(
       `UPDATE auctions 
-       SET commission_calculated = true, 
+       SET is_settled = true,
+           settled_at = NOW(),
+           updated_at = NOW(),
+           commission_calculated = true, 
            commission_amount = $1
        WHERE id = $2`,
       [commission, auctionId]
     );
 
-    // 5. Automatically log approved commission proof for platform accounting (non-critical auxiliary audit)
+    // 5. Decrement seller's unpaid commission debt since platform fee was deducted at source
+    await client.query(
+      `UPDATE users 
+       SET unpaid_commission = GREATEST(0.00, unpaid_commission - $1) 
+       WHERE id = $2`,
+      [commission, sellerId]
+    );
+
+    // 6. Automatically log approved commission proof for platform accounting (non-critical auxiliary audit)
     try {
       await client.query(
         `INSERT INTO commission_proofs (user_id, amount, comment, proof_url, notes, screenshot_url, status, admin_notes)
@@ -385,6 +408,8 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       hammerPrice: numericPrice,
       commission,
       sellerPayout,
+      winnerWallet: debitResult.wallet,
+      sellerWallet: creditResult.wallet,
       winnerTransaction: debitResult.transaction,
       sellerTransaction: creditResult.transaction,
     };

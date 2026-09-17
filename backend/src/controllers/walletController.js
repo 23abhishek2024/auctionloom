@@ -166,6 +166,14 @@ const settleLotPayment = async (req, res) => {
       return res.status(403).json({ error: 'Only the winning bidder can settle this auction lot.' });
     }
 
+    if (auction.is_settled) {
+      return res.status(400).json({
+        error: 'This auction lot has already been settled via platform escrow.',
+        code: 'ALREADY_SETTLED',
+        isSettled: true,
+      });
+    }
+
     // 2. Execute atomic settlement
     const settlement = await walletService.settleLotEscrow({
       auctionId,
@@ -181,6 +189,13 @@ const settleLotPayment = async (req, res) => {
     });
   } catch (err) {
     console.error('[WalletController.settleLotPayment] Error:', err);
+    if (err.message && err.message.toLowerCase().includes('already')) {
+      return res.status(400).json({
+        error: err.message,
+        code: 'ALREADY_SETTLED',
+        isSettled: true,
+      });
+    }
     if (err instanceof walletService.InsufficientFundsError || err.name === 'InsufficientFundsError') {
       return res.status(400).json({
         error: err.message,

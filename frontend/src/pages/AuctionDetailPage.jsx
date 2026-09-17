@@ -116,11 +116,23 @@ export const AuctionDetailPage = () => {
       setSettleSuccess(res.data?.data || res.data?.message || 'Lot successfully settled from wallet!');
       setLotPaid(true);
       setLotPaymentData(res.data?.data);
+      // Immediately mark auction as settled in local state so UI locks into settled mode
+      setAuction((prev) => (prev ? { ...prev, is_settled: true, settled_at: new Date().toISOString() } : prev));
+      if (res.data?.data?.winnerWallet?.balance !== undefined) {
+        setWalletBalance(parseFloat(res.data.data.winnerWallet.balance));
+      }
       await fetchWallet();
       window.dispatchEvent(new Event('wallet_updated'));
     } catch (err) {
       console.error('Settlement error:', err);
-      setSettleError(err.response?.data?.error || 'Failed to settle lot from wallet.');
+      if (err.response?.data?.code === 'ALREADY_SETTLED') {
+        setLotPaid(true);
+        setAuction((prev) => (prev ? { ...prev, is_settled: true } : prev));
+        setSettleError(null);
+        setSettleSuccess('This lot was already settled via platform escrow.');
+      } else {
+        setSettleError(err.response?.data?.error || 'Failed to settle lot from wallet.');
+      }
     } finally {
       setSettlingLot(false);
     }
@@ -159,11 +171,15 @@ export const AuctionDetailPage = () => {
           auctionApi.getById(id),
           bidApi.getBidsForAuction(id),
         ]);
-        setAuction(auctionRes.data.auction);
+        const loadedAuction = auctionRes.data.auction;
+        setAuction(loadedAuction);
+        if (loadedAuction?.is_settled) {
+          setLotPaid(true);
+        }
         setBids(bidsRes.data.bids || []);
 
         // Initial default bid proposal (current price + 10)
-        const current = parseFloat(auctionRes.data.auction.current_price);
+        const current = parseFloat(loadedAuction.current_price);
         setBidAmount((current + 10).toFixed(2));
       } catch (err) {
         console.error('Failed to load auction detail:', err);
@@ -846,12 +862,17 @@ export const AuctionDetailPage = () => {
                 </div>
 
                 {/* Settle Success Alert */}
-                {(settleSuccess || lotPaid) && (
+                {(settleSuccess || lotPaid || auction.is_settled) && (
                   <div className="p-4 rounded-2xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-xs flex items-center gap-3">
                     <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
                     <div>
                       <strong className="font-bold text-white block">Lot Successfully Settled via Platform Escrow!</strong>
                       <span>Hammer price of ${parseFloat(auction.current_price).toFixed(2)} transferred to seller. Platform commission recorded.</span>
+                      {auction.settled_at && (
+                        <span className="block mt-1 text-[11px] text-emerald-400/80 font-mono">
+                          Settled on {new Date(auction.settled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
@@ -881,7 +902,7 @@ export const AuctionDetailPage = () => {
                 </div>
 
                 {/* Actions */}
-                {!settleSuccess && !lotPaid && (
+                {!settleSuccess && !lotPaid && !auction.is_settled && (
                   <div>
                     {walletBalance >= parseFloat(auction.current_price) ? (
                       <button
@@ -943,9 +964,19 @@ export const AuctionDetailPage = () => {
                   </span>
                 </div>
 
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Congratulations on winning this lot! Settle the hammer price of <strong className="text-slate-900">${parseFloat(auction.current_price).toFixed(2)}</strong> directly to the seller using their payment coordinates below:
-                </p>
+                {(settleSuccess || lotPaid || auction.is_settled) ? (
+                  <div className="p-4 rounded-2xl bg-white/90 border border-emerald-300 text-slate-700 text-xs flex items-center gap-3 shadow-sm">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+                    <div>
+                      <strong className="font-bold text-slate-900 block">Settled via Platform Escrow</strong>
+                      <span>This lot has already been settled directly from your wallet balance. Direct external transfer to the seller is not required.</span>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Congratulations on winning this lot! Settle the hammer price of <strong className="text-slate-900">${parseFloat(auction.current_price).toFixed(2)}</strong> directly to the seller using their payment coordinates below:
+                    </p>
 
 
 
@@ -1153,8 +1184,10 @@ export const AuctionDetailPage = () => {
                     </a>
                   </div>
                 )}
-              </div>
+              </>
             )}
+          </div>
+        )}
 
             {/* If seller is viewing their own concluded auction, provide reminder */}
             {isSeller && isEnded && (
@@ -1162,18 +1195,26 @@ export const AuctionDetailPage = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 font-bold text-sm text-indigo-950">
                     <CreditCard className="w-4 h-4 text-indigo-600" />
-                    <span>Your Seller Payout Setup</span>
+                    <span>{auction.is_settled ? 'Auction Lot Settled via Platform Escrow' : 'Your Seller Payout Setup'}</span>
                   </div>
-                  <Link
-                    to="/my-hub"
-                    className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-indigo-600 text-white font-semibold text-xs hover:bg-indigo-700 transition-colors"
-                  >
-                    Configure Coordinates in My Hub →
-                  </Link>
+                  {!auction.is_settled && (
+                    <Link
+                      to="/my-hub"
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-indigo-600 text-white font-semibold text-xs hover:bg-indigo-700 transition-colors"
+                    >
+                      Configure Coordinates in My Hub →
+                    </Link>
+                  )}
                 </div>
-                <p className="text-slate-600">
-                  This auction concluded with a winning bid of <strong>${parseFloat(auction.current_price).toFixed(2)}</strong> by <strong>{winnerName || 'Winner'}</strong>. Ensure your Bank, UPI, and PayPal details are configured in My Hub so your buyer can complete payment.
-                </p>
+                {auction.is_settled ? (
+                  <p className="text-slate-600">
+                    This auction concluded with a winning bid of <strong>${parseFloat(auction.current_price).toFixed(2)}</strong> by <strong>{winnerName || 'Winner'}</strong> and was <strong>settled via platform escrow</strong>. Net proceeds of <strong>${(parseFloat(auction.current_price) * 0.95).toFixed(2)}</strong> (after 5% platform fee) have been credited directly to your platform wallet.
+                  </p>
+                ) : (
+                  <p className="text-slate-600">
+                    This auction concluded with a winning bid of <strong>${parseFloat(auction.current_price).toFixed(2)}</strong> by <strong>{winnerName || 'Winner'}</strong>. Ensure your Bank, UPI, and PayPal details are configured in My Hub so your buyer can complete payment.
+                  </p>
+                )}
               </div>
             )}
           </>

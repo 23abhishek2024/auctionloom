@@ -399,11 +399,11 @@ const getCommissionLedger = async (req, res, next) => {
     const groupBySeller = req.query.groupBySeller === 'true';
 
     // ----------------------------------------------------------------
-    // Per-auction ledger: each SETTLEMENT_DEBIT (winner's payment) =>
-    //   join auction => find seller credit + platform fee via idempotency key pattern
-    // We query auctions where commission_calculated=true, join users.
+    // Per-auction ledger: each settled auction =>
+    //   shows hammer price, seller, winner, and 5% platform commission
+    // We query auctions where is_settled=TRUE, join users.
     // ----------------------------------------------------------------
-    const conditions = [`a.commission_calculated = TRUE`, `a.winner_id IS NOT NULL`];
+    const conditions = [`a.is_settled = TRUE`, `a.winner_id IS NOT NULL`];
     const params = [];
 
     if (search) {
@@ -415,11 +415,11 @@ const getCommissionLedger = async (req, res, next) => {
     }
     if (from) {
       params.push(from);
-      conditions.push(`a.updated_at >= $${params.length}`);
+      conditions.push(`COALESCE(a.settled_at, a.updated_at, a.created_at) >= $${params.length}`);
     }
     if (to) {
       params.push(to);
-      conditions.push(`a.updated_at <= ($${params.length}::date + INTERVAL '1 day')`);
+      conditions.push(`COALESCE(a.settled_at, a.updated_at, a.created_at) <= ($${params.length}::date + INTERVAL '1 day')`);
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -434,8 +434,8 @@ const getCommissionLedger = async (req, res, next) => {
            COUNT(a.id)::int     AS auctions_count,
            SUM(a.commission_amount)::numeric AS total_commission,
            SUM(a.current_price)::numeric     AS total_volume,
-           MIN(a.updated_at)    AS first_settlement,
-           MAX(a.updated_at)    AS last_settlement
+           MIN(COALESCE(a.settled_at, a.updated_at, a.created_at)) AS first_settlement,
+           MAX(COALESCE(a.settled_at, a.updated_at, a.created_at)) AS last_settlement
          FROM auctions a
          JOIN users seller ON seller.id = a.seller_id
          JOIN users winner ON winner.id = a.winner_id
@@ -477,7 +477,7 @@ const getCommissionLedger = async (req, res, next) => {
            a.title               AS auction_title,
            a.current_price       AS hammer_price,
            a.commission_amount   AS commission,
-           a.updated_at          AS settled_at,
+           COALESCE(a.settled_at, a.updated_at, a.created_at) AS settled_at,
            COALESCE(seller.name, seller.email) AS seller_name,
            seller.email          AS seller_email,
            COALESCE(winner.name, winner.email) AS winner_name,
@@ -486,7 +486,7 @@ const getCommissionLedger = async (req, res, next) => {
          JOIN users seller ON seller.id = a.seller_id
          JOIN users winner ON winner.id = a.winner_id
          ${where}
-         ORDER BY a.updated_at DESC
+         ORDER BY COALESCE(a.settled_at, a.updated_at, a.created_at) DESC
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
         [...params, limit, offset]
       ),
@@ -502,11 +502,11 @@ const getCommissionLedger = async (req, res, next) => {
       pool.query(`
         SELECT
           COALESCE(SUM(commission_amount), 0)::numeric AS total_commission,
-          COALESCE(SUM(CASE WHEN updated_at >= date_trunc('month', NOW()) THEN commission_amount ELSE 0 END), 0)::numeric AS month_commission,
+          COALESCE(SUM(CASE WHEN COALESCE(settled_at, updated_at, created_at) >= date_trunc('month', NOW()) THEN commission_amount ELSE 0 END), 0)::numeric AS month_commission,
           COUNT(*)::int AS total_auctions,
           COALESCE(AVG(commission_amount), 0)::numeric AS avg_commission
         FROM auctions
-        WHERE commission_calculated = TRUE AND winner_id IS NOT NULL
+        WHERE is_settled = TRUE AND winner_id IS NOT NULL
       `),
     ]);
 

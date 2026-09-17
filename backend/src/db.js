@@ -58,6 +58,19 @@ pool.connect(async (err, client, release) => {
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS republished_at TIMESTAMP;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS commission_amount NUMERIC(12,2) DEFAULT 0.00;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS commission_calculated BOOLEAN DEFAULT FALSE;
+      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS is_settled BOOLEAN DEFAULT FALSE;
+      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS settled_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+      UPDATE auctions a
+      SET is_settled = TRUE,
+          settled_at = wt.created_at,
+          updated_at = wt.created_at
+      FROM wallet_transactions wt
+      WHERE wt.reference_type = 'AUCTION'
+        AND wt.type = 'SETTLEMENT_DEBIT'
+        AND wt.reference_id = a.id
+        AND a.is_settled = FALSE;
 
       ALTER TABLE auctions DROP CONSTRAINT IF EXISTS auctions_status_check;
       ALTER TABLE auctions ADD CONSTRAINT auctions_status_check CHECK (status IN ('ACTIVE', 'CLOSED', 'RESTRICTED'));
