@@ -41,13 +41,7 @@ async function closeAuction(auctionId) {
         [commission, auctionId]
       );
 
-      await client.query(
-        `UPDATE users 
-         SET unpaid_commission = unpaid_commission + $1 
-         WHERE id = $2`,
-        [commission, auction.seller_id]
-      );
-      console.log(`[AuctionClosure] Lot ${auctionId} closed. Winner: ${winnerId}, 5% Commission: $${commission}`);
+      console.log(`[AuctionClosure] Lot ${auctionId} closed. Winner: ${winnerId}, 5% Platform Fee: $${commission} (recorded for escrow settlement)`);
     } else {
       console.log(`[AuctionClosure] Lot ${auctionId} closed with no bids placed.`);
     }

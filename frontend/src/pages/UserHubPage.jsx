@@ -278,31 +278,7 @@ export const UserHubPage = () => {
 
       </div>
 
-      {/* Commission Settlement Alert Banner */}
-      {stats.unpaidCommission > 0 && (
-        <div className="mb-8 p-5 rounded-3xl bg-gradient-to-r from-rose-50 to-orange-50 border border-rose-200 text-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm animate-fade-in">
-          <div className="flex items-center gap-3.5">
-            <div className="p-2.5 rounded-2xl bg-rose-600 text-white shrink-0 shadow-md">
-              <DollarSign className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="font-extrabold text-sm text-rose-900 flex items-center gap-2">
-                <span>Platform Commission Settlement Required:</span>
-                <span className="font-mono text-base text-rose-600">${stats.unpaidCommission.toFixed(2)}</span>
-              </div>
-              <p className="text-xs text-rose-700 mt-0.5 max-w-xl">
-                A 5% platform fee has accrued from your concluded auction lots. Settle your balance at the commission portal to keep your listing privileges active.
-              </p>
-            </div>
-          </div>
-          <Link
-            to="/submit-commission"
-            className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-600/20 transition-all active:scale-95 shrink-0"
-          >
-            Settle Balance ➔
-          </Link>
-        </div>
-      )}
+
 
       {/* ── 2. Metric KPI Cards Matrix ──────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

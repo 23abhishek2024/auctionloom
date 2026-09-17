@@ -72,6 +72,9 @@ pool.connect(async (err, client, release) => {
         AND wt.reference_id = a.id
         AND a.is_settled = FALSE;
 
+      -- Reset phantom unpaid_commission debts caused by legacy auction closure logic
+      UPDATE users SET unpaid_commission = 0.00 WHERE unpaid_commission > 0;
+
       ALTER TABLE auctions DROP CONSTRAINT IF EXISTS auctions_status_check;
       ALTER TABLE auctions ADD CONSTRAINT auctions_status_check CHECK (status IN ('ACTIVE', 'CLOSED', 'RESTRICTED'));
 

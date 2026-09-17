@@ -100,13 +100,7 @@ const handleCloseAuction = async (auctionId) => {
         [commission, auctionId]
       );
 
-      await client.query(
-        `UPDATE users 
-         SET unpaid_commission = unpaid_commission + $1 
-         WHERE id = $2`,
-        [commission, auction.seller_id]
-      );
-      console.log(`[Worker] Accrued $${commission} (5% platform commission) to seller ${auction.seller_id}`);
+      console.log(`[Worker] Recorded $${commission} (5% platform commission) on Lot ${auctionId} for escrow settlement`);
     }
 
     await client.query('COMMIT');

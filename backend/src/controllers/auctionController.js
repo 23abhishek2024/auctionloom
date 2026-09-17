@@ -54,16 +54,6 @@ const getAuctionById = async (req, res, next) => {
  */
 const createAuction = async (req, res, next) => {
   try {
-    // 1. Commission settlement lock check: sellers with unpaid fees are restricted
-    const userRes = await pool.query('SELECT unpaid_commission FROM users WHERE id = $1', [req.user.id]);
-    const unpaidCommission = parseFloat(userRes.rows[0]?.unpaid_commission || 0);
-    if (unpaidCommission > 0) {
-      return res.status(403).json({
-        error: `You have an outstanding platform commission balance of $${unpaidCommission.toFixed(2)}. Please settle this balance at /submit-commission before creating new listings.`,
-        unpaidCommission,
-      });
-    }
-
     let { title, description, starting_price, end_time, duration_minutes, duration_hours } = req.body;
     const imageUrl = req.body.image_url || req.body.imageUrl || null;
 
@@ -164,16 +154,6 @@ const republishAuction = async (req, res, next) => {
       if (!isPositiveNumber(parsedStartingPrice)) {
         return res.status(400).json({ error: 'starting_price must be a positive number greater than 0.' });
       }
-    }
-
-    // Check unpaid commission lock
-    const userRes = await client.query('SELECT unpaid_commission FROM users WHERE id = $1', [req.user.id]);
-    const unpaidCommission = parseFloat(userRes.rows[0]?.unpaid_commission || 0);
-    if (unpaidCommission > 0) {
-      return res.status(403).json({
-        error: `You have an outstanding platform commission balance of $${unpaidCommission.toFixed(2)}. Settle your balance before republishing listings.`,
-        unpaidCommission,
-      });
     }
 
     await client.query('BEGIN');
