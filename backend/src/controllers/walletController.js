@@ -254,11 +254,16 @@ const settleCommission = async (req, res) => {
       [remainingUnpaid, req.user.id]
     );
 
-    // 4. Log approved proof in commission_proofs (non-critical auxiliary audit)
+    const commitRes = await client.query('COMMIT');
+    if (commitRes.command !== 'COMMIT') {
+      throw new Error(`Transaction failed to commit: database returned ${commitRes.command}`);
+    }
+
+    // 4. Log approved proof in commission_proofs (non-critical auxiliary audit, done post-commit)
     try {
-      await client.query(
-        `INSERT INTO commission_proofs (user_id, amount, comment, proof_url, notes, screenshot_url, status, admin_notes)
-         VALUES ($1, $2, $3, $4, $5, $6, 'APPROVED', $7)
+      await pool.query(
+        `INSERT INTO commission_proofs (user_id, amount, payment_method, comment, proof_url, notes, screenshot_url, status, admin_notes)
+         VALUES ($1, $2, 'WALLET', $3, $4, $5, $6, 'APPROVED', $7)
          ON CONFLICT DO NOTHING`,
         [
           req.user.id,
@@ -274,7 +279,10 @@ const settleCommission = async (req, res) => {
       console.warn('[WalletController] Notice: commission_proofs log bypassed non-critically:', proofErr.message);
     }
 
-    await client.query('COMMIT');
+    const freshWalletRes = await pool.query('SELECT * FROM wallets WHERE user_id = $1', [req.user.id]);
+    const finalWallet = freshWalletRes.rows[0]
+      ? { ...freshWalletRes.rows[0], balance: parseFloat(freshWalletRes.rows[0].balance) }
+      : debitResult.wallet;
 
     return res.status(200).json({
       success: true,
@@ -282,7 +290,7 @@ const settleCommission = async (req, res) => {
       data: {
         paidAmount: payAmount,
         remainingUnpaid,
-        wallet: debitResult.wallet,
+        wallet: finalWallet,
         transaction: debitResult.transaction,
       },
     });

@@ -380,27 +380,25 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       [commission, sellerId]
     );
 
-    // 6. Automatically log approved commission proof for platform accounting (non-critical auxiliary audit)
-    try {
-      await client.query(
-        `INSERT INTO commission_proofs (user_id, amount, comment, proof_url, notes, screenshot_url, status, admin_notes)
-         VALUES ($1, $2, $3, $4, $5, $6, 'APPROVED', $7)
-         ON CONFLICT DO NOTHING`,
-        [
-          sellerId,
-          commission,
-          `Automated 5% platform fee for Lot: ${auction.title}`,
-          'wallet://internal-escrow',
-          `Automated 5% platform fee for Lot: ${auction.title}`,
-          'wallet://internal-escrow',
-          `Settled via internal double-entry wallet (Auction ${auctionId})`,
-        ]
-      );
-    } catch (proofErr) {
-      console.warn('[WalletService] Notice: commission_proofs log bypassed non-critically:', proofErr.message);
+    // 6. Commit transaction and verify successful write
+    const commitRes = await client.query('COMMIT');
+    if (commitRes.command !== 'COMMIT') {
+      throw new Error(`Transaction failed to commit: database returned ${commitRes.command}`);
     }
 
-    await client.query('COMMIT');
+    // 7. Retrieve confirmed committed wallet states from database ground-truth
+    const [freshWinnerRes, freshSellerRes] = await Promise.all([
+      pool.query('SELECT * FROM wallets WHERE user_id = $1', [winnerId]),
+      pool.query('SELECT * FROM wallets WHERE user_id = $1', [sellerId]),
+    ]);
+
+    const finalWinnerWallet = freshWinnerRes.rows[0]
+      ? { ...freshWinnerRes.rows[0], balance: parseFloat(freshWinnerRes.rows[0].balance) }
+      : debitResult.wallet;
+
+    const finalSellerWallet = freshSellerRes.rows[0]
+      ? { ...freshSellerRes.rows[0], balance: parseFloat(freshSellerRes.rows[0].balance) }
+      : creditResult.wallet;
 
     return {
       success: true,
@@ -408,8 +406,8 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       hammerPrice: numericPrice,
       commission,
       sellerPayout,
-      winnerWallet: debitResult.wallet,
-      sellerWallet: creditResult.wallet,
+      winnerWallet: finalWinnerWallet,
+      sellerWallet: finalSellerWallet,
       winnerTransaction: debitResult.transaction,
       sellerTransaction: creditResult.transaction,
     };
