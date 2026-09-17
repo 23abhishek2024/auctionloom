@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { commissionApi, walletApi, resolveImageUrl } from '../api/client';
 import { TopupModal } from '../components/TopupModal';
 import { useAuth } from '../context/AuthContext';
@@ -27,6 +28,7 @@ export const SubmitCommissionPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [showManualTransfer, setShowManualTransfer] = useState(false);
 
   // Wallet State
   const [walletBalance, setWalletBalance] = useState(0);
@@ -278,16 +280,47 @@ export const SubmitCommissionPage = () => {
         </div>
       )}
 
-      {/* Payment Coordinates & Upload Form Grid (Manual Option) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
-        {/* Platform Payment Coordinates */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 space-y-6">
-          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <Building2 className="w-5 h-5 text-indigo-600" /> Platform Settlement Accounts
-          </h2>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Alternatively, transfer your platform fee to any of our verified corporate treasury accounts below and upload the receipt:
-          </p>
+      {/* ── ALL CLEAR / ZERO BALANCE STATE ── */}
+      {unpaidCommission === 0 && (
+        <div className="bg-white rounded-3xl border border-emerald-200 shadow-xl p-8 mb-12 text-center space-y-4 animate-fade-in">
+          <div className="w-16 h-16 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+            <CheckCircle2 className="w-8 h-8" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-bold text-slate-900">All Platform Fees Cleared</h2>
+            <p className="text-xs text-slate-500 max-w-lg mx-auto leading-relaxed">
+              Your seller account has <strong>$0.00</strong> in outstanding commission. When auction lots are settled via Platform Wallet Escrow, 5% platform fees are automatically retained and cleared with zero paperwork or manual transfers.
+            </p>
+          </div>
+          <div className="pt-2 flex flex-wrap items-center justify-center gap-4">
+            <Link
+              to="/create"
+              className="px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition-all active:scale-95 flex items-center gap-2 cursor-pointer"
+            >
+              <span>➕ Create New Auction Listing</span>
+            </Link>
+            <button
+              type="button"
+              onClick={() => setShowManualTransfer(!showManualTransfer)}
+              className="text-xs font-semibold text-slate-500 hover:text-slate-800 underline transition-colors cursor-pointer"
+            >
+              {showManualTransfer ? 'Hide Manual Wire Accounts' : 'View Manual Wire / Treasury Accounts'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Coordinates & Upload Form Grid (Shown if fee owed or user expanded manual accounts) */}
+      {(unpaidCommission > 0 || showManualTransfer) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12 animate-fade-in">
+          {/* Platform Payment Coordinates */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 space-y-6">
+            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-indigo-600" /> Platform Settlement Accounts
+            </h2>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Alternatively, transfer your platform fee to any of our verified corporate treasury accounts below and upload the receipt:
+            </p>
 
           <div className="space-y-4 text-xs font-mono">
             {/* Bank Transfer */}
@@ -435,6 +468,7 @@ export const SubmitCommissionPage = () => {
           </form>
         </div>
       </div>
+      )}
 
       {/* Manual Proof History Table */}
       <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8">
