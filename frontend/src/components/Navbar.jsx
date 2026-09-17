@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { walletApi } from '../api/client';
 import { TopupModal } from './TopupModal';
-import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio, Pencil, LayoutDashboard, Trophy, ShieldAlert, DollarSign, HelpCircle, Wallet, Zap } from 'lucide-react';
+import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio, Pencil, LayoutDashboard, Trophy, ShieldAlert, HelpCircle, Wallet, Zap } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
 export const Navbar = () => {
@@ -134,15 +134,6 @@ export const Navbar = () => {
                 >
                   <LayoutDashboard className="w-4 h-4 text-indigo-500" />
                   <span>My Hub</span>
-                </Link>
-
-                <Link
-                  to="/submit-commission"
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-slate-100 transition-all"
-                  title="Commission & Proofs"
-                >
-                  <DollarSign className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Commission</span>
                 </Link>
 
                 {user?.role === 'admin' && (
