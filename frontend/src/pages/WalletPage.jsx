@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { walletApi } from '../api/client';
 import { TopupModal } from '../components/TopupModal';
+import { WithdrawModal } from '../components/WithdrawModal';
 import {
   Wallet,
   ArrowDownLeft,
@@ -110,6 +111,7 @@ export const WalletPage = () => {
   const [typeFilter, setTypeFilter] = useState('');
   const [page, setPage] = useState(1);
   const [isTopupOpen, setIsTopupOpen] = useState(false);
+  const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
 
   const fetchData = useCallback(
     async (opts = {}) => {
@@ -209,7 +211,7 @@ export const WalletPage = () => {
               {pagination.total} transaction{pagination.total !== 1 ? 's' : ''} on record
             </p>
           </div>
-          <div className="relative mt-6 flex items-center gap-3">
+          <div className="relative mt-6 flex items-center gap-3 flex-wrap">
             <button
               onClick={() => setIsTopupOpen(true)}
               id="wallet-topup-btn"
@@ -217,6 +219,15 @@ export const WalletPage = () => {
             >
               <ArrowDownLeft className="w-4 h-4" />
               Top Up Wallet
+            </button>
+            <button
+              onClick={() => setIsWithdrawOpen(true)}
+              id="wallet-withdraw-btn"
+              disabled={!walletInfo || walletInfo.balance <= 0}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-950/80 hover:bg-indigo-900 text-white font-bold text-sm shadow-lg shadow-indigo-950/30 transition-all active:scale-95 border border-white/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <ArrowUpRight className="w-4 h-4" />
+              Cash Out / Withdraw
             </button>
             <Link
               to="/my-hub"
@@ -409,6 +420,18 @@ export const WalletPage = () => {
       <TopupModal
         isOpen={isTopupOpen}
         onClose={() => setIsTopupOpen(false)}
+        onSuccess={(w) => {
+          if (w) setWalletInfo((prev) => ({ ...prev, balance: parseFloat(w.balance || 0) }));
+          fetchData({ refresh: true });
+          window.dispatchEvent(new Event('wallet_updated'));
+        }}
+        currentBalance={walletInfo?.balance || 0}
+      />
+
+      {/* Withdraw Modal */}
+      <WithdrawModal
+        isOpen={isWithdrawOpen}
+        onClose={() => setIsWithdrawOpen(false)}
         onSuccess={(w) => {
           if (w) setWalletInfo((prev) => ({ ...prev, balance: parseFloat(w.balance || 0) }));
           fetchData({ refresh: true });

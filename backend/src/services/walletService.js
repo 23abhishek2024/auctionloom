@@ -16,6 +16,8 @@ class InsufficientFundsError extends Error {
   }
 }
 
+const PLATFORM_TREASURY_USER_ID = '00000000-0000-0000-0000-000000000000';
+
 /**
  * Get existing wallet or create one atomically if missing.
  */
@@ -24,6 +26,13 @@ async function getOrCreateWallet(userId, externalClient = null) {
   let res = await client.query('SELECT * FROM wallets WHERE user_id = $1', [userId]);
 
   if (res.rows.length === 0) {
+    if (userId === PLATFORM_TREASURY_USER_ID) {
+      await client.query(`
+        INSERT INTO users (id, email, password_hash, role, name)
+        VALUES ('00000000-0000-0000-0000-000000000000', 'treasury@auctionloom.internal', 'SYSTEM_ACCOUNT_DO_NOT_LOGIN', 'admin', 'AuctionLoom Treasury')
+        ON CONFLICT (id) DO NOTHING
+      `);
+    }
     res = await client.query(
       `INSERT INTO wallets (user_id, balance, currency, version)
        VALUES ($1, 0.00, 'USD', 0)
@@ -390,7 +399,30 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       client,
     });
 
-    // 4. Mark auction as settled and record timestamp in platform records
+    // 4. Credit Platform Treasury Wallet (5% Platform Commission)
+    let platformWallet = null;
+    if (commission > 0) {
+      const platformKey = `${idempotencyPrefix || 'lot'}_platform_fee_${auctionId}`;
+      const platformCreditResult = await creditWallet({
+        userId: PLATFORM_TREASURY_USER_ID,
+        amount: commission,
+        type: 'COMMISSION',
+        referenceType: 'AUCTION',
+        referenceId: auctionId,
+        idempotencyKey: platformKey,
+        metadata: {
+          auctionTitle: auction.title,
+          sellerId,
+          winnerId,
+          hammerPrice: numericPrice,
+          commissionRate: '5%',
+        },
+        client,
+      });
+      platformWallet = platformCreditResult.wallet;
+    }
+
+    // 5. Mark auction as settled and record timestamp in platform records
     await client.query(
       `UPDATE auctions 
        SET is_settled = true,
@@ -402,7 +434,7 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       [commission, auctionId]
     );
 
-    // 5. Decrement seller's unpaid commission debt since platform fee was deducted at source
+    // 6. Decrement seller's unpaid commission debt since platform fee was deducted at source
     await client.query(
       `UPDATE users 
        SET unpaid_commission = GREATEST(0.00, unpaid_commission - $1) 
@@ -410,16 +442,17 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       [commission, sellerId]
     );
 
-    // 6. Commit transaction and verify successful write
+    // 7. Commit transaction and verify successful write
     const commitRes = await client.query('COMMIT');
     if (commitRes.command !== 'COMMIT') {
       throw new Error(`Transaction failed to commit: database returned ${commitRes.command}`);
     }
 
-    // 7. Retrieve confirmed committed wallet states from database ground-truth
-    const [freshWinnerRes, freshSellerRes] = await Promise.all([
+    // 8. Retrieve confirmed committed wallet states from database ground-truth
+    const [freshWinnerRes, freshSellerRes, freshPlatformRes] = await Promise.all([
       pool.query('SELECT * FROM wallets WHERE user_id = $1', [winnerId]),
       pool.query('SELECT * FROM wallets WHERE user_id = $1', [sellerId]),
+      pool.query('SELECT * FROM wallets WHERE user_id = $1', [PLATFORM_TREASURY_USER_ID]),
     ]);
 
     const finalWinnerWallet = freshWinnerRes.rows[0]
@@ -430,6 +463,10 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       ? { ...freshSellerRes.rows[0], balance: parseFloat(freshSellerRes.rows[0].balance) }
       : creditResult.wallet;
 
+    const finalPlatformWallet = freshPlatformRes.rows[0]
+      ? { ...freshPlatformRes.rows[0], balance: parseFloat(freshPlatformRes.rows[0].balance) }
+      : platformWallet;
+
     return {
       success: true,
       auctionId,
@@ -438,6 +475,7 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       sellerPayout,
       winnerWallet: finalWinnerWallet,
       sellerWallet: finalSellerWallet,
+      platformWallet: finalPlatformWallet,
       winnerTransaction: debitResult.transaction,
       sellerTransaction: creditResult.transaction,
     };
@@ -487,6 +525,7 @@ async function getWalletSummary(userId) {
 }
 
 module.exports = {
+  PLATFORM_TREASURY_USER_ID,
   InsufficientFundsError,
   getOrCreateWallet,
   creditWallet,

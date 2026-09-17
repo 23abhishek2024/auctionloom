@@ -115,6 +115,14 @@ pool.connect(async (err, client, release) => {
       );
       CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets(user_id);
 
+      INSERT INTO users (id, email, password_hash, role, name)
+      VALUES ('00000000-0000-0000-0000-000000000000', 'treasury@auctionloom.internal', 'SYSTEM_ACCOUNT_DO_NOT_LOGIN', 'admin', 'AuctionLoom Treasury')
+      ON CONFLICT (id) DO NOTHING;
+
+      INSERT INTO wallets (user_id, balance, currency)
+      VALUES ('00000000-0000-0000-0000-000000000000', 0.00, 'USD')
+      ON CONFLICT (user_id) DO NOTHING;
+
       CREATE TABLE IF NOT EXISTS wallet_transactions (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
