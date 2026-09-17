@@ -167,10 +167,17 @@ const settleLotPayment = async (req, res) => {
     }
 
     if (auction.is_settled) {
-      return res.status(400).json({
-        error: 'This auction lot has already been settled via platform escrow.',
-        code: 'ALREADY_SETTLED',
-        isSettled: true,
+      const winnerWallet = await walletService.getOrCreateWallet(req.user.id);
+      return res.status(200).json({
+        success: true,
+        alreadySettled: true,
+        alreadyProcessed: true,
+        message: 'This auction lot has already been settled via platform escrow.',
+        data: {
+          auctionId,
+          alreadySettled: true,
+          winnerWallet,
+        },
       });
     }
 

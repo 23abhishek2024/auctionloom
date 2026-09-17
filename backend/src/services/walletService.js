@@ -318,7 +318,22 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
     const auction = auctionRes.rows[0];
 
     if (auction.is_settled) {
-      throw new Error('This auction lot has already been settled via platform escrow.');
+      const [winnerWallet, sellerWallet] = await Promise.all([
+        getOrCreateWallet(winnerId, client),
+        getOrCreateWallet(sellerId, client),
+      ]);
+      await client.query('COMMIT');
+      return {
+        success: true,
+        alreadyProcessed: true,
+        alreadySettled: true,
+        auctionId,
+        hammerPrice: numericPrice,
+        commission,
+        sellerPayout,
+        winnerWallet,
+        sellerWallet,
+      };
     }
 
     // 2. Debit Winner
@@ -339,7 +354,22 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
         `UPDATE auctions SET is_settled = true, settled_at = COALESCE(settled_at, NOW()), updated_at = NOW() WHERE id = $1`,
         [auctionId]
       );
-      throw new Error('This auction lot settlement has already been processed.');
+      const [winnerWallet, sellerWallet] = await Promise.all([
+        getOrCreateWallet(winnerId, client),
+        getOrCreateWallet(sellerId, client),
+      ]);
+      await client.query('COMMIT');
+      return {
+        success: true,
+        alreadyProcessed: true,
+        alreadySettled: true,
+        auctionId,
+        hammerPrice: numericPrice,
+        commission,
+        sellerPayout,
+        winnerWallet,
+        sellerWallet,
+      };
     }
 
     // 3. Credit Seller (net of commission)
