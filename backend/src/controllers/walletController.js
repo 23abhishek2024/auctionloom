@@ -1,6 +1,7 @@
 const pool = require('../db');
 const walletService = require('../services/walletService');
 const topupService = require('../services/topupService');
+const auctionClosureService = require('../services/auctionClosureService');
 
 /**
  * Wallet Controller
@@ -58,15 +59,27 @@ const settleLotPayment = async (req, res) => {
     }
 
     // 1. Fetch auction and verify lot status
-    const auctionRes = await pool.query('SELECT * FROM auctions WHERE id = $1', [auctionId]);
+    let auctionRes = await pool.query('SELECT * FROM auctions WHERE id = $1', [auctionId]);
     if (auctionRes.rows.length === 0) {
       return res.status(404).json({ error: 'Auction lot not found' });
     }
 
-    const auction = auctionRes.rows[0];
+    let auction = auctionRes.rows[0];
+
+    // If auction end time has passed but status is still ACTIVE, auto-close it atomically
+    const isTimeEnded = new Date(auction.end_time) <= new Date();
+    if (auction.status === 'ACTIVE' && isTimeEnded) {
+      await auctionClosureService.closeAuction(auctionId);
+      auctionRes = await pool.query('SELECT * FROM auctions WHERE id = $1', [auctionId]);
+      auction = auctionRes.rows[0];
+    }
 
     if (auction.status !== 'CLOSED') {
-      return res.status(400).json({ error: 'Auction is not closed yet. Only closed auctions can be settled.' });
+      return res.status(400).json({ error: 'This auction lot has not concluded yet. Bidding is still active.' });
+    }
+
+    if (!auction.winner_id) {
+      return res.status(400).json({ error: 'This auction concluded with no winning bids placed.' });
     }
 
     if (auction.winner_id !== req.user.id) {

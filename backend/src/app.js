@@ -18,6 +18,7 @@ const adminRoutes = require('./routes/adminRoutes');
 const commissionRoutes = require('./routes/commissionRoutes');
 const walletRoutes = require('./routes/walletRoutes');
 const { getLeaderboard } = require('./controllers/userController');
+const auctionClosureService = require('./services/auctionClosureService');
 const path = require('path');
 
 // Services
@@ -146,6 +147,9 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`[App] Worker ${process.pid} listening on port ${PORT}`);
+  // Automated background sweep: close expired auctions every 15s (ensures seamless lot settlement)
+  auctionClosureService.closeExpiredAuctions();
+  setInterval(() => auctionClosureService.closeExpiredAuctions(), 15000);
 });
 
 module.exports = app;

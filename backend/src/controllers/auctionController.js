@@ -1,5 +1,6 @@
 const pool = require('../db');
 const auctionModel = require('../models/auctionModel');
+const auctionClosureService = require('../services/auctionClosureService');
 const { isUUID, isPositiveNumber } = require('../utils/validators');
 
 /**
@@ -32,8 +33,15 @@ const getAuctionById = async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid auction ID format. Must be a valid UUID.' });
     }
 
-    const auction = await auctionModel.findById(id);
+    let auction = await auctionModel.findById(id);
     if (!auction) return res.status(404).json({ error: 'Auction not found.' });
+
+    // Auto-close expired auction on demand if still marked ACTIVE
+    if (auction.status === 'ACTIVE' && new Date(auction.end_time) <= new Date()) {
+      await auctionClosureService.closeAuction(id);
+      auction = await auctionModel.findById(id);
+    }
+
     res.json({ auction });
   } catch (err) {
     next(err);
