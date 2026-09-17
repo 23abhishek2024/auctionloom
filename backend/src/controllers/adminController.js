@@ -382,6 +382,181 @@ const updatePaymentProofStatus = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /api/admin/commission-ledger
+ * Returns per-auction commission breakdown (PLATFORM_FEE + SETTLEMENT_CREDIT rows).
+ * Supports: ?page=1&limit=20&search=&from=YYYY-MM-DD&to=YYYY-MM-DD&format=csv&groupBySeller=true
+ */
+const getCommissionLedger = async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page || '1'));
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '20')));
+    const offset = (page - 1) * limit;
+    const search = (req.query.search || '').trim();
+    const from = req.query.from || null;
+    const to = req.query.to || null;
+    const format = (req.query.format || 'json').toLowerCase();
+    const groupBySeller = req.query.groupBySeller === 'true';
+
+    // ----------------------------------------------------------------
+    // Per-auction ledger: each SETTLEMENT_DEBIT (winner's payment) =>
+    //   join auction => find seller credit + platform fee via idempotency key pattern
+    // We query auctions where commission_calculated=true, join users.
+    // ----------------------------------------------------------------
+    const conditions = [`a.commission_calculated = TRUE`, `a.winner_id IS NOT NULL`];
+    const params = [];
+
+    if (search) {
+      params.push(`%${search}%`);
+      const idx = params.length;
+      conditions.push(
+        `(a.title ILIKE $${idx} OR seller.name ILIKE $${idx} OR seller.email ILIKE $${idx} OR winner.name ILIKE $${idx} OR winner.email ILIKE $${idx})`
+      );
+    }
+    if (from) {
+      params.push(from);
+      conditions.push(`a.updated_at >= $${params.length}`);
+    }
+    if (to) {
+      params.push(to);
+      conditions.push(`a.updated_at <= ($${params.length}::date + INTERVAL '1 day')`);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    if (groupBySeller) {
+      // Group by seller — aggregate total commission per seller
+      const groupRes = await pool.query(
+        `SELECT
+           seller.id            AS seller_id,
+           COALESCE(seller.name, seller.email) AS seller_name,
+           seller.email         AS seller_email,
+           COUNT(a.id)::int     AS auctions_count,
+           SUM(a.commission_amount)::numeric AS total_commission,
+           SUM(a.current_price)::numeric     AS total_volume,
+           MIN(a.updated_at)    AS first_settlement,
+           MAX(a.updated_at)    AS last_settlement
+         FROM auctions a
+         JOIN users seller ON seller.id = a.seller_id
+         JOIN users winner ON winner.id = a.winner_id
+         ${where}
+         GROUP BY seller.id, seller.name, seller.email
+         ORDER BY total_commission DESC`,
+        params
+      );
+
+      const rows = groupRes.rows.map((r) => ({
+        sellerId: r.seller_id,
+        sellerName: r.seller_name,
+        sellerEmail: r.seller_email,
+        auctionsCount: r.auctions_count,
+        totalCommission: parseFloat(r.total_commission || 0),
+        totalVolume: parseFloat(r.total_volume || 0),
+        firstSettlement: r.first_settlement,
+        lastSettlement: r.last_settlement,
+      }));
+
+      if (format === 'csv') {
+        const header = 'Seller Name,Seller Email,Auctions,Total Volume ($),Total Commission ($),First Settlement,Last Settlement';
+        const csvRows = rows.map((r) =>
+          `"${r.sellerName}","${r.sellerEmail}",${r.auctionsCount},${r.totalVolume.toFixed(2)},${r.totalCommission.toFixed(2)},"${r.firstSettlement ? new Date(r.firstSettlement).toISOString() : ''}","${r.lastSettlement ? new Date(r.lastSettlement).toISOString() : ''}"`
+        );
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename="commission_by_seller.csv"');
+        return res.send([header, ...csvRows].join('\n'));
+      }
+
+      return res.json({ success: true, data: { rows, grouped: true } });
+    }
+
+    // Per-auction mode (default)
+    const [dataRes, countRes, summaryRes] = await Promise.all([
+      pool.query(
+        `SELECT
+           a.id                  AS auction_id,
+           a.title               AS auction_title,
+           a.current_price       AS hammer_price,
+           a.commission_amount   AS commission,
+           a.updated_at          AS settled_at,
+           COALESCE(seller.name, seller.email) AS seller_name,
+           seller.email          AS seller_email,
+           COALESCE(winner.name, winner.email) AS winner_name,
+           winner.email          AS winner_email
+         FROM auctions a
+         JOIN users seller ON seller.id = a.seller_id
+         JOIN users winner ON winner.id = a.winner_id
+         ${where}
+         ORDER BY a.updated_at DESC
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset]
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS total
+         FROM auctions a
+         JOIN users seller ON seller.id = a.seller_id
+         JOIN users winner ON winner.id = a.winner_id
+         ${where}`,
+        params
+      ),
+      // Global summary (ignoring pagination/search filters)
+      pool.query(`
+        SELECT
+          COALESCE(SUM(commission_amount), 0)::numeric AS total_commission,
+          COALESCE(SUM(CASE WHEN updated_at >= date_trunc('month', NOW()) THEN commission_amount ELSE 0 END), 0)::numeric AS month_commission,
+          COUNT(*)::int AS total_auctions,
+          COALESCE(AVG(commission_amount), 0)::numeric AS avg_commission
+        FROM auctions
+        WHERE commission_calculated = TRUE AND winner_id IS NOT NULL
+      `),
+    ]);
+
+    const total = countRes.rows[0].total;
+    const summary = summaryRes.rows[0];
+    const rows = dataRes.rows.map((r) => ({
+      auctionId: r.auction_id,
+      auctionTitle: r.auction_title,
+      hammerPrice: parseFloat(r.hammer_price || 0),
+      commission: parseFloat(r.commission || 0),
+      settledAt: r.settled_at,
+      sellerName: r.seller_name,
+      sellerEmail: r.seller_email,
+      winnerName: r.winner_name,
+      winnerEmail: r.winner_email,
+    }));
+
+    if (format === 'csv') {
+      const header = 'Auction Title,Seller,Seller Email,Winner,Winner Email,Hammer Price ($),Commission 5% ($),Settled At';
+      const csvRows = rows.map((r) =>
+        `"${r.auctionTitle}","${r.sellerName}","${r.sellerEmail}","${r.winnerName}","${r.winnerEmail}",${r.hammerPrice.toFixed(2)},${r.commission.toFixed(2)},"${r.settledAt ? new Date(r.settledAt).toISOString() : ''}"`,
+      );
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="commission_ledger.csv"');
+      return res.send([header, ...csvRows].join('\n'));
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        summary: {
+          totalCommission: parseFloat(summary.total_commission),
+          monthCommission: parseFloat(summary.month_commission),
+          totalAuctions: summary.total_auctions,
+          avgCommission: parseFloat(summary.avg_commission),
+        },
+        rows,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getAdminMetrics,
   getRevenueChart,
@@ -391,4 +566,5 @@ module.exports = {
   updateAuctionStatus,
   getAllPaymentProofs,
   updatePaymentProofStatus,
+  getCommissionLedger,
 };

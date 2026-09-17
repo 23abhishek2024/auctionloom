@@ -11,6 +11,9 @@ router.use(roleMiddleware('admin'));
 router.get('/metrics', adminController.getAdminMetrics);
 router.get('/revenue-chart', adminController.getRevenueChart);
 
+// Commission analytics ledger
+router.get('/commission-ledger', adminController.getCommissionLedger);
+
 // User management
 router.get('/users', adminController.getAllUsers);
 router.put('/users/:id/role', adminController.updateUserRole);

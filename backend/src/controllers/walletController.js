@@ -3,6 +3,86 @@ const walletService = require('../services/walletService');
 const topupService = require('../services/topupService');
 const auctionClosureService = require('../services/auctionClosureService');
 
+// GET /api/wallet/transactions?page=1&limit=20&type=
+const getTransactions = async (req, res) => {
+  try {
+    const wallet = await walletService.getOrCreateWallet(req.user.id);
+    const page = Math.max(1, parseInt(req.query.page || '1'));
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20')));
+    const offset = (page - 1) * limit;
+    const typeFilter = req.query.type ? req.query.type.toUpperCase() : null;
+
+    const conditions = ['wt.wallet_id = $1'];
+    const params = [wallet.id];
+    if (typeFilter) {
+      params.push(typeFilter);
+      conditions.push(`wt.type = $${params.length}`);
+    }
+    const where = conditions.join(' AND ');
+
+    const [txRes, countRes] = await Promise.all([
+      pool.query(
+        `SELECT
+           wt.id,
+           wt.type,
+           wt.amount,
+           wt.balance_after,
+           wt.reference_type,
+           wt.reference_id,
+           wt.status,
+           wt.metadata,
+           wt.created_at,
+           a.title AS auction_title,
+           a.id    AS auction_id
+         FROM wallet_transactions wt
+         LEFT JOIN auctions a ON a.id::text = wt.reference_id::text
+         WHERE ${where}
+         ORDER BY wt.created_at DESC
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset]
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS total FROM wallet_transactions wt WHERE ${where}`,
+        params
+      ),
+    ]);
+
+    const total = countRes.rows[0].total;
+    return res.status(200).json({
+      success: true,
+      data: {
+        wallet: {
+          id: wallet.id,
+          balance: parseFloat(wallet.balance),
+          currency: wallet.currency,
+        },
+        transactions: txRes.rows.map((r) => ({
+          id: r.id,
+          type: r.type,
+          amount: parseFloat(r.amount),
+          balanceAfter: parseFloat(r.balance_after),
+          referenceType: r.reference_type,
+          referenceId: r.reference_id,
+          auctionTitle: r.auction_title || null,
+          auctionId: r.auction_id || null,
+          status: r.status,
+          metadata: r.metadata,
+          createdAt: r.created_at,
+        })),
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
+    });
+  } catch (err) {
+    console.error('[WalletController.getTransactions] Error:', err);
+    return res.status(500).json({ error: 'Failed to retrieve transactions' });
+  }
+};
+
 /**
  * Wallet Controller
  * Exposes endpoints for balance inquiry, simulated top-ups, lot settlements,
@@ -241,6 +321,7 @@ const withdraw = async (req, res) => {
 
 module.exports = {
   getWallet,
+  getTransactions,
   topup,
   settleLotPayment,
   settleCommission,

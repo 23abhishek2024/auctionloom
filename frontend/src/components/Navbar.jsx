@@ -136,6 +136,14 @@ export const Navbar = () => {
                   <span>My Hub</span>
                 </Link>
 
+                <Link
+                  to="/wallet"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium text-slate-700 hover:text-emerald-600 hover:bg-emerald-50 transition-all"
+                >
+                  <Wallet className="w-4 h-4 text-emerald-500" />
+                  <span>Wallet</span>
+                </Link>
+
                 {user?.role === 'admin' && (
                   <Link
                     to="/admin"
@@ -162,21 +170,25 @@ export const Navbar = () => {
           <div className="flex items-center gap-3">
             {isAuthenticated ? (
               <div className="flex items-center gap-3">
-                {/* Wallet Balance Pill & Quick Top-Up */}
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 shadow-xs">
+                {/* Wallet Balance Pill — click to go to /wallet */}
+                <Link
+                  to="/wallet"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 shadow-xs hover:bg-emerald-100 transition-all"
+                  title="View transaction history"
+                >
                   <Wallet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                   <span className="text-xs font-mono font-extrabold tracking-tight">
                     ${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </span>
                   <button
                     type="button"
-                    onClick={() => setIsTopupOpen(true)}
+                    onClick={(e) => { e.preventDefault(); setIsTopupOpen(true); }}
                     className="ml-1 px-2 py-0.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95 cursor-pointer shadow-xs"
                     title="Instant Wallet Top-Up"
                   >
                     + Top Up
                   </button>
-                </div>
+                </Link>
 
                 {/* User info & role badge - Links to My Hub */}
                 <Link

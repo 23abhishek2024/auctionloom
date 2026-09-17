@@ -12,6 +12,7 @@ import { CreateAuctionPage } from './pages/CreateAuctionPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { UserHubPage } from './pages/UserHubPage';
+import { WalletPage } from './pages/WalletPage';
 import { LeaderboardPage } from './pages/LeaderboardPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { SubmitCommissionPage } from './pages/SubmitCommissionPage';
@@ -42,6 +43,14 @@ function App() {
                     element={
                       <ProtectedRoute>
                         <UserHubPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/wallet"
+                    element={
+                      <ProtectedRoute>
+                        <WalletPage />
                       </ProtectedRoute>
                     }
                   />

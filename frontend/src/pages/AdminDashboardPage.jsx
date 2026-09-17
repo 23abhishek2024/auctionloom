@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { adminApi, auctionApi, resolveImageUrl } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -20,6 +20,9 @@ import {
   Lock,
   Pause,
   Play,
+  Download,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -33,13 +36,24 @@ export const AdminDashboardPage = () => {
   const [proofs, setProofs] = useState([]);
   const [auctions, setAuctions] = useState([]);
 
-  const [activeTab, setActiveTab] = useState('proofs'); // 'proofs', 'users', 'auctions'
+  const [activeTab, setActiveTab] = useState('proofs'); // 'proofs', 'users', 'auctions', 'commission'
   const [proofStatusFilter, setProofStatusFilter] = useState('PENDING'); // 'PENDING', 'APPROVED', 'REJECTED', 'ALL'
   const [userSearch, setUserSearch] = useState('');
   const [auctionSearch, setAuctionSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [selectedProofModal, setSelectedProofModal] = useState(null);
+
+  // Commission Ledger State
+  const [commRows, setCommRows] = useState([]);
+  const [commSummary, setCommSummary] = useState(null);
+  const [commPag, setCommPag] = useState({ page: 1, totalPages: 1, total: 0 });
+  const [commPage, setCommPage] = useState(1);
+  const [commSearch, setCommSearch] = useState('');
+  const [commFrom, setCommFrom] = useState('');
+  const [commTo, setCommTo] = useState('');
+  const [commLoading, setCommLoading] = useState(false);
+  const [commGrouped, setCommGrouped] = useState(false);
 
   // Authorization gate: Only role === 'admin'
   useEffect(() => {
@@ -76,6 +90,69 @@ export const AdminDashboardPage = () => {
       fetchAllAdminData();
     }
   }, [proofStatusFilter]);
+
+  // Commission Ledger Fetch
+  const fetchCommissionLedger = useCallback(async (opts = {}) => {
+    setCommLoading(true);
+    try {
+      const res = await adminApi.getCommissionLedger({
+        page: opts.page ?? commPage,
+        limit: 20,
+        search: commSearch || undefined,
+        from: commFrom || undefined,
+        to: commTo || undefined,
+        groupBySeller: commGrouped,
+      });
+      const d = res.data.data;
+      if (commGrouped) {
+        setCommRows(d.rows || []);
+        setCommSummary(null);
+        setCommPag({ page: 1, totalPages: 1, total: (d.rows || []).length });
+      } else {
+        setCommRows(d.rows || []);
+        setCommSummary(d.summary || null);
+        setCommPag(d.pagination || { page: 1, totalPages: 1, total: 0 });
+      }
+    } catch (err) {
+      console.error('[AdminDashboard] Commission ledger fetch error:', err);
+    } finally {
+      setCommLoading(false);
+    }
+  }, [commPage, commSearch, commFrom, commTo, commGrouped]);
+
+  useEffect(() => {
+    if (activeTab === 'commission' && user?.role === 'admin') {
+      fetchCommissionLedger();
+    }
+  }, [activeTab, fetchCommissionLedger]);
+
+  const handleCommPageChange = (p) => {
+    setCommPage(p);
+    fetchCommissionLedger({ page: p });
+  };
+
+  const handleCommExportCsv = () => {
+    const params = new URLSearchParams({
+      format: 'csv',
+      groupBySeller: commGrouped,
+      ...(commSearch ? { search: commSearch } : {}),
+      ...(commFrom ? { from: commFrom } : {}),
+      ...(commTo ? { to: commTo } : {}),
+    });
+    const token = localStorage.getItem('token');
+    const rawBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+    const base = rawBase.match(/https?:\/\/[^\s\r\n]+/)?.[0]?.replace(/\/+$/, '') || 'http://localhost:5000/api';
+    const url = `${base}/admin/commission-ledger?${params.toString()}`;
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.blob())
+      .then((blob) => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = commGrouped ? 'commission_by_seller.csv' : 'commission_ledger.csv';
+        a.click();
+      })
+      .catch(() => alert('CSV export failed. Please try again.'));
+  };
 
   // Handle Proof Approval / Rejection
   const handleProofDecision = async (proofId, status) => {
@@ -335,6 +412,18 @@ export const AdminDashboardPage = () => {
         >
           <Gavel className="w-4 h-4" />
           Auction Inventory ({auctions.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('commission')}
+          className={`pb-3 px-4 font-bold text-sm transition-all flex items-center gap-2 border-b-2 ${
+            activeTab === 'commission'
+              ? 'border-emerald-600 text-emerald-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" />
+          Commission Analytics
         </button>
       </div>
 
@@ -703,6 +792,174 @@ export const AdminDashboardPage = () => {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* TAB 4: COMMISSION LEDGER */}
+      {activeTab === 'commission' && (
+        <div className="space-y-6">
+
+          {/* KPI Summary Cards */}
+          {commSummary && !commGrouped && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">All-Time Commission</p>
+                <p className="text-2xl font-extrabold text-emerald-600 font-mono">${commSummary.totalCommission.toFixed(2)}</p>
+              </div>
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">This Month</p>
+                <p className="text-2xl font-extrabold text-indigo-600 font-mono">${commSummary.monthCommission.toFixed(2)}</p>
+              </div>
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Settled Auctions</p>
+                <p className="text-2xl font-extrabold text-slate-800 font-mono">{commSummary.totalAuctions}</p>
+              </div>
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Avg per Auction</p>
+                <p className="text-2xl font-extrabold text-amber-600 font-mono">${commSummary.avgCommission.toFixed(2)}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Filter Bar */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex-1 min-w-[200px]">
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Search</label>
+                <input
+                  type="text"
+                  value={commSearch}
+                  onChange={(e) => setCommSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && fetchCommissionLedger({ page: 1 })}
+                  placeholder="Auction, seller, or winner..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  id="comm-search-input"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">From</label>
+                <input type="date" value={commFrom} onChange={(e) => setCommFrom(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-indigo-400" id="comm-from-date" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">To</label>
+                <input type="date" value={commTo} onChange={(e) => setCommTo(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-indigo-400" id="comm-to-date" />
+              </div>
+              <button onClick={() => { setCommPage(1); fetchCommissionLedger({ page: 1 }); }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold shadow hover:bg-indigo-700 transition-all cursor-pointer" id="comm-apply-filter">
+                Apply
+              </button>
+              <button onClick={() => { setCommSearch(''); setCommFrom(''); setCommTo(''); setCommPage(1); }}
+                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-sm font-medium hover:bg-slate-200 transition-all cursor-pointer">
+                Clear
+              </button>
+            </div>
+            <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
+              <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+                <input type="checkbox" checked={commGrouped} onChange={(e) => { setCommGrouped(e.target.checked); setCommPage(1); }}
+                  className="w-4 h-4 rounded accent-indigo-600" id="comm-group-by-seller" />
+                Group by Seller
+              </label>
+              <button onClick={handleCommExportCsv}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-medium hover:bg-emerald-100 transition-all cursor-pointer" id="comm-export-csv">
+                <Download className="w-3.5 h-3.5" /> Export CSV
+              </button>
+            </div>
+          </div>
+
+          {/* Ledger Table */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            {commLoading ? (
+              <div className="p-8 space-y-3">
+                {[...Array(4)].map((_, i) => (<div key={i} className="h-10 bg-slate-100 rounded-xl animate-pulse" />))}
+              </div>
+            ) : commRows.length === 0 ? (
+              <div className="py-16 text-center text-slate-400">
+                <DollarSign className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p className="font-semibold text-slate-600">No commission records found</p>
+                <p className="text-xs mt-1">Settle a lot to see data here.</p>
+              </div>
+            ) : commGrouped ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                      <th className="py-3 px-4">Seller</th>
+                      <th className="py-3 px-4">Auctions</th>
+                      <th className="py-3 px-4">Total Volume</th>
+                      <th className="py-3 px-4 text-emerald-700">Total Commission</th>
+                      <th className="py-3 px-4">Last Settlement</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {commRows.map((r) => (
+                      <tr key={r.sellerId} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-4"><p className="text-sm font-semibold text-slate-800">{r.sellerName}</p><p className="text-xs text-slate-400 font-mono">{r.sellerEmail}</p></td>
+                        <td className="py-3 px-4 text-sm font-mono text-slate-700">{r.auctionsCount}</td>
+                        <td className="py-3 px-4 text-sm font-mono text-slate-700">${r.totalVolume.toFixed(2)}</td>
+                        <td className="py-3 px-4 text-sm font-bold font-mono text-emerald-700">${r.totalCommission.toFixed(2)}</td>
+                        <td className="py-3 px-4 text-xs text-slate-400">{r.lastSettlement ? new Date(r.lastSettlement).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                      <th className="py-3 px-4">Auction</th>
+                      <th className="py-3 px-4">Seller</th>
+                      <th className="py-3 px-4">Winner</th>
+                      <th className="py-3 px-4">Hammer Price</th>
+                      <th className="py-3 px-4 text-emerald-700">Commission 5%</th>
+                      <th className="py-3 px-4">Settled At</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {commRows.map((r) => (
+                      <tr key={r.auctionId} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-4"><p className="text-sm font-semibold text-slate-800 max-w-[200px] truncate" title={r.auctionTitle}>{r.auctionTitle}</p><p className="text-xs font-mono text-slate-400">{r.auctionId?.slice(0, 8)}…</p></td>
+                        <td className="py-3 px-4"><p className="text-sm text-slate-700">{r.sellerName}</p><p className="text-xs text-slate-400 font-mono">{r.sellerEmail}</p></td>
+                        <td className="py-3 px-4"><p className="text-sm text-slate-700">{r.winnerName}</p><p className="text-xs text-slate-400 font-mono">{r.winnerEmail}</p></td>
+                        <td className="py-3 px-4 text-sm font-mono font-semibold text-slate-800">${r.hammerPrice.toFixed(2)}</td>
+                        <td className="py-3 px-4"><span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold font-mono">+${r.commission.toFixed(2)}</span></td>
+                        <td className="py-3 px-4 text-xs text-slate-400 whitespace-nowrap">{r.settledAt ? new Date(r.settledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Pagination */}
+          {!commLoading && !commGrouped && commPag.totalPages > 1 && (
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-slate-500 font-mono">Page {commPag.page} of {commPag.totalPages} &middot; {commPag.total} records</p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => handleCommPageChange(commPage - 1)} disabled={commPage <= 1} id="comm-prev-page"
+                  className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                {Array.from({ length: Math.min(5, commPag.totalPages) }, (_, i) => {
+                  const p = i + 1;
+                  return (
+                    <button key={p} onClick={() => handleCommPageChange(p)} id={`comm-page-${p}`}
+                      className={`w-8 h-8 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                        p === commPage ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50 border border-slate-200'
+                      }`}>{p}</button>
+                  );
+                })}
+                <button onClick={() => handleCommPageChange(commPage + 1)} disabled={commPage >= commPag.totalPages} id="comm-next-page"
+                  className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

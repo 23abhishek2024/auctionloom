@@ -96,6 +96,7 @@ export const adminApi = {
   getProofs: (status) => api.get('/admin/commission-proofs', { params: { status } }),
   updateProofStatus: (id, status, notes) =>
     api.put(`/admin/commission-proofs/${id}/status`, { status, admin_notes: notes }),
+  getCommissionLedger: (params) => api.get('/admin/commission-ledger', { params }),
 };
 
 export const commissionApi = {
@@ -108,6 +109,7 @@ export const commissionApi = {
 
 export const walletApi = {
   getWallet: () => api.get('/wallet'),
+  getTransactions: (params) => api.get('/wallet/transactions', { params }),
   topup: (data) => api.post('/wallet/topup', data),
   settleLot: (data) => api.post('/wallet/settle-lot', data),
   settleCommission: (data) => api.post('/wallet/settle-commission', data),

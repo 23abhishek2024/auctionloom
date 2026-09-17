@@ -11,6 +11,9 @@ const { authMiddleware } = require('../middlewares/auth');
 // Balance & Ledger Summary
 router.get('/', authMiddleware, walletController.getWallet);
 
+// Full paginated transaction history
+router.get('/transactions', authMiddleware, walletController.getTransactions);
+
 // Self-Service Simulated Top-Up
 router.post('/topup', authMiddleware, walletController.topup);
 
