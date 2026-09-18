@@ -34,6 +34,18 @@ export const Navbar = () => {
   // Profile Dropdown Menu State
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const hoverTimeoutRef = useRef(null);
+
+  const handleMouseEnter = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    setIsDropdownOpen(true);
+  };
+
+  const handleMouseLeave = () => {
+    hoverTimeoutRef.current = setTimeout(() => {
+      setIsDropdownOpen(false);
+    }, 250);
+  };
 
   // Wallet State
   const [walletBalance, setWalletBalance] = useState(0);
@@ -239,7 +251,12 @@ export const Navbar = () => {
                 </Link>
 
                 {/* Modern User Profile Dropdown Pill */}
-                <div className="relative" ref={dropdownRef}>
+                <div 
+                  className="relative" 
+                  ref={dropdownRef}
+                  onMouseEnter={handleMouseEnter}
+                  onMouseLeave={handleMouseLeave}
+                >
                   <button
                     type="button"
                     onClick={() => setIsDropdownOpen(prev => !prev)}
