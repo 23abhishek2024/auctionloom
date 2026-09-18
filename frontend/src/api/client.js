@@ -98,6 +98,7 @@ export const adminApi = {
     api.put(`/admin/commission-proofs/${id}/status`, { status, admin_notes: notes }),
   getCommissionLedger: (params) => api.get('/admin/commission-ledger', { params }),
   getCommissionTransactions: (params) => api.get('/admin/commission-transactions', { params }),
+  purgeAndResetDatabase: (data) => api.post('/admin/system/purge-and-reset', data),
 };
 
 export const commissionApi = {

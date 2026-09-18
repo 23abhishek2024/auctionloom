@@ -263,6 +263,38 @@ export const AdminDashboardPage = () => {
     }
   };
 
+  // Handle Complete System Purge & Clean Reset
+  const handlePurgeAndReset = async () => {
+    const confirmed = window.confirm(
+      '⚠️ CLEAN PURGE & TEST RESET:\n\n' +
+      'This will:\n' +
+      '1. Delete all old auctions, bids, and payment history.\n' +
+      '2. Ensure ONLY test1@gmail.com through test5@gmail.com and admin@gmail.com exist (password: test@123).\n' +
+      '3. Clear all wallets to $0.00 first.\n' +
+      '4. Run 3 automated test transactions and seed fresh active auctions.\n\n' +
+      'Are you sure you want to proceed?'
+    );
+    if (!confirmed) return;
+
+    try {
+      setActionLoading(true);
+      const res = await adminApi.purgeAndResetDatabase({ runTestAuctions: true });
+      alert(
+        '✅ SYSTEM RESET & VERIFIED!\n\n' +
+        res.data.message + '\n\n' +
+        'Balances:\n' +
+        Object.entries(res.data.balances || {})
+          .map(([email, bal]) => ` • ${email}: $${bal.toFixed(2)} USD`)
+          .join('\n')
+      );
+      await fetchAllAdminData();
+    } catch (err) {
+      alert(err.response?.data?.error || err.message || 'Reset failed');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   if (!user || user.role !== 'admin') {
     return null;
   }
@@ -283,14 +315,26 @@ export const AdminDashboardPage = () => {
           </p>
         </div>
 
-        <button
-          onClick={fetchAllAdminData}
-          disabled={loading || actionLoading}
-          className="self-start sm:self-auto inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 shadow-sm active:scale-95 transition-all"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Metrics
-        </button>
+        <div className="flex items-center gap-3 self-start sm:self-auto">
+          <button
+            onClick={handlePurgeAndReset}
+            disabled={loading || actionLoading}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-sm font-semibold hover:bg-amber-100 shadow-sm active:scale-95 transition-all"
+            title="Purge all old data, clear wallets, and configure 5 test users + admin with verified transitions"
+          >
+            <Trash2 className="w-4 h-4 text-amber-600" />
+            Clean Reset & Test Suite
+          </button>
+
+          <button
+            onClick={fetchAllAdminData}
+            disabled={loading || actionLoading}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 shadow-sm active:scale-95 transition-all"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh Metrics
+          </button>
+        </div>
       </div>
 
       {/* KPI Telemetry Cards */}

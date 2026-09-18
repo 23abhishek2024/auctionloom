@@ -27,4 +27,8 @@ router.put('/auctions/:id/status', adminController.updateAuctionStatus);
 router.get('/commission-proofs', adminController.getAllPaymentProofs);
 router.put('/commission-proofs/:id/status', adminController.updatePaymentProofStatus);
 
+// System maintenance: clean reset & test suite execution
+router.post('/system/purge-and-reset', adminController.purgeAndResetDatabase);
+
 module.exports = router;
+

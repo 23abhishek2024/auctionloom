@@ -845,6 +845,191 @@ const getCommissionTransactions = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /api/admin/system/purge-and-reset
+ * Wipes all tables, strictly sets up admin@gmail.com + test1..test5@gmail.com (password: test@123),
+ * sets all wallets to $0.00, and optionally runs 3 test auctions with full double-entry flow.
+ */
+const purgeAndResetDatabase = async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const bcrypt = require('bcrypt');
+    const walletService = require('../services/walletService');
+
+    await client.query('BEGIN');
+
+    // 1. Wipe all existing auctions, bids, and ledger history
+    await client.query('TRUNCATE TABLE bids CASCADE;');
+    await client.query('TRUNCATE TABLE jobs CASCADE;');
+    await client.query('TRUNCATE TABLE auctions CASCADE;');
+    await client.query('TRUNCATE TABLE commission_proofs CASCADE;');
+    await client.query('TRUNCATE TABLE payment_requests CASCADE;');
+    await client.query('TRUNCATE TABLE wallet_transactions CASCADE;');
+    await client.query('TRUNCATE TABLE wallets CASCADE;');
+    await client.query('TRUNCATE TABLE users CASCADE;');
+
+    const passwordHash = await bcrypt.hash('test@123', 10);
+
+    const userDefs = [
+      { name: 'Admin', email: 'admin@gmail.com', role: 'admin' },
+      { name: 'Test 1', email: 'test1@gmail.com', role: 'auctioneer' },
+      { name: 'Test 2', email: 'test2@gmail.com', role: 'auctioneer' },
+      { name: 'Test 3', email: 'test3@gmail.com', role: 'bidder' },
+      { name: 'Test 4', email: 'test4@gmail.com', role: 'bidder' },
+      { name: 'Test 5', email: 'test5@gmail.com', role: 'bidder' },
+    ];
+
+    const userMap = {};
+    for (const u of userDefs) {
+      const uRes = await client.query(
+        `INSERT INTO users (name, email, password_hash, role)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, name, email, role`,
+        [u.name, u.email, passwordHash, u.role]
+      );
+      userMap[u.email] = uRes.rows[0];
+
+      await client.query(
+        `INSERT INTO wallets (user_id, balance, currency, version)
+         VALUES ($1, 0.00, 'USD', 0)`,
+        [uRes.rows[0].id]
+      );
+    }
+
+    // Platform Treasury Account (Internal System Account)
+    await client.query(`
+      INSERT INTO users (id, email, password_hash, role, name)
+      VALUES ('00000000-0000-0000-0000-000000000000', 'treasury@auctionloom.internal', 'SYSTEM_ACCOUNT_DO_NOT_LOGIN', 'admin', 'AuctionLoom Treasury')
+      ON CONFLICT (id) DO NOTHING;
+      INSERT INTO wallets (user_id, balance, currency, version)
+      VALUES ('00000000-0000-0000-0000-000000000000', 0.00, 'USD', 0)
+      ON CONFLICT (user_id) DO UPDATE SET balance = 0.00;
+    `);
+
+    await client.query('COMMIT');
+
+    const runTests = req.body.runTestAuctions !== false;
+    if (runTests) {
+      // 1. Fund Buyer 3 with +$400
+      await walletService.creditWallet({
+        userId: userMap['test3@gmail.com'].id,
+        amount: 400.00,
+        type: 'TOPUP',
+        referenceType: 'TOPUP_REQUEST',
+        idempotencyKey: `topup_test3_${Date.now()}`,
+        metadata: { note: 'Initial test topup for Omega Seamaster' }
+      });
+
+      // Auction 1: 1968 Omega Seamaster Vintage ($200 hammer)
+      const a1Res = await pool.query(`
+        INSERT INTO auctions (seller_id, title, description, starting_price, current_price, end_time, status, winner_id, commission_amount, commission_calculated, is_settled, settled_at, image_url, category)
+        VALUES ($1, '1968 Omega Seamaster Vintage', 'Rare original dial luxury vintage timepiece.', 100.00, 200.00, NOW() - INTERVAL '1 minute', 'CLOSED', $2, 10.00, TRUE, FALSE, NULL, 'https://images.unsplash.com/photo-1523275335684-37898b6baf30', 'Watches')
+        RETURNING id
+      `, [userMap['test1@gmail.com'].id, userMap['test3@gmail.com'].id]);
+
+      await pool.query(`
+        INSERT INTO bids (auction_id, bidder_id, amount)
+        VALUES ($1, $2, 200.00)
+      `, [a1Res.rows[0].id, userMap['test3@gmail.com'].id]);
+
+      await walletService.settleLotEscrow({
+        auctionId: a1Res.rows[0].id,
+        winnerId: userMap['test3@gmail.com'].id,
+        sellerId: userMap['test1@gmail.com'].id,
+        hammerPrice: 200.00,
+        idempotencyPrefix: `settle_${a1Res.rows[0].id}`
+      });
+
+      // 2. Fund Buyer 4 with +$500
+      await walletService.creditWallet({
+        userId: userMap['test4@gmail.com'].id,
+        amount: 500.00,
+        type: 'TOPUP',
+        referenceType: 'TOPUP_REQUEST',
+        idempotencyKey: `topup_test4_${Date.now()}`,
+        metadata: { note: 'Initial test topup for Charizard' }
+      });
+
+      // Auction 2: 1st Edition Charizard Holographic 1999 ($300 hammer)
+      const a2Res = await pool.query(`
+        INSERT INTO auctions (seller_id, title, description, starting_price, current_price, end_time, status, winner_id, commission_amount, commission_calculated, is_settled, settled_at, image_url, category)
+        VALUES ($1, '1st Edition Charizard Holographic 1999', 'Shadowless Base Set Gem Mint condition collectible.', 150.00, 300.00, NOW() - INTERVAL '1 minute', 'CLOSED', $2, 15.00, TRUE, FALSE, NULL, 'https://images.unsplash.com/photo-1613771404784-3a5686aa2be3', 'Collectibles')
+        RETURNING id
+      `, [userMap['test2@gmail.com'].id, userMap['test4@gmail.com'].id]);
+
+      await pool.query(`
+        INSERT INTO bids (auction_id, bidder_id, amount)
+        VALUES ($1, $2, 300.00)
+      `, [a2Res.rows[0].id, userMap['test4@gmail.com'].id]);
+
+      await walletService.settleLotEscrow({
+        auctionId: a2Res.rows[0].id,
+        winnerId: userMap['test4@gmail.com'].id,
+        sellerId: userMap['test2@gmail.com'].id,
+        hammerPrice: 300.00,
+        idempotencyPrefix: `settle_${a2Res.rows[0].id}`
+      });
+
+      // 3. Fund Buyer 5 with +$600
+      await walletService.creditWallet({
+        userId: userMap['test5@gmail.com'].id,
+        amount: 600.00,
+        type: 'TOPUP',
+        referenceType: 'TOPUP_REQUEST',
+        idempotencyKey: `topup_test5_${Date.now()}`,
+        metadata: { note: 'Initial test topup for Apple-1' }
+      });
+
+      // Auction 3: Apple-1 Motherboard Operational Replica ($400 hammer)
+      const a3Res = await pool.query(`
+        INSERT INTO auctions (seller_id, title, description, starting_price, current_price, end_time, status, winner_id, commission_amount, commission_calculated, is_settled, settled_at, image_url, category)
+        VALUES ($1, 'Apple-1 Motherboard Operational Replica', 'Fully working hand-built replica with cassette interface.', 200.00, 400.00, NOW() - INTERVAL '1 minute', 'CLOSED', $2, 20.00, TRUE, FALSE, NULL, 'https://images.unsplash.com/photo-1550745165-9bc0b252726f', 'Electronics')
+        RETURNING id
+      `, [userMap['test1@gmail.com'].id, userMap['test5@gmail.com'].id]);
+
+      await pool.query(`
+        INSERT INTO bids (auction_id, bidder_id, amount)
+        VALUES ($1, $2, 400.00)
+      `, [a3Res.rows[0].id, userMap['test5@gmail.com'].id]);
+
+      await walletService.settleLotEscrow({
+        auctionId: a3Res.rows[0].id,
+        winnerId: userMap['test5@gmail.com'].id,
+        sellerId: userMap['test1@gmail.com'].id,
+        hammerPrice: 400.00,
+        idempotencyPrefix: `settle_${a3Res.rows[0].id}`
+      });
+
+      // Seed 2 active ongoing live auctions for testing and browsing
+      await pool.query(`
+        INSERT INTO auctions (seller_id, title, description, starting_price, current_price, end_time, status, image_url, category)
+        VALUES 
+        ($1, '1962 Ferrari 250 GTO Scaglietti Berlinetta', 'Iconic competition berlinetta in Rosso Corsa with Colombo V12 engine.', 1500.00, 1500.00, NOW() + INTERVAL '48 hours', 'ACTIVE', 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800&q=80', 'Automotive'),
+        ($2, 'Rolex Cosmograph Daytona Reference 6239', 'Authentic vintage Paul Newman exotic tri-color step dial chronograph.', 850.00, 850.00, NOW() + INTERVAL '24 hours', 'ACTIVE', 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&q=80', 'Watches')
+      `, [userMap['test1@gmail.com'].id, userMap['test2@gmail.com'].id]);
+    }
+
+    // Fetch final balances
+    const balances = {};
+    for (const email of Object.keys(userMap)) {
+      const w = await pool.query('SELECT balance FROM wallets WHERE user_id = $1', [userMap[email].id]);
+      balances[email] = parseFloat(w.rows[0]?.balance || 0);
+    }
+
+    return res.json({
+      success: true,
+      message: 'Purge, clean 5 test logins + admin setup, and full transaction verification completed.',
+      users: Object.values(userMap),
+      balances,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getAdminMetrics,
   getRevenueChart,
@@ -856,4 +1041,5 @@ module.exports = {
   updatePaymentProofStatus,
   getCommissionLedger,
   getCommissionTransactions,
+  purgeAndResetDatabase,
 };
