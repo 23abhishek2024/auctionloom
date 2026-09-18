@@ -48,6 +48,29 @@ async function closeAuction(auctionId) {
 
     await client.query('COMMIT');
 
+    // 2b. Attempt immediate auto-settlement if winner has sufficient wallet balance
+    if (winnerId && highestBid) {
+      try {
+        const walletService = require('./walletService');
+        const winnerWallet = await walletService.getOrCreateWallet(winnerId);
+        if (parseFloat(winnerWallet.balance) >= parseFloat(highestBid.amount)) {
+          console.log(`[AuctionClosure] ⚡ Auto-settling lot ${auctionId} from winner's wallet ($${winnerWallet.balance} >= $${highestBid.amount})...`);
+          await walletService.settleLotEscrow({
+            auctionId,
+            winnerId,
+            sellerId: auction.seller_id,
+            hammerPrice: highestBid.amount,
+            idempotencyPrefix: 'auto_settle',
+          });
+          console.log(`[AuctionClosure] ✅ Lot ${auctionId} successfully auto-settled! Winner debited, seller credited (+95%), admin credited (+5%).`);
+        } else {
+          console.log(`[AuctionClosure] Winner wallet ($${winnerWallet.balance}) below hammer price ($${highestBid.amount}). Awaiting manual settlement.`);
+        }
+      } catch (settleErr) {
+        console.warn(`[AuctionClosure] Auto-settle note for lot ${auctionId}:`, settleErr.message);
+      }
+    }
+
     // 3. Dispatch transactional emails non-critically
     if (winnerId && highestBid) {
       Promise.resolve().then(async () => {

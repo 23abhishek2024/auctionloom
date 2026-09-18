@@ -2,10 +2,11 @@ const pool = require('../db');
 
 const userModel = {
   /**
-   * Find a user by email
+   * Find a user by email (case-insensitive)
    */
   findByEmail: async (email) => {
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (!email) return null;
+    const result = await pool.query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
     return result.rows[0];
   },
 

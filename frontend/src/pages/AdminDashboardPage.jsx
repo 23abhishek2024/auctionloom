@@ -96,7 +96,8 @@ export const AdminDashboardPage = () => {
     if (user?.role === 'admin') {
       fetchAllAdminData();
     }
-  }, [proofStatusFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proofStatusFilter, user]);
 
   // Commission Transactions Fetch
   const fetchCommissionTransactions = useCallback(async (opts = {}) => {
@@ -158,7 +159,7 @@ export const AdminDashboardPage = () => {
         fetchCommissionLedger();
       }
     }
-  }, [activeTab, commTab, fetchCommissionTransactions, fetchCommissionLedger]);
+  }, [activeTab, commTab, fetchCommissionTransactions, fetchCommissionLedger, user]);
 
   const handleCommPageChange = (p) => {
     setCommPage(p);

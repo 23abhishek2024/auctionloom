@@ -303,6 +303,17 @@ export const AuctionDetailPage = () => {
       if (diff <= 0 || auction.status === 'CLOSED') {
         setTimeLeft('AUCTION CONCLUDED');
         setIsEnded(true);
+        if (auction.status === 'ACTIVE') {
+          auctionApi.getById(id).then((res) => {
+            if (res.data?.auction) {
+              setAuction(res.data.auction);
+              if (res.data.auction.is_settled) {
+                setLotPaid(true);
+              }
+              window.dispatchEvent(new Event('wallet_updated'));
+            }
+          }).catch(() => {});
+        }
         return;
       }
 

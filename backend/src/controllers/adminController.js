@@ -617,7 +617,7 @@ const getCommissionTransactions = async (req, res, next) => {
         LEFT JOIN auctions a ON a.id = wt.reference_id
         LEFT JOIN users seller ON seller.id = a.seller_id
         LEFT JOIN users winner ON winner.id = a.winner_id
-        WHERE wt.type = 'COMMISSION'
+        WHERE wt.type = 'COMMISSION' AND w.user_id != '00000000-0000-0000-0000-000000000000'
 
         UNION ALL
 
@@ -698,7 +698,8 @@ const getCommissionTransactions = async (req, res, next) => {
           wt.created_at AS date,
           wt.amount::numeric AS commission
         FROM wallet_transactions wt
-        WHERE wt.type = 'COMMISSION'
+        JOIN wallets w ON w.id = wt.wallet_id
+        WHERE wt.type = 'COMMISSION' AND w.user_id != '00000000-0000-0000-0000-000000000000'
 
         UNION ALL
 
@@ -748,7 +749,7 @@ const getCommissionTransactions = async (req, res, next) => {
         LEFT JOIN auctions a ON a.id = wt.reference_id
         LEFT JOIN users seller ON seller.id = a.seller_id
         LEFT JOIN users winner ON winner.id = a.winner_id
-        WHERE wt.type = 'COMMISSION'
+        WHERE wt.type = 'COMMISSION' AND w.user_id != '00000000-0000-0000-0000-000000000000'
 
         UNION ALL
 

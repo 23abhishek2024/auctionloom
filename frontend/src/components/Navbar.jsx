@@ -21,7 +21,10 @@ export const Navbar = () => {
   const [isTopupOpen, setIsTopupOpen] = useState(false);
 
   const fetchWallet = async () => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      setWalletBalance(0);
+      return;
+    }
     try {
       const res = await walletApi.getWallet();
       if (res.data?.data?.wallet) {
@@ -35,11 +38,13 @@ export const Navbar = () => {
   useEffect(() => {
     if (isAuthenticated) {
       fetchWallet();
+    } else {
+      setWalletBalance(0);
     }
     const handleWalletUpdated = () => fetchWallet();
     window.addEventListener('wallet_updated', handleWalletUpdated);
     return () => window.removeEventListener('wallet_updated', handleWalletUpdated);
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user?.id]);
 
   const handleLogout = () => {
     logout();

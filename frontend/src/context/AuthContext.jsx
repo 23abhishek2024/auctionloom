@@ -37,6 +37,7 @@ export const AuthProvider = ({ children }) => {
     setToken(tokenData);
     localStorage.setItem('token', tokenData);
     localStorage.setItem('user', JSON.stringify(userData));
+    setTimeout(() => window.dispatchEvent(new Event('wallet_updated')), 50);
     return userData;
   };
 
@@ -47,6 +48,7 @@ export const AuthProvider = ({ children }) => {
     setToken(tokenData);
     localStorage.setItem('token', tokenData);
     localStorage.setItem('user', JSON.stringify(userData));
+    setTimeout(() => window.dispatchEvent(new Event('wallet_updated')), 50);
     return userData;
   };
 
@@ -75,6 +77,7 @@ export const AuthProvider = ({ children }) => {
     setToken(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    window.dispatchEvent(new Event('wallet_updated'));
   };
 
   return (

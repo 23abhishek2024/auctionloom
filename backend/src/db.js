@@ -157,6 +157,37 @@ pool.connect(async (err, client, release) => {
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_payment_requests_wallet ON payment_requests(wallet_id);
+
+      -- Ensure admin@gmail.com has a wallet and sync accumulated platform commission
+      INSERT INTO wallets (user_id, balance, currency)
+      SELECT id, 0.00, 'USD' FROM users WHERE email = 'admin@gmail.com'
+      ON CONFLICT (user_id) DO NOTHING;
+
+      DO $$
+      DECLARE
+        v_admin_id UUID;
+        v_admin_wallet_id UUID;
+        v_comm_sum NUMERIC(12,2);
+        v_curr_balance NUMERIC(12,2);
+      BEGIN
+        SELECT id INTO v_admin_id FROM users WHERE email = 'admin@gmail.com' LIMIT 1;
+        IF v_admin_id IS NOT NULL THEN
+          SELECT id, balance INTO v_admin_wallet_id, v_curr_balance FROM wallets WHERE user_id = v_admin_id;
+          
+          SELECT COALESCE(SUM(amount), 0.00) INTO v_comm_sum FROM wallet_transactions WHERE type = 'COMMISSION';
+          IF v_comm_sum <= 0 THEN
+            SELECT COALESCE(balance, 0.00) INTO v_comm_sum FROM wallets WHERE user_id = '00000000-0000-0000-0000-000000000000';
+          END IF;
+
+          IF v_curr_balance = 0 AND v_comm_sum > 0 THEN
+            UPDATE wallets SET balance = v_comm_sum, updated_at = NOW() WHERE id = v_admin_wallet_id;
+            IF NOT EXISTS (SELECT 1 FROM wallet_transactions WHERE wallet_id = v_admin_wallet_id) THEN
+              INSERT INTO wallet_transactions (wallet_id, type, amount, balance_after, reference_type, status, metadata)
+              VALUES (v_admin_wallet_id, 'COMMISSION', v_comm_sum, v_comm_sum, 'MANUAL', 'COMPLETED', '{"note": "Platform commission initial sync"}');
+            END IF;
+          END IF;
+        END IF;
+      END $$;
     `);
     console.log('[DB] ✅ PostgreSQL connected successfully & verified latest v2 schema.');
   } catch (migErr) {

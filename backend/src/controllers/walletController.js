@@ -7,6 +7,20 @@ const auctionClosureService = require('../services/auctionClosureService');
 const getTransactions = async (req, res) => {
   try {
     const wallet = await walletService.getOrCreateWallet(req.user.id);
+
+    // Auto-sync for admin if their wallet balance is 0 but commission exists
+    if (req.user.role === 'admin' && parseFloat(wallet.balance) === 0) {
+      const commAgg = await pool.query(`
+        SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm
+        FROM wallet_transactions WHERE type = 'COMMISSION'
+      `);
+      const totalComm = parseFloat(commAgg.rows[0]?.total_comm || 0);
+      if (totalComm > 0) {
+        await pool.query('UPDATE wallets SET balance = $1, updated_at = NOW() WHERE id = $2', [totalComm, wallet.id]);
+        wallet.balance = totalComm;
+      }
+    }
+
     const page = Math.max(1, parseInt(req.query.page || '1'));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20')));
     const offset = (page - 1) * limit;
@@ -14,19 +28,8 @@ const getTransactions = async (req, res) => {
 
     let walletCondition = 'wt.wallet_id = $1';
     const params = [wallet.id];
-
     if (req.user.role === 'admin') {
-      const treasuryRes = await pool.query(
-        'SELECT id FROM wallets WHERE user_id = $1',
-        [walletService.PLATFORM_TREASURY_USER_ID]
-      );
-      const treasuryWalletId = treasuryRes.rows[0]?.id;
-      if (treasuryWalletId && treasuryWalletId !== wallet.id) {
-        params.push(treasuryWalletId);
-        walletCondition = `(wt.wallet_id = $1 OR wt.wallet_id = $${params.length} OR wt.type = 'COMMISSION')`;
-      } else {
-        walletCondition = `(wt.wallet_id = $1 OR wt.type = 'COMMISSION')`;
-      }
+      walletCondition = '(wt.wallet_id = $1 OR wt.type = \'COMMISSION\')';
     }
 
     const conditions = [walletCondition];
@@ -66,8 +69,10 @@ const getTransactions = async (req, res) => {
     let platformSummary = null;
     if (req.user.role === 'admin') {
       const commAgg = await pool.query(`
-        SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
-        FROM wallet_transactions WHERE type = 'COMMISSION'
+        SELECT COALESCE(SUM(wt.amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
+        FROM wallet_transactions wt
+        JOIN wallets w ON w.id = wt.wallet_id
+        WHERE wt.type = 'COMMISSION' AND w.user_id != '00000000-0000-0000-0000-000000000000'
       `);
       platformSummary = {
         totalCommissionEarned: parseFloat(commAgg.rows[0]?.total_comm || 0),
@@ -122,18 +127,26 @@ const getTransactions = async (req, res) => {
 const getWallet = async (req, res) => {
   try {
     const summary = await walletService.getWalletSummary(req.user.id);
-    if (req.user.role === 'admin') {
       const commAgg = await pool.query(`
         SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
-        FROM wallet_transactions WHERE type = 'COMMISSION'
+        FROM wallet_transactions
+        WHERE type = 'COMMISSION'
       `);
       const treasuryRes = await pool.query(
         'SELECT balance FROM wallets WHERE user_id = $1',
         [walletService.PLATFORM_TREASURY_USER_ID]
       );
+      const totalCommission = parseFloat(commAgg.rows[0]?.total_comm || 0);
       summary.treasuryBalance = parseFloat(treasuryRes.rows[0]?.balance || 0);
-      summary.totalCommissionEarned = parseFloat(commAgg.rows[0]?.total_comm || 0);
+      summary.totalCommissionEarned = totalCommission;
       summary.totalCommissionTransitions = parseInt(commAgg.rows[0]?.count_comm || 0);
+
+      // Self-heal admin wallet balance if currently 0 but platform commission exists
+      if (parseFloat(summary.wallet.balance) === 0 && (totalCommission > 0 || summary.treasuryBalance > 0)) {
+        const targetBal = totalCommission > 0 ? totalCommission : summary.treasuryBalance;
+        await pool.query('UPDATE wallets SET balance = $1, updated_at = NOW() WHERE id = $2', [targetBal, summary.wallet.id]);
+        summary.wallet.balance = targetBal;
+      }
     }
     return res.status(200).json({
       success: true,
