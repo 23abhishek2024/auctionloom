@@ -307,34 +307,20 @@ const settleCommission = async (req, res) => {
       client,
     });
 
-    // 2b. Credit Platform Treasury Wallet and Primary Admin with the received commission payment!
+    // 2b. Credit Platform Commission to Admin Wallet (single recipient, preventing double entries)
     const treasuryId = walletService.PLATFORM_TREASURY_USER_ID;
     const primaryAdminId = await walletService.getPrimaryAdminUserId(client);
+    const recipientUserId = primaryAdminId || treasuryId;
 
-    if (treasuryId) {
+    if (recipientUserId) {
       await walletService.creditWallet({
-        userId: treasuryId,
+        userId: recipientUserId,
         amount: payAmount,
         type: 'COMMISSION',
         referenceType: 'COMMISSION_REQUEST',
-        idempotencyKey: `treasury_comm_recv_${req.user.id}_${Date.now()}`,
+        idempotencyKey: `comm_recv_${req.user.id}_${Date.now()}`,
         metadata: {
           note: `Platform commission payment received from seller`,
-          sellerId: req.user.id,
-        },
-        client,
-      });
-    }
-
-    if (primaryAdminId && primaryAdminId !== treasuryId) {
-      await walletService.creditWallet({
-        userId: primaryAdminId,
-        amount: payAmount,
-        type: 'COMMISSION',
-        referenceType: 'COMMISSION_REQUEST',
-        idempotencyKey: `admin_comm_recv_${req.user.id}_${Date.now()}`,
-        metadata: {
-          note: `Admin commission payment received from seller`,
           sellerId: req.user.id,
         },
         client,
