@@ -1,10 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { walletApi } from '../api/client';
 import { TopupModal } from './TopupModal';
-import { Gavel, PlusCircle, LogIn, LogOut, UserPlus, Radio, Pencil, LayoutDashboard, Trophy, ShieldAlert, HelpCircle, Wallet, Zap } from 'lucide-react';
+import { 
+  Gavel, 
+  PlusCircle, 
+  LogIn, 
+  LogOut, 
+  UserPlus, 
+  Radio, 
+  Pencil, 
+  LayoutDashboard, 
+  Trophy, 
+  ShieldAlert, 
+  HelpCircle, 
+  Wallet, 
+  Zap,
+  ChevronDown
+} from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 
 export const Navbar = () => {
@@ -16,9 +31,37 @@ export const Navbar = () => {
   const [nameInput, setNameInput] = useState('');
   const [savingName, setSavingName] = useState(false);
 
+  // Profile Dropdown Menu State
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
   // Wallet State
   const [walletBalance, setWalletBalance] = useState(0);
   const [isTopupOpen, setIsTopupOpen] = useState(false);
+
+  // Click-outside listener for profile dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDropdownOpen]);
+
+  // Escape key listener to close dropdown
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setIsDropdownOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const fetchWallet = async () => {
     if (!isAuthenticated) {
@@ -195,47 +238,195 @@ export const Navbar = () => {
                   </button>
                 </Link>
 
-                {/* User info & role badge - Links to My Hub */}
-                <Link
-                  to="/my-hub"
-                  className="flex items-center gap-2.5 p-1 rounded-2xl hover:bg-slate-100/80 transition-all group cursor-pointer"
-                  title="View My Hub Dashboard"
-                >
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-semibold text-xs flex items-center justify-center shadow-sm shadow-indigo-500/20 group-hover:scale-105 transition-transform">
-                    {getInitials(user?.name || user?.email)}
-                  </div>
-                  <div className="hidden sm:flex flex-col items-start text-left">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-semibold text-slate-900 max-w-[130px] truncate group-hover:text-indigo-600 transition-colors" title={user?.email}>
+                {/* Modern User Profile Dropdown Pill */}
+                <div className="relative" ref={dropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsDropdownOpen(prev => !prev)}
+                    className={`flex items-center gap-2 sm:gap-2.5 p-1 sm:p-1.5 sm:pr-3 rounded-2xl border transition-all cursor-pointer select-none ${
+                      isDropdownOpen 
+                        ? 'bg-slate-100 border-indigo-300 ring-2 ring-indigo-500/20 shadow-sm' 
+                        : 'bg-white hover:bg-slate-50 border-slate-200/80 shadow-xs'
+                    }`}
+                    aria-expanded={isDropdownOpen}
+                    aria-label="User profile menu"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-600 text-white font-semibold text-xs flex items-center justify-center shadow-sm shadow-indigo-500/20 shrink-0">
+                      {getInitials(user?.name || user?.email)}
+                    </div>
+                    <div className="hidden sm:flex flex-col items-start text-left leading-tight">
+                      <span className="text-xs font-semibold text-slate-900 max-w-[120px] truncate" title={user?.email}>
                         {user?.name || formatDisplayName(user)}
                       </span>
+                      <span className={`text-[9px] uppercase font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-md border mt-0.5 ${getRoleBadge(user?.role)}`}>
+                        {user?.role}
+                      </span>
                     </div>
-                    <span className={`text-[10px] uppercase font-mono font-medium px-2 py-0.2 rounded-full border ${getRoleBadge(user?.role)}`}>
-                      {user?.role}
-                    </span>
-                  </div>
-                </Link>
+                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-indigo-600' : ''}`} />
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNameInput(user?.name || '');
-                    setIsEditingName(true);
-                  }}
-                  className="text-slate-400 hover:text-indigo-600 transition-colors p-1.5 rounded-xl hover:bg-slate-100 cursor-pointer"
-                  title="Quick change display name"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
+                  {/* Dropdown Menu Panel */}
+                  {isDropdownOpen && (
+                    <div className="absolute right-0 mt-2 w-72 sm:w-80 rounded-3xl bg-white/95 backdrop-blur-2xl border border-slate-200/90 shadow-2xl shadow-slate-900/15 py-3 z-50 animate-in fade-in zoom-in-95 duration-150">
+                      {/* User Account Info Header */}
+                      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-600 text-white font-bold text-sm flex items-center justify-center shadow-md shadow-indigo-500/25 shrink-0">
+                          {getInitials(user?.name || user?.email)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-sm font-bold text-slate-900 truncate">
+                              {user?.name || formatDisplayName(user)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsDropdownOpen(false);
+                                setNameInput(user?.name || '');
+                                setIsEditingName(true);
+                              }}
+                              className="p-1 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all cursor-pointer"
+                              title="Edit Display Name"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <p className="text-xs text-slate-500 truncate font-mono">
+                            {user?.email}
+                          </p>
+                          <div className="mt-1">
+                            <span className={`inline-block text-[10px] uppercase font-mono font-bold tracking-wider px-2 py-0.5 rounded-full border ${getRoleBadge(user?.role)}`}>
+                              {user?.role}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
 
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-all cursor-pointer"
-                  title="Logout"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Logout</span>
-                </button>
+                      {/* Quick Balance Preview Card */}
+                      <div className="mx-3 my-2.5 p-3 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-emerald-50 to-teal-50/40 border border-emerald-200/70 flex items-center justify-between">
+                        <div>
+                          <div className="text-[10px] uppercase font-mono font-bold tracking-wider text-emerald-700">
+                            Available Balance
+                          </div>
+                          <div className="text-base font-extrabold font-mono text-emerald-950">
+                            ${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })} <span className="text-xs font-normal text-emerald-700">USD</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDropdownOpen(false);
+                            setIsTopupOpen(true);
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm active:scale-95 transition-all cursor-pointer flex items-center gap-1"
+                        >
+                          <PlusCircle className="w-3.5 h-3.5" />
+                          <span>Top Up</span>
+                        </button>
+                      </div>
+
+                      {/* Navigation Links */}
+                      <div className="px-2 py-1 space-y-0.5">
+                        <Link
+                          to="/my-hub"
+                          onClick={() => setIsDropdownOpen(false)}
+                          className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-indigo-600 hover:bg-slate-50 transition-colors group"
+                        >
+                          <div className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                            <LayoutDashboard className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-semibold text-slate-800 group-hover:text-indigo-600">My Hub / Dashboard</div>
+                            <div className="text-[10px] text-slate-400 font-normal">Active bids, won lots & listings</div>
+                          </div>
+                        </Link>
+
+                        <Link
+                          to="/wallet"
+                          onClick={() => setIsDropdownOpen(false)}
+                          className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-emerald-600 hover:bg-slate-50 transition-colors group"
+                        >
+                          <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                            <Wallet className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-semibold text-slate-800 group-hover:text-emerald-600">Wallet & Ledger</div>
+                            <div className="text-[10px] text-slate-400 font-normal">Transaction history & balance</div>
+                          </div>
+                        </Link>
+
+                        {(user?.role === 'auctioneer' || user?.role === 'admin') && (
+                          <Link
+                            to="/create"
+                            onClick={() => setIsDropdownOpen(false)}
+                            className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-violet-600 hover:bg-slate-50 transition-colors group"
+                          >
+                            <div className="p-1.5 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors">
+                              <PlusCircle className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="font-semibold text-slate-800 group-hover:text-violet-600">Create New Auction</div>
+                              <div className="text-[10px] text-slate-400 font-normal">List item for live bidding</div>
+                            </div>
+                          </Link>
+                        )}
+
+                        {user?.role === 'admin' && (
+                          <Link
+                            to="/admin"
+                            onClick={() => setIsDropdownOpen(false)}
+                            className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-rose-600 hover:bg-rose-50/60 transition-colors group"
+                          >
+                            <div className="p-1.5 rounded-lg bg-rose-50 text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition-colors">
+                              <ShieldAlert className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="font-semibold text-slate-800 group-hover:text-rose-600">Super Admin Panel</div>
+                              <div className="text-[10px] text-slate-400 font-normal">Commission ledger & moderation</div>
+                            </div>
+                          </Link>
+                        )}
+
+                        <Link
+                          to="/how-it-works"
+                          onClick={() => setIsDropdownOpen(false)}
+                          className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors group"
+                        >
+                          <div className="p-1.5 rounded-lg bg-slate-100 text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">
+                            <HelpCircle className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-semibold text-slate-800">How It Works</div>
+                            <div className="text-[10px] text-slate-400 font-normal">Auction rules & platform guide</div>
+                          </div>
+                        </Link>
+                      </div>
+
+                      {/* Divider */}
+                      <div className="my-1.5 border-t border-slate-100" />
+
+                      {/* Logout Action */}
+                      <div className="px-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDropdownOpen(false);
+                            handleLogout();
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer group"
+                        >
+                          <div className="p-1.5 rounded-lg bg-rose-50 text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition-colors">
+                            <LogOut className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1 text-left">
+                            <div className="font-bold">Sign Out</div>
+                            <div className="text-[10px] text-rose-400 font-normal">Log out of this account</div>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="flex items-center gap-2">
