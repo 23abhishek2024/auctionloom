@@ -127,6 +127,7 @@ const getTransactions = async (req, res) => {
 const getWallet = async (req, res) => {
   try {
     const summary = await walletService.getWalletSummary(req.user.id);
+    if (req.user.role === 'admin') {
       const commAgg = await pool.query(`
         SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
         FROM wallet_transactions
