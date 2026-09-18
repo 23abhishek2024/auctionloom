@@ -45,6 +45,13 @@ async function getOrCreateWallet(userId, externalClient = null) {
         VALUES ('00000000-0000-0000-0000-000000000000', 'treasury@auctionloom.internal', 'SYSTEM_ACCOUNT_DO_NOT_LOGIN', 'admin', 'AuctionLoom Treasury')
         ON CONFLICT (id) DO NOTHING
       `);
+    } else {
+      const userCheck = await client.query('SELECT id FROM users WHERE id = $1', [userId]);
+      if (userCheck.rows.length === 0) {
+        const err = new Error('User account not found or session expired.');
+        err.statusCode = 401;
+        throw err;
+      }
     }
     res = await client.query(
       `INSERT INTO wallets (user_id, balance, currency, version)
@@ -412,18 +419,21 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
       client,
     });
 
-    // 4. Credit Platform Treasury Wallet & Primary Admin Wallet (5% Platform Commission)
+    // 4. Credit Platform Commission to Admin Wallet (single immutable entry)
     let platformWallet = null;
     if (commission > 0) {
+      const primaryAdminId = await getPrimaryAdminUserId(client);
+      const recipientUserId = primaryAdminId || PLATFORM_TREASURY_USER_ID;
       const platformKey = `${idempotencyPrefix || 'lot'}_platform_fee_${auctionId}`;
       const platformCreditResult = await creditWallet({
-        userId: PLATFORM_TREASURY_USER_ID,
+        userId: recipientUserId,
         amount: commission,
         type: 'COMMISSION',
         referenceType: 'AUCTION',
         referenceId: auctionId,
         idempotencyKey: platformKey,
         metadata: {
+          note: `Admin commission (+5%) received from "${auction.title}"`,
           auctionTitle: auction.title,
           sellerId,
           winnerId,
@@ -433,28 +443,6 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
         client,
       });
       platformWallet = platformCreditResult.wallet;
-
-      // Also mirror credit to primary human admin's wallet so their live balance updates and shows the transition
-      const primaryAdminId = await getPrimaryAdminUserId(client);
-      if (primaryAdminId && primaryAdminId !== PLATFORM_TREASURY_USER_ID) {
-        const adminKey = `${idempotencyPrefix || 'lot'}_admin_comm_${auctionId}`;
-        await creditWallet({
-          userId: primaryAdminId,
-          amount: commission,
-          type: 'COMMISSION',
-          referenceType: 'AUCTION',
-          referenceId: auctionId,
-          idempotencyKey: adminKey,
-          metadata: {
-            note: `Admin commission (+5%) received from "${auction.title}"`,
-            auctionTitle: auction.title,
-            sellerId,
-            winnerId,
-            hammerPrice: numericPrice,
-          },
-          client,
-        });
-      }
     }
 
     // 5. Mark auction as settled and record timestamp in platform records

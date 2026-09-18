@@ -12,8 +12,8 @@ const getTransactions = async (req, res) => {
     if (req.user.role === 'admin' && parseFloat(wallet.balance) === 0) {
       const commAgg = await pool.query(`
         SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm
-        FROM wallet_transactions WHERE type = 'COMMISSION'
-      `);
+        FROM wallet_transactions WHERE wallet_id = $1 AND type = 'COMMISSION'
+      `, [wallet.id]);
       const totalComm = parseFloat(commAgg.rows[0]?.total_comm || 0);
       if (totalComm > 0) {
         await pool.query('UPDATE wallets SET balance = $1, updated_at = NOW() WHERE id = $2', [totalComm, wallet.id]);
@@ -26,11 +26,8 @@ const getTransactions = async (req, res) => {
     const offset = (page - 1) * limit;
     const typeFilter = req.query.type ? req.query.type.toUpperCase() : null;
 
-    let walletCondition = 'wt.wallet_id = $1';
+    const walletCondition = 'wt.wallet_id = $1';
     const params = [wallet.id];
-    if (req.user.role === 'admin') {
-      walletCondition = '(wt.wallet_id = $1 OR wt.type = \'COMMISSION\')';
-    }
 
     const conditions = [walletCondition];
     if (typeFilter) {
@@ -71,9 +68,8 @@ const getTransactions = async (req, res) => {
       const commAgg = await pool.query(`
         SELECT COALESCE(SUM(wt.amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
         FROM wallet_transactions wt
-        JOIN wallets w ON w.id = wt.wallet_id
-        WHERE wt.type = 'COMMISSION' AND w.user_id != '00000000-0000-0000-0000-000000000000'
-      `);
+        WHERE wt.wallet_id = $1 AND wt.type = 'COMMISSION'
+      `, [wallet.id]);
       platformSummary = {
         totalCommissionEarned: parseFloat(commAgg.rows[0]?.total_comm || 0),
         totalCommissionTransitions: parseInt(commAgg.rows[0]?.count_comm || 0),
@@ -112,6 +108,9 @@ const getTransactions = async (req, res) => {
       },
     });
   } catch (err) {
+    if (err.statusCode === 401) {
+      return res.status(401).json({ error: err.message });
+    }
     console.error('[WalletController.getTransactions] Error:', err);
     return res.status(500).json({ error: 'Failed to retrieve transactions' });
   }
@@ -131,22 +130,17 @@ const getWallet = async (req, res) => {
       const commAgg = await pool.query(`
         SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
         FROM wallet_transactions
-        WHERE type = 'COMMISSION'
-      `);
-      const treasuryRes = await pool.query(
-        'SELECT balance FROM wallets WHERE user_id = $1',
-        [walletService.PLATFORM_TREASURY_USER_ID]
-      );
+        WHERE wallet_id = $1 AND type = 'COMMISSION'
+      `, [summary.wallet.id]);
       const totalCommission = parseFloat(commAgg.rows[0]?.total_comm || 0);
-      summary.treasuryBalance = parseFloat(treasuryRes.rows[0]?.balance || 0);
+      summary.treasuryBalance = totalCommission;
       summary.totalCommissionEarned = totalCommission;
       summary.totalCommissionTransitions = parseInt(commAgg.rows[0]?.count_comm || 0);
 
       // Self-heal admin wallet balance if currently 0 but platform commission exists
-      if (parseFloat(summary.wallet.balance) === 0 && (totalCommission > 0 || summary.treasuryBalance > 0)) {
-        const targetBal = totalCommission > 0 ? totalCommission : summary.treasuryBalance;
-        await pool.query('UPDATE wallets SET balance = $1, updated_at = NOW() WHERE id = $2', [targetBal, summary.wallet.id]);
-        summary.wallet.balance = targetBal;
+      if (parseFloat(summary.wallet.balance) === 0 && totalCommission > 0) {
+        await pool.query('UPDATE wallets SET balance = $1, updated_at = NOW() WHERE id = $2', [totalCommission, summary.wallet.id]);
+        summary.wallet.balance = totalCommission;
       }
     }
     return res.status(200).json({
@@ -154,6 +148,9 @@ const getWallet = async (req, res) => {
       data: summary,
     });
   } catch (err) {
+    if (err.statusCode === 401) {
+      return res.status(401).json({ error: err.message });
+    }
     console.error('[WalletController.getWallet] Error:', err);
     return res.status(500).json({ error: 'Failed to retrieve wallet information' });
   }
