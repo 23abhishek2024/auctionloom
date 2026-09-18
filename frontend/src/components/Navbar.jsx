@@ -186,42 +186,14 @@ export const Navbar = () => {
               Guide
             </Link>
 
-            {isAuthenticated && (
-              <>
-                <Link
-                  to="/my-hub"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium text-slate-700 hover:text-indigo-600 hover:bg-slate-100 transition-all"
-                >
-                  <LayoutDashboard className="w-4 h-4 text-indigo-500" />
-                  <span>My Hub</span>
-                </Link>
-
-                <Link
-                  to="/wallet"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium text-slate-700 hover:text-emerald-600 hover:bg-emerald-50 transition-all"
-                >
-                  <Wallet className="w-4 h-4 text-emerald-500" />
-                  <span>Wallet</span>
-                </Link>
-
-                {user?.role === 'admin' && (
-                  <Link
-                    to="/admin"
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold font-mono bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-all shadow-sm"
-                  >
-                    <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-                    <span>Admin</span>
-                  </Link>
-                )}
-
-                <Link
-                  to="/create"
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-sm font-medium text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all shadow-sm"
-                >
-                  <PlusCircle className="w-4 h-4 text-indigo-600" />
-                  <span>Create</span>
-                </Link>
-              </>
+            {isAuthenticated && (user?.role === 'auctioneer' || user?.role === 'admin') && (
+              <Link
+                to="/create"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-sm font-medium text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all shadow-sm ml-1"
+              >
+                <PlusCircle className="w-4 h-4 text-indigo-600" />
+                <span>Create</span>
+              </Link>
             )}
           </div>
 
