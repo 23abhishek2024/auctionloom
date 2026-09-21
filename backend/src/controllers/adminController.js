@@ -1080,14 +1080,22 @@ const runConcurrencyBenchmark = async (req, res, next) => {
     const startPriceFloor = Math.floor(startingPrice);
     const benchmarkStart = performance.now();
 
-    const tasks = Array.from({ length: count }, (_, i) => {
-      const bidder = bidders[i % bidders.length];
-      const bidAmount = startPriceFloor + Math.floor(i / 2) * 10 + 5; // Intentional collision bids
+    const CONCURRENCY_LIMIT = 8; // Match DB pool capacity to eliminate pool exhaustion & timeouts
+    let currentIndex = 0;
+    const results = new Array(count);
 
-      return (async () => {
+    const worker = async () => {
+      while (true) {
+        const i = currentIndex++;
+        if (i >= count) break;
+
+        const bidder = bidders[i % bidders.length];
+        const bidAmount = startPriceFloor + Math.floor(i / 2) * 10 + 5; // Intentional collision bids
         const reqStart = performance.now();
-        const client = await pool.connect();
+        let client;
+
         try {
+          client = await pool.connect();
           await client.query('BEGIN');
           const lockRes = await client.query(
             'SELECT * FROM auctions WHERE id = $1 FOR UPDATE',
@@ -1097,46 +1105,54 @@ const runConcurrencyBenchmark = async (req, res, next) => {
 
           if (bidAmount <= currentPrice) {
             await client.query('ROLLBACK');
-            return {
+            results[i] = {
               status: 400,
               duration: performance.now() - reqStart,
               bidAmount,
               bidder: bidder.email,
               reason: 'Bid must be higher than current price',
             };
+          } else {
+            await client.query(
+              'INSERT INTO bids (auction_id, bidder_id, amount) VALUES ($1, $2, $3)',
+              [auctionId, bidder.id, bidAmount]
+            );
+            await client.query(
+              'UPDATE auctions SET current_price = $1 WHERE id = $2',
+              [bidAmount, auctionId]
+            );
+            await client.query('COMMIT');
+
+            results[i] = {
+              status: 201,
+              duration: performance.now() - reqStart,
+              bidAmount,
+              bidder: bidder.email,
+            };
           }
-
-          await client.query(
-            'INSERT INTO bids (auction_id, bidder_id, amount) VALUES ($1, $2, $3)',
-            [auctionId, bidder.id, bidAmount]
-          );
-          await client.query(
-            'UPDATE auctions SET current_price = $1 WHERE id = $2',
-            [bidAmount, auctionId]
-          );
-          await client.query('COMMIT');
-
-          return {
-            status: 201,
-            duration: performance.now() - reqStart,
-            bidAmount,
-            bidder: bidder.email,
-          };
         } catch (err) {
-          await client.query('ROLLBACK').catch(() => {});
-          return {
+          if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+          }
+          results[i] = {
             status: 500,
             duration: performance.now() - reqStart,
             error: err.message,
             bidAmount,
           };
         } finally {
-          client.release();
+          if (client) {
+            client.release();
+          }
         }
-      })();
-    });
+      }
+    };
 
-    const results = await Promise.all(tasks);
+    const workers = Array.from(
+      { length: Math.min(CONCURRENCY_LIMIT, count) },
+      () => worker()
+    );
+    await Promise.all(workers);
     const totalDuration = performance.now() - benchmarkStart;
 
     // 4. Calculate metrics & percentiles

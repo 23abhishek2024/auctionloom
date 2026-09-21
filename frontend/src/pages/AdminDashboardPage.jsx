@@ -26,6 +26,7 @@ import {
   Zap,
   Activity,
   ShieldCheck,
+  AlertCircle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -48,6 +49,7 @@ export const AdminDashboardPage = () => {
   const [selectedProofModal, setSelectedProofModal] = useState(null);
   const [benchmarkLoading, setBenchmarkLoading] = useState(false);
   const [benchmarkResult, setBenchmarkResult] = useState(null);
+  const [benchmarkError, setBenchmarkError] = useState(null);
   const [showBenchmarkModal, setShowBenchmarkModal] = useState(false);
 
   // Commission Sub-Tab & State
@@ -307,10 +309,11 @@ export const AdminDashboardPage = () => {
       setBenchmarkLoading(true);
       setShowBenchmarkModal(true);
       setBenchmarkResult(null);
+      setBenchmarkError(null);
       const res = await adminApi.runBenchmark({ requests: requestCount });
       setBenchmarkResult(res.data?.data || null);
     } catch (err) {
-      alert(err.response?.data?.error || err.message || 'Benchmark failed to execute');
+      setBenchmarkError(err.response?.data?.error || err.message || 'Benchmark failed to execute');
     } finally {
       setBenchmarkLoading(false);
     }
@@ -1303,6 +1306,25 @@ export const AdminDashboardPage = () => {
                   <p className="text-xs text-slate-400 max-w-md font-mono">
                     Dispatched 100 simultaneous transactions across test bidders. Waiting for PostgreSQL lock manager resolution...
                   </p>
+                </div>
+              ) : benchmarkError ? (
+                <div className="p-6 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-center space-y-4 my-4">
+                  <div className="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+                    <AlertCircle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-white mb-1">Benchmark Run Notice</h4>
+                    <p className="text-xs text-rose-300 font-mono max-w-md mx-auto">{benchmarkError}</p>
+                    <p className="text-[11px] text-slate-400 mt-2">
+                      (If backend is waking up on Render free tier, please give it a moment and try again.)
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleRunBenchmark(100)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/30 transition-all"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Try Again
+                  </button>
                 </div>
               ) : benchmarkResult ? (
                 <div className="space-y-6">
