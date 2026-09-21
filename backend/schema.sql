@@ -38,8 +38,11 @@ CREATE TABLE IF NOT EXISTS auctions (
     republished_at        TIMESTAMP WITH TIME ZONE,
     commission_amount     DECIMAL(12, 2) DEFAULT 0.00,
     commission_calculated BOOLEAN DEFAULT FALSE,
+    is_settled            BOOLEAN DEFAULT FALSE,
+    settled_at            TIMESTAMP WITH TIME ZONE,
     winner_email_preview_url TEXT,
-    created_at            TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at            TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at            TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Index for the scheduler to quickly find ended auctions

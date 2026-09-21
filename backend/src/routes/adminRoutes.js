@@ -29,6 +29,7 @@ router.put('/commission-proofs/:id/status', adminController.updatePaymentProofSt
 
 // System maintenance: clean reset & test suite execution
 router.post('/system/purge-and-reset', adminController.purgeAndResetDatabase);
+router.post('/system/run-benchmark', adminController.runConcurrencyBenchmark);
 
 module.exports = router;
 

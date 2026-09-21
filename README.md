@@ -16,7 +16,9 @@
 > 🌐 **Production Web Application**: [https://auctionloom.vercel.app/](https://auctionloom.vercel.app/)  
 > ⚡ **Live Production API Gateway**: [https://primebid-backend-e971.onrender.com/api](https://primebid-backend-e971.onrender.com/api)  
 > 🩺 **Service Health Endpoint**: [https://primebid-backend-e971.onrender.com/health](https://primebid-backend-e971.onrender.com/health)  
-> 🗄️ **Primary Relational Store**: Managed PostgreSQL 15 on Supabase (Mumbai Cluster)
+> 🗄️ **Primary Relational Store**: Managed PostgreSQL 15 on Supabase (Mumbai Cluster)  
+> 📐 **Systems Architecture & HLD/LLD Specification**: [bidding_system_hld.md](bidding_system_hld.md)  
+> 🎓 **14-Part Master Interview Study Guide**: [INTERVIEW_STUDY_GUIDE.md](INTERVIEW_STUDY_GUIDE.md)
 
 ---
 
@@ -233,14 +235,13 @@ auctionloom/
 │   │   │   ├── authController.js    # Registration, login, JWT issuance, profile updates
 │   │   │   ├── bidController.js     # Concurrency-safe bidding & price updates
 │   │   │   ├── commissionController.js # Proof submission & seller debt tracking
-│   │   │   ├── uploadController.js  # Multer single-image ingestion
 │   │   │   ├── userController.js    # User stats, listings, bids, payout profiles
 │   │   │   └── walletController.js  # Top-ups, lot settlements, withdrawals, balance feeds
 │   │   ├── middlewares/             # Security & Request Processing Pipeline
 │   │   │   ├── auth.js              # JWT Bearer verification & Role-Based Access Control
 │   │   │   ├── logger.js            # Structured console logging with unique request IDs
-│   │   │   ├── multer.js            # Disk storage, MIME filter, and 5MB size limit
-│   │   │   └── rateLimiter.js       # IP rate limiting via express-rate-limit
+│   │   │   ├── rateLimiter.js       # IP rate limiting via express-rate-limit (5,000 req/15m)
+│   │   │   └── upload.js            # Multer disk storage, MIME filter, and 5MB size limit
 │   │   ├── models/                  # Data Access & SQL Query Layer
 │   │   │   ├── auctionModel.js      # Auction queries and row locking helpers
 │   │   │   ├── bidModel.js          # Bid creation and highest-bid retrieval
@@ -260,7 +261,10 @@ auctionloom/
 │   │   │   ├── auctionClosureService.js # Atomic lot closure & escrow settlement
 │   │   │   ├── emailService.js      # Nodemailer dual-delivery engine (Ethereal + SMTP)
 │   │   │   ├── socketService.js     # Socket.IO room manager & event broadcaster
+│   │   │   ├── topupService.js      # Wallet funding & payment request abstraction
 │   │   │   └── walletService.js     # ACID double-entry ledger & zero-overdraft engine
+│   │   ├── utils/                   # Shared Helper Utilities
+│   │   │   └── validators.js        # UUID, email, and numeric format validators
 │   │   ├── workers/                 # Asynchronous Distributed Processors
 │   │   │   ├── jobWorker.js         # SELECT FOR UPDATE SKIP LOCKED job executor
 │   │   │   └── scheduler.js         # Periodic lot expiration poller (every 30s)
@@ -284,7 +288,8 @@ auctionloom/
     │   │   ├── AuctionCard.jsx      # Auction lot card with live countdown & bid badges
     │   │   ├── Navbar.jsx           # Responsive header with profile dropdown & wallet pill
     │   │   ├── ProtectedRoute.jsx   # Route guard enforcing authentication
-    │   │   └── TopupModal.jsx       # Interactive wallet top-up modal
+    │   │   ├── TopupModal.jsx       # Interactive wallet top-up modal
+    │   │   └── WithdrawModal.jsx    # Escrow earnings payout modal
     │   ├── context/                 # Global Client State Providers
     │   │   ├── AuthContext.jsx      # Authentication session, tokens, and active user
     │   │   └── SocketContext.jsx    # Socket.IO client connection & event subscriptions
@@ -301,6 +306,8 @@ auctionloom/
     │   │   ├── SubmitCommissionPage.jsx # Manual payment receipt submission
     │   │   ├── UserHubPage.jsx      # Personal stats, active bids, won lots & payouts
     │   │   └── WalletPage.jsx       # Real-time ledger, top-up modal & transaction logs
+    │   ├── utils/                   # Frontend Formatters & Helpers
+    │   │   └── formatters.js        # Currency, date, and countdown formatting utilities
     │   ├── App.jsx                  # React Router configuration & layout scaffold
     │   ├── index.css                # Tailwind CSS directives & custom design tokens
     │   └── main.jsx                 # React DOM mount point
@@ -438,8 +445,8 @@ The frontend will be available at [http://localhost:5173](http://localhost:5173)
 | `npm run worker` | `node src/workers/jobWorker.js` | Starts standalone distributed job worker (`SKIP LOCKED`). |
 | `npm run scheduler` | `node src/workers/scheduler.js` | Starts background poller queuing expired lots every 30s. |
 | `npm run migrate` | `node scripts/migrate.js` | Executes DDL schema migrations against configured database. |
-| `npm run seed` | `node scripts/reset_and_seed.js` | Resets database and seeds clean test accounts and demo lots. |
 | `npm run clean-verify` | `node clean_reset_and_verify.js` | Full DB purge, 6-user reseed, live bid race, and ledger audit. |
+| `npm run benchmark` | `node benchmark_concurrency.js` | Stress tests SELECT FOR UPDATE with 100 concurrent bids & latency percentiles. |
 | `npm test` | `node verify_phases.mjs` | Executes the 10-phase, 103-assertion verification test suite. |
 
 ### Frontend (`frontend/package.json`)
@@ -477,34 +484,35 @@ The database schema is defined in [backend/schema.sql](backend/schema.sql) and a
 | seller_id(FK) |<---+  | auction_id(FK)|       | user_id (FK)  |
 | current_price |    |  | bidder_id(FK) |       | balance >= 0  |
 | status        |    |  | amount        |       | version       |
-| winner_id(FK) |    |  +---------------+       +-------+-------+
-+-------+-------+    |                                  |
-        |            |                                  | 1:N
-        | 1:N        +------------------+       +-------v-------+
-+-------v-------+                       |       |  WALLET_TXS   |
-|     JOBS      |                       |       +---------------+
-+---------------+                       |       | id (UUID, PK) |
-| id (UUID, PK) |                       |       | wallet_id(FK) |
-| type          |                       |       | type          |
-| payload(JSONB)|                       |       | amount        |
-| status        |                       |       | balance_after |
-| (type,payload)|(UNIQUE)               |       | idempotency_key (UNIQUE)
-+---------------+                       |       +---------------+
-                                        |
-                                +-------v-------+
-                                |COMMISSION_PRFS|
-                                +---------------+
-                                | id (UUID, PK) |
-                                | user_id (FK)  |
-                                | status        |
-                                | proof_url     |
-                                +---------------+
+| winner_id(FK) |    |  +---------------+       +---+-------+---+
+| is_settled    |    |                              |       |
++-------+-------+    |                          1:N |       | 1:N
+        |            |                  +-----------+       +-----------+
+        | 1:N        +---------------+  |                               |
++-------v-------+                    |  |                               |
+|     JOBS      |                    |  v                               v
++---------------+                    | +---------------+ +-------------------+
+| id (UUID, PK) |                    | |  WALLET_TXS   | | PAYMENT_REQUESTS  |
+| type          |                    | +---------------+ +-------------------+
+| payload(JSONB)|                    | | id (UUID, PK) | | id (UUID, PK)     |
+| status        |                    | | wallet_id(FK) | | wallet_id (FK)    |
+| (type,payload)|(UNIQUE)            | | amount        | | amount, type      |
++---------------+                    | | balance_after | | provider, status  |
+                                     | | idempotency_uk| | idempotency_key_uk|
+                             +-------v-------+ +---------------+ +-------------------+
+                             |COMMISSION_PRFS|
+                             +---------------+
+                             | id (UUID, PK) |
+                             | user_id (FK)  |
+                             | status, amount|
+                             | proof_url     |
+                             +---------------+
 ```
 
 ### Key Database Entities
 
 1. **`users`**: Manages credentials, display identities, account roles (`admin`, `auctioneer`, `bidder`), accumulated unpaid commissions, and JSONB payout configurations.
-2. **`auctions`**: Stores lot metadata, starting/current prices, timestamps, statuses (`ACTIVE`, `CLOSED`, `RESTRICTED`), foreign-key winner associations, and calculated commission records.
+2. **`auctions`**: Stores lot metadata, starting/current prices, timestamps, statuses (`ACTIVE`, `CLOSED`, `RESTRICTED`), foreign-key winner associations, escrow settlement state (`is_settled`, `settled_at`), and calculated commission records.
 3. **`bids`**: Immutable record of all accepted bids placed per auction, indexed by `auction_id` for instantaneous price-ladder reconstruction.
 4. **`wallets`**: Secure balance store with row versioning, constrained by `CHECK (balance >= 0)` to guarantee zero overdraft.
 5. **`wallet_transactions`**: Immutable double-entry transaction ledger tracking all balance adjustments with unique `idempotency_key` guarantees.
@@ -582,6 +590,13 @@ All protected endpoints require an `Authorization: Bearer <jwt_token>` header.
 | `GET` | `/api/admin/commission-proofs`| Admin | List submitted offline payment proofs | _None_ |
 | `PUT` | `/api/admin/commission-proofs/:id/status` | Admin | Approve or reject payment proof | Path: `id` (UUID), Body: `{ status: 'APPROVED' \| 'REJECTED', admin_notes? }` |
 | `POST` | `/api/admin/system/purge-and-reset` | Admin | 1-Click clean DB reset & test suite run | _None_ |
+
+### 🧾 Commissions & Offline Wire Proofs (`/api/commissions`)
+
+| Method | Endpoint | Auth | Description | Request Body / Parameters |
+|---|---|---|---|---|
+| `POST` | `/api/commissions/proof` | Bearer | Submit offline wire payment receipt image | Form field: `proof` (image ≤ 5MB), Body: `{ amount, paymentMethod?, notes? }` |
+| `GET` | `/api/commissions/my-proofs` | Bearer | Retrieve user's submitted commission receipts & debt | _None_ |
 
 ### 🤖 AI Valuations & Media (`/api/ai` & `/api/upload`)
 
@@ -752,7 +767,7 @@ Deploy using the Blueprint specification in [render.yaml](render.yaml):
 
 ## 17. Security Architecture
 
-* **Rate Limiting**: `express-rate-limit` enforces a maximum threshold of 300 requests per 15-minute window per IP, mitigating brute-force and DDoS attempts.
+* **Rate Limiting**: `express-rate-limit` enforces a threshold of 5,000 requests per 15-minute window per IP (configured in `rateLimiter.js` to support high-frequency real-time bidding without dropping telemetry), mitigating brute-force and DDoS attempts.
 * **Password Hashing**: Passwords are salted and hashed using `bcrypt` (10 rounds). Plaintext passwords are never logged or stored.
 * **JWT Authentication**: Stateless Bearer tokens signed with HMAC-SHA256 carry user claims (`id`, `email`, `role`) with verified expiration periods.
 * **Role-Based Access Control**: Route-level middleware ensures only users with `admin` or `auctioneer` privileges can create listings, appraise items, or execute moderation commands.
