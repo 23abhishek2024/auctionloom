@@ -14,11 +14,10 @@
 [![Live Demo](https://img.shields.io/badge/Live_Demo-auctionloom.vercel.app-00C7B7?logo=vercel&logoColor=white)](https://auctionloom.vercel.app/)
 
 > 🌐 **Production Web Application**: [https://auctionloom.vercel.app/](https://auctionloom.vercel.app/)  
-> ⚡ **Live Production API Gateway**: [https://primebid-backend-e971.onrender.com/api](https://primebid-backend-e971.onrender.com/api)  
+> ⚡ **Live Production API Gateway**: [https://primebid-backend-e971.onrender.com/api](https://primebid-backend-e971.onrender.com/api) *(Render Cloud Host)*  
 > 🩺 **Service Health Endpoint**: [https://primebid-backend-e971.onrender.com/health](https://primebid-backend-e971.onrender.com/health)  
 > 🗄️ **Primary Relational Store**: Managed PostgreSQL 15 on Supabase (Mumbai Cluster)  
 > 📐 **Systems Architecture & HLD/LLD Specification**: [bidding_system_hld.md](bidding_system_hld.md)  
-> 🎓 **14-Part Master Interview Study Guide**: [INTERVIEW_STUDY_GUIDE.md](INTERVIEW_STUDY_GUIDE.md)
 
 ---
 
@@ -446,7 +445,7 @@ The frontend will be available at [http://localhost:5173](http://localhost:5173)
 | `npm run scheduler` | `node src/workers/scheduler.js` | Starts background poller queuing expired lots every 30s. |
 | `npm run migrate` | `node scripts/migrate.js` | Executes DDL schema migrations against configured database. |
 | `npm run clean-verify` | `node clean_reset_and_verify.js` | Full DB purge, 6-user reseed, live bid race, and ledger audit. |
-| `npm run benchmark` | `node benchmark_concurrency.js` | Stress tests SELECT FOR UPDATE with 100 concurrent bids & latency percentiles. |
+| `npm run benchmark` | `node benchmark_concurrency.js` | Stress tests SELECT FOR UPDATE with 100 concurrent bids & latency percentiles (also available via 1-click in the Admin Dashboard UI). |
 | `npm test` | `node verify_phases.mjs` | Executes the 10-phase, 103-assertion verification test suite. |
 
 ### Frontend (`frontend/package.json`)

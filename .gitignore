@@ -7,3 +7,8 @@ dist/
 *.log
 backend/public/uploads/*
 !backend/public/uploads/.gitkeep
+
+# Local documentation & private notes
+RESUME_POINTS_AND_EXPLANATION.md
+INTERVIEW_STUDY_GUIDE.md
+roadmap.md

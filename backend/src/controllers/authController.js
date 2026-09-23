@@ -50,22 +50,12 @@ const login = async (req, res, next) => {
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const lookupEmail = cleanEmail === 'admin@gamil.com' ? 'admin@gmail.com' : cleanEmail;
-
-    let user = await userModel.findByEmail(lookupEmail);
-    if (!user && lookupEmail !== cleanEmail) {
-      user = await userModel.findByEmail(cleanEmail);
-    }
+    const user = await userModel.findByEmail(cleanEmail);
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    let isMatch = await bcrypt.compare(password, user.password_hash);
-    if (!isMatch && user.email === 'admin@gmail.com') {
-      if (password === 'test@123' || password === 'Admin@1234') {
-        isMatch = true;
-      }
-    }
+    const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }

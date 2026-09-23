@@ -1,16 +1,31 @@
-# React + Vite
+# AuctionLoom — Frontend Client
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The responsive, real-time Single Page Application (SPA) for the **AuctionLoom** auction and settlement platform.
 
-Currently, two official plugins are available:
+## Tech Stack
+* **Framework**: React 19 (`react`, `react-dom`)
+* **Tooling & Bundler**: Vite 8 with Hot Module Replacement (HMR)
+* **Routing**: React Router 7 (`react-router-dom`)
+* **Styling**: Tailwind CSS 3.4 & Lucide React icons
+* **Real-Time Client**: Socket.IO Client 4.8
+* **HTTP Client**: Axios
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Key Features & Architecture
+* **Real-Time Bidding Feeds**: Room-partitioned WebSockets subscribing to live bid events, auction timers, and instant price updates without page reloads.
+* **Live Room Chat & Floating Reactions**: Bi-directional participant chat with synchronized floating emoji reactions.
+* **Interactive Financial Wallet**: Wallet balance management, top-ups, withdrawals, and 1-click escrow settlement triggers.
+* **Role-Based Authorization Guards**: Protected routes safeguarding administrative consoles and auctioneer workflows.
+* **AI Luxury Appraisal Generator**: Interactive appraisal copywriting interface communicating with backend Gemini AI endpoints.
 
-## React Compiler
+## Getting Started
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+# Install dependencies
+npm install
 
-## Expanding the Oxlint configuration
+# Start Vite development server (defaults to http://localhost:5173)
+npm run dev
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+# Production build
+npm run build
+```
