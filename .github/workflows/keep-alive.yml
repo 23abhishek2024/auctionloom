@@ -1,0 +1,35 @@
+name: Keep Demo Alive
+
+# Free hosting goes to sleep when nobody uses it:
+#   - Supabase pauses the database after about 7 days without database activity
+#   - Render puts the backend to sleep after 15 minutes without traffic
+# Twice a day this job calls an API route that reads from the database.
+# That wakes the backend and keeps the Supabase project active.
+# If the ping fails (for example the database got paused anyway),
+# the run fails and GitHub emails you, so you know to fix it before an interview.
+
+on:
+  schedule:
+    - cron: '30 2,14 * * *'   # 08:00 and 20:00 IST (cron times are in UTC)
+  workflow_dispatch:           # lets you run it manually from the Actions tab
+
+jobs:
+  ping:
+    name: Ping backend and database
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call /api/auctions (wakes Render, queries Supabase)
+        run: |
+          url="https://primebid-backend-e971.onrender.com/api/auctions?limit=1"
+          for attempt in 1 2 3 4 5; do
+            body=$(curl -s --max-time 90 -H "Accept: application/json" "$url" || true)
+            if [[ "$body" == *'"auctions"'* ]]; then
+              echo "Attempt $attempt: backend and database are up"
+              exit 0
+            fi
+            echo "Attempt $attempt: not ready yet (the server may still be waking up), retrying in 20s"
+            sleep 20
+          done
+          echo "Backend did not return auction data after 5 attempts"
+          exit 1
