@@ -30,7 +30,6 @@ export const LeaderboardPage = () => {
   const filtered = leaderboard.filter(
     (u) =>
       u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.tier.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -54,7 +53,7 @@ export const LeaderboardPage = () => {
               Bidders Leaderboard
             </h1>
             <p className="text-slate-300 text-sm sm:text-base max-w-2xl leading-relaxed">
-              Celebrating our most distinguished collectors and active bidders. Ranked in real-time by total verified expenditure and auction victories.
+              Celebrating our most distinguished collectors and active bidders. Ranked in real time by total bid volume and auction victories.
             </p>
           </div>
 
@@ -83,7 +82,7 @@ export const LeaderboardPage = () => {
                 #2 Silver Collector
               </span>
               <h3 className="text-lg font-bold text-slate-900 truncate">{top2.username}</h3>
-              <p className="text-xs text-slate-500 mb-4">{top2.email}</p>
+              <p className="text-xs text-slate-500 mb-4">{top2.totalBids} bids placed</p>
               <div className="pt-3 border-t border-slate-100 flex items-center justify-around text-xs">
                 <div>
                   <span className="block text-slate-400 font-mono">Volume</span>
@@ -110,7 +109,7 @@ export const LeaderboardPage = () => {
                 <Sparkles className="w-3.5 h-3.5" /> #1 Grand Master
               </span>
               <h3 className="text-xl font-extrabold text-slate-900 truncate">{top1.username}</h3>
-              <p className="text-xs text-slate-500 mb-4">{top1.email}</p>
+              <p className="text-xs text-slate-500 mb-4">{top1.totalBids} bids placed</p>
               <div className="pt-4 border-t border-amber-200/60 flex items-center justify-around text-xs">
                 <div>
                   <span className="block text-amber-800/70 font-mono">Total Volume</span>
@@ -141,7 +140,7 @@ export const LeaderboardPage = () => {
                 #3 Bronze Collector
               </span>
               <h3 className="text-lg font-bold text-slate-900 truncate">{top3.username}</h3>
-              <p className="text-xs text-slate-500 mb-4">{top3.email}</p>
+              <p className="text-xs text-slate-500 mb-4">{top3.totalBids} bids placed</p>
               <div className="pt-3 border-t border-slate-100 flex items-center justify-around text-xs">
                 <div>
                   <span className="block text-slate-400 font-mono">Volume</span>
@@ -165,7 +164,7 @@ export const LeaderboardPage = () => {
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search by username, email, or tier..."
+            placeholder="Search by username or tier..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
@@ -204,7 +203,7 @@ export const LeaderboardPage = () => {
                   <th className="py-4 px-6">Standing Tier</th>
                   <th className="py-4 px-6 text-center">Bids Placed</th>
                   <th className="py-4 px-6 text-center">Auctions Won</th>
-                  <th className="py-4 px-6 text-right">Total Expenditure</th>
+                  <th className="py-4 px-6 text-right">Bid Volume</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
@@ -262,7 +261,6 @@ export const LeaderboardPage = () => {
                               {bidder.username}
                               {isTop1 && <Crown className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />}
                             </div>
-                            <div className="text-xs text-slate-400 font-mono">{bidder.email}</div>
                           </div>
                         </div>
                       </td>
@@ -295,7 +293,7 @@ export const LeaderboardPage = () => {
                         {bidder.auctionsWon > 0 ? `${bidder.auctionsWon} Won` : '—'}
                       </td>
 
-                      {/* Total Expenditure */}
+                      {/* Bid volume: the sum of this bidder's bids, each counted once */}
                       <td className="py-4 px-6 text-right font-mono font-bold text-slate-900 text-base">
                         ${bidder.totalSpent.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>

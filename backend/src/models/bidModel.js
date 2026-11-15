@@ -2,13 +2,13 @@ const pool = require('../db');
 
 const bidModel = {
   /**
-   * Get all bids for a specific auction, ordered by highest amount first
+   * Get all bids for a specific auction, ordered by highest amount first.
+   * This list is public, so it carries the bidder's display name but never their email.
    */
   findByAuctionId: async (auctionId) => {
     const result = await pool.query(
-      `SELECT b.*, 
-              COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS bidder_name,
-              u.email AS bidder_email
+      `SELECT b.*,
+              COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS bidder_name
        FROM bids b
        JOIN users u ON b.bidder_id = u.id
        WHERE b.auction_id = $1

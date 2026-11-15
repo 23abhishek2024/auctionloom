@@ -31,9 +31,9 @@ const processNextJob = async () => {
       return; // No pending jobs right now
     }
 
-    // Mark job as IN_PROGRESS
+    // Mark job as IN_PROGRESS and count the attempt (the scheduler's reaper uses both)
     await client.query(
-      `UPDATE jobs SET status = 'IN_PROGRESS', locked_at = NOW(), locked_by = $1
+      `UPDATE jobs SET status = 'IN_PROGRESS', locked_at = NOW(), locked_by = $1, attempts = attempts + 1
        WHERE id = $2`,
       [process.pid.toString(), job.id]
     );

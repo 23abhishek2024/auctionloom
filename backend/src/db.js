@@ -72,8 +72,11 @@ pool.connect(async (err, client, release) => {
         AND wt.reference_id = a.id
         AND a.is_settled = FALSE;
 
-      -- Reset phantom unpaid_commission debts caused by legacy auction closure logic
-      UPDATE users SET unpaid_commission = 0.00 WHERE unpaid_commission > 0;
+      -- (A one-time cleanup used to run here on every start: it set every seller's unpaid_commission to 0,
+      --  wiping real debts at each restart or deploy. Closing no longer creates phantom debts, so it is gone.)
+
+      -- Job queue: count how many times a job was claimed, so a job that keeps crashing workers ends FAILED
+      ALTER TABLE IF EXISTS jobs ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0;
 
       ALTER TABLE auctions DROP CONSTRAINT IF EXISTS auctions_status_check;
       ALTER TABLE auctions ADD CONSTRAINT auctions_status_check CHECK (status IN ('ACTIVE', 'CLOSED', 'RESTRICTED'));

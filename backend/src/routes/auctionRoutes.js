@@ -8,10 +8,11 @@ const {
   republishAuction,
 } = require('../controllers/auctionController');
 const { getBidsForAuction, placeBid } = require('../controllers/bidController');
-const { authMiddleware, roleMiddleware } = require('../middlewares/auth');
+const { authMiddleware, optionalAuth, roleMiddleware } = require('../middlewares/auth');
 
-router.get('/', getAllAuctions);
-router.get('/:id', getAuctionById);
+// Public, but a logged-in admin also gets emails, and the winner or seller the email-preview link
+router.get('/', optionalAuth, getAllAuctions);
+router.get('/:id', optionalAuth, getAuctionById);
 // Only auctioneers and admins can create auctions
 router.post('/', authMiddleware, roleMiddleware('auctioneer', 'admin'), createAuction);
 router.delete('/:id', authMiddleware, deleteAuction);

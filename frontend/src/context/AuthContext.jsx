@@ -66,9 +66,14 @@ export const AuthProvider = ({ children }) => {
 
   const upgradeToSeller = async () => {
     const res = await userApi.upgradeToSeller();
-    const updatedUser = res.data.user;
+    const { user: updatedUser, token: newToken } = res.data;
     setUser(updatedUser);
     localStorage.setItem('user', JSON.stringify(updatedUser));
+    // Keep the token in step with the new role (the old token still says "bidder")
+    if (newToken) {
+      setToken(newToken);
+      localStorage.setItem('token', newToken);
+    }
     return updatedUser;
   };
 

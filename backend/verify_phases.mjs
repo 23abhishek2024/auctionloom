@@ -243,6 +243,13 @@ async function runVerification() {
   assert('Phase 4', 'Self-bidding blocked (seller cannot bid on own auction -> 400 Bad Request)', selfBidRes.status === 400);
 
   // Admin bidding restriction (Marketplace Neutrality Policy)
+  // The admin must exist: the auth middleware reads the current role from the database,
+  // so a signed token for a user who isn't there is rejected with 401.
+  await pool.query(
+    `INSERT INTO users (id, email, password_hash, role, name)
+     VALUES ('11111111-1111-1111-1111-111111111111', 'neutrality-admin@auctionloom.test', 'NO_LOGIN', 'admin', 'Neutrality Admin')
+     ON CONFLICT (id) DO UPDATE SET role = 'admin'`
+  );
   const adminToken = jwt.sign(
     { id: '11111111-1111-1111-1111-111111111111', email: 'admin@auctionloom.com', role: 'admin' },
     process.env.JWT_SECRET || 'your-secret-key-min-32-chars-long!!'
@@ -340,7 +347,8 @@ async function runVerification() {
   const socketEventData = await priceUpdatePromise;
   assert('Phase 5', 'Received real-time PRICE_UPDATE event via WebSocket', socketEventData.auction_id === auctionId);
   assert('Phase 5', 'PRICE_UPDATE payload contains new price $750.00', parseFloat(socketEventData.new_price) === 750.00);
-  assert('Phase 5', 'PRICE_UPDATE payload includes bidder_email', socketEventData.bidder_email === bidderEmail);
+  // Everyone in the room gets this event, so it identifies the bidder by id and never carries an email
+  assert('Phase 5', 'PRICE_UPDATE payload identifies the bidder by id, without an email', socketEventData.bidder_id === bidderId && socketEventData.bidder_email === undefined);
 
   socketClient.disconnect();
 
@@ -560,13 +568,15 @@ async function runVerification() {
   chatSocket.emit('SEND_MESSAGE', {
     auctionId: auctionWithImgRes.data.auction.id,
     text: 'Is the original warranty card included with this watch?',
-    senderEmail: 'verified_bidder@auctionloom.com',
+    senderName: 'Verified Bidder',
+    senderId: bidderId,
+    senderEmail: 'verified_bidder@auctionloom.com', // an old client may still send it; it must not be broadcast
     role: 'bidder',
   });
 
   const receivedChatMsg = await chatPromise;
   assert('Phase 9', 'Socket.IO CHAT_MESSAGE broadcast received in real time', receivedChatMsg.text === 'Is the original warranty card included with this watch?');
-  assert('Phase 9', 'Chat message includes senderEmail and ISO timestamp', receivedChatMsg.senderEmail === 'verified_bidder@auctionloom.com' && !!receivedChatMsg.timestamp);
+  assert('Phase 9', 'Chat message carries the sender id and ISO timestamp, never an email', receivedChatMsg.senderId === bidderId && receivedChatMsg.senderEmail === undefined && !!receivedChatMsg.timestamp);
 
   // 6. Socket.IO Live Floating Reaction
   const reactionPromise = new Promise((resolve) => {

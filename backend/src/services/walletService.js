@@ -500,15 +500,11 @@ async function settleLotEscrowOnce({ auctionId, winnerId, sellerId, hammerPrice,
       [commission, auctionId]
     );
 
-    // 6. Decrement seller's unpaid commission debt since platform fee was deducted at source
-    await client.query(
-      `UPDATE users 
-       SET unpaid_commission = GREATEST(0.00, unpaid_commission - $1) 
-       WHERE id = $2`,
-      [commission, sellerId]
-    );
+    // (The 5% fee was taken from the hammer price above, so this lot leaves the seller no debt.
+    //  An old step here also subtracted the fee from unpaid_commission, which forgave unrelated
+    //  debt; it only went unnoticed because a start-up step reset every debt to 0.)
 
-    // 7. Commit transaction and verify successful write
+    // 6. Commit transaction and verify successful write
     const commitRes = await client.query('COMMIT');
     if (commitRes.command !== 'COMMIT') {
       throw new Error(`Transaction failed to commit: database returned ${commitRes.command}`);

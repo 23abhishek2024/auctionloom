@@ -42,7 +42,9 @@ services:
       DB_NAME: ${DB_NAME:-auctionloom}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      JWT_SECRET: ${JWT_SECRET:-supersecret_jwt_key_auctionloom_2026}
+      # No default: a secret written in this file would be public on GitHub, so anyone could forge tokens.
+      # Compose refuses to start until JWT_SECRET is set in .env (see .env.example).
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env to a long random value (see .env.example)}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     ports:

@@ -1,3 +1,4 @@
+const jwt = require('jsonwebtoken');
 const pool = require('../db');
 
 /**
@@ -196,9 +197,18 @@ const upgradeToSeller = async (req, res, next) => {
       return res.status(404).json({ error: 'User not found.' });
     }
 
+    // Send a fresh token with the new role, so the browser doesn't keep using the old one
+    const user = result.rows[0];
+    const token = jwt.sign(
+      { id: user.id, name: user.name || user.email.split('@')[0], email: user.email, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
     res.json({
       message: 'Account successfully upgraded to full member (Bidder & Seller).',
-      user: result.rows[0],
+      user,
+      token,
     });
   } catch (err) {
     next(err);
@@ -207,24 +217,34 @@ const upgradeToSeller = async (req, res, next) => {
 
 /**
  * GET /api/users/leaderboard (or /api/analytics/leaderboard)
- * Public leaderboard of top bidders by total expenditure & won auctions
+ * Public leaderboard of top bidders by bid volume & won auctions (display names only, no emails)
+ *
+ * Each total is computed in its own subquery. Joining users to auctions AND bids in one query
+ * multiplied the rows (every bid repeated once per auction won), which inflated the bid volume.
  */
 const getLeaderboard = async (req, res, next) => {
   try {
     const result = await pool.query(`
-      SELECT 
-        u.id, 
-        u.email,
+      SELECT
+        u.id,
         COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS username,
         u.role,
-        COALESCE(SUM(b.amount), 0)::numeric AS total_spent,
-        COUNT(DISTINCT a.id)::int AS auctions_won,
-        COUNT(DISTINCT b.id)::int AS total_bids
+        COALESCE(bid_totals.total_volume, 0)::numeric AS total_spent,
+        COALESCE(win_totals.auctions_won, 0)::int AS auctions_won,
+        COALESCE(bid_totals.total_bids, 0)::int AS total_bids
       FROM users u
-      LEFT JOIN auctions a ON a.winner_id = u.id AND a.status = 'CLOSED'
-      LEFT JOIN bids b ON b.bidder_id = u.id
-      GROUP BY u.id, u.name, u.email, u.role
-      HAVING COALESCE(SUM(b.amount), 0) > 0 OR COUNT(DISTINCT a.id) > 0 OR COUNT(DISTINCT b.id) > 0
+      LEFT JOIN (
+        SELECT bidder_id, SUM(amount) AS total_volume, COUNT(*) AS total_bids
+        FROM bids
+        GROUP BY bidder_id
+      ) bid_totals ON bid_totals.bidder_id = u.id
+      LEFT JOIN (
+        SELECT winner_id, COUNT(*) AS auctions_won
+        FROM auctions
+        WHERE status = 'CLOSED' AND winner_id IS NOT NULL
+        GROUP BY winner_id
+      ) win_totals ON win_totals.winner_id = u.id
+      WHERE bid_totals.bidder_id IS NOT NULL OR win_totals.winner_id IS NOT NULL
       ORDER BY total_spent DESC, auctions_won DESC, total_bids DESC
       LIMIT 100
     `);
@@ -240,7 +260,6 @@ const getLeaderboard = async (req, res, next) => {
         rank,
         id: row.id,
         username: row.username,
-        email: row.email,
         totalSpent: parseFloat(row.total_spent),
         auctionsWon: row.auctions_won,
         totalBids: row.total_bids,

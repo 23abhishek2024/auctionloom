@@ -1,30 +1,27 @@
 const { Server } = require('socket.io');
+const { getAllowedOrigins } = require('../utils/allowedOrigins');
 
 let io;
-
-const parseAllowedOrigins = () => {
-  const envUrl = process.env.FRONTEND_URL;
-  if (!envUrl || envUrl === '*') {
-    return '*';
-  }
-  const origins = envUrl.split(',').map((o) => o.trim()).filter(Boolean);
-  if (!origins.includes('http://localhost:5173')) origins.push('http://localhost:5173');
-  if (!origins.includes('http://localhost:3000')) origins.push('http://localhost:3000');
-  if (!origins.includes('https://auctionloom.vercel.app')) origins.push('https://auctionloom.vercel.app');
-  if (!origins.includes('https://biding-app-indol.vercel.app')) origins.push('https://biding-app-indol.vercel.app');
-  return origins;
-};
 
 /**
  * Initialize Socket.IO and attach to the HTTP server.
  * Called once from app.js on startup.
  */
 const initSocket = (server) => {
+  const allowedOrigins = getAllowedOrigins();
   io = new Server(server, {
     cors: {
-      origin: parseAllowedOrigins(),
+      // Same allow-list as the REST API (no "*", even when FRONTEND_URL is unset)
+      origin: allowedOrigins,
       methods: ['GET', 'POST'],
       credentials: true,
+    },
+    // CORS covers only the HTTP polling transport; browsers don't apply it to WebSockets.
+    // So the handshake itself is checked: a browser on another site sends its own Origin and is refused.
+    // (No Origin header means a non-browser client such as the test suite.)
+    allowRequest: (req, callback) => {
+      const origin = req.headers.origin;
+      callback(null, !origin || allowedOrigins.includes(origin));
     },
   });
 
@@ -52,13 +49,14 @@ const initSocket = (server) => {
         // Auto-join room to ensure sender receives room broadcasts
         socket.join(data.auctionId);
 
-        const senderName = data.senderName || (data.senderEmail ? data.senderEmail.split('@')[0] : 'Bidder');
+        // Everyone in the room receives this, so it carries the sender's id and name, never an email
+        const senderName = String(data.senderName || 'Bidder').slice(0, 60);
         const messagePayload = {
           id: data.id || `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
           auctionId: data.auctionId,
           text,
           senderName,
-          senderEmail: data.senderEmail || senderName,
+          senderId: data.senderId || null,
           role: data.role || 'bidder',
           timestamp: data.timestamp || new Date().toISOString(),
         };
@@ -78,13 +76,13 @@ const initSocket = (server) => {
         const allowed = ['🔥', '🚀', '💎', '👏', '❤️', '⚡', '🎉'];
         const emoji = allowed.includes(data.emoji) ? data.emoji : '🔥';
 
-        const senderName = data.senderName || (data.senderEmail ? data.senderEmail.split('@')[0] : 'Bidder');
+        const senderName = String(data.senderName || 'Bidder').slice(0, 60);
         const reactionPayload = {
           id: data.id || `react-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
           auctionId: data.auctionId,
           emoji,
           senderName,
-          senderEmail: data.senderEmail || senderName,
+          senderId: data.senderId || null,
           timestamp: data.timestamp || new Date().toISOString(),
         };
 

@@ -65,7 +65,7 @@ export const AuctionDetailPage = () => {
       id: 'welcome-1',
       text: '👋 Welcome to the live auction room! Ask questions or share thoughts here in real time.',
       senderName: 'System Bot',
-      senderEmail: 'System Bot',
+      senderId: 'system',
       role: 'system',
       timestamp: new Date().toISOString(),
     },
@@ -209,7 +209,7 @@ export const AuctionDetailPage = () => {
           id: data.bid_id || Math.random().toString(),
           amount: data.new_price,
           bidder_name: data.bidder_name,
-          bidder_email: data.bidder_email,
+          bidder_id: data.bidder_id,
           created_at: data.timestamp || new Date().toISOString(),
         };
 
@@ -507,7 +507,7 @@ export const AuctionDetailPage = () => {
       auctionId: id,
       text,
       senderName,
-      senderEmail: user?.email || senderName,
+      senderId: user?.id || null,
       role: user?.role || 'bidder',
       timestamp: new Date().toISOString(),
     };
@@ -524,7 +524,7 @@ export const AuctionDetailPage = () => {
       auctionId: id,
       emoji,
       senderName: formatDisplayName(user),
-      senderEmail: user?.email || 'Bidder',
+      senderId: user?.id || null,
     });
     setShowReactions(false);
   };
@@ -534,14 +534,17 @@ export const AuctionDetailPage = () => {
   const isAdmin = user?.role === 'admin';
   const highestBid = bids && bids.length > 0 ? bids[0] : null;
   const winnerName = auction?.winner_name
-    ? formatDisplayName(auction.winner_name, auction.winner_email)
-    : (highestBid ? formatDisplayName(highestBid.bidder_name, highestBid.bidder_email) : null);
+    ? formatDisplayName(auction.winner_name)
+    : (highestBid ? formatDisplayName(highestBid.bidder_name) : null);
   const isWinnerMe = Boolean(
     user && (
       (auction?.winner_id && user.id === auction.winner_id) ||
-      (highestBid && (user.id === highestBid.bidder_id || (user.email && highestBid.bidder_email === user.email)))
+      (highestBid && user.id === highestBid.bidder_id)
     )
   );
+  // The seller's email reaches the winner only through the private payout endpoint (sellerPayout);
+  // public auction data carries no emails (an admin's view still includes them).
+  const sellerContactEmail = sellerPayout?.email || auction?.seller_email || '';
 
   // Hook 5: Winner settlement payout instructions & previous payment verification check
   useEffect(() => {
@@ -677,7 +680,7 @@ export const AuctionDetailPage = () => {
               </span>
 
               <div className="text-xs text-slate-500 font-mono">
-                Seller: <span className="text-slate-800 font-medium">{formatDisplayName(auction.seller_name, auction.seller_email)}</span>
+                Seller: <span className="text-slate-800 font-medium">{formatDisplayName(auction.seller_name)}</span>
               </div>
             </div>
 
@@ -1103,7 +1106,7 @@ export const AuctionDetailPage = () => {
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                       {/* Option 1: Open in Web Gmail */}
                       <a
-                        href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sellerPayout?.email || auction.seller_email)}&su=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}&body=${encodeURIComponent(`Hi ${sellerPayout?.name || auction.seller_name},\n\nI won your auction "${auction.title}" with a winning bid of $${parseFloat(auction.current_price).toFixed(2)}.\nPlease reply with your payment coordinates and shipping arrangements.\n\nThank you!`)}`}
+                        href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sellerContactEmail)}&su=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}&body=${encodeURIComponent(`Hi ${sellerPayout?.name || auction.seller_name},\n\nI won your auction "${auction.title}" with a winning bid of $${parseFloat(auction.current_price).toFixed(2)}.\nPlease reply with your payment coordinates and shipping arrangements.\n\nThank you!`)}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 text-white font-semibold text-xs shadow-md shadow-indigo-500/20 hover:bg-indigo-700 transition-all cursor-pointer"
@@ -1116,7 +1119,7 @@ export const AuctionDetailPage = () => {
                       {/* Option 2: 1-Click Copy Email */}
                       <button
                         type="button"
-                        onClick={() => copyToClipboard(sellerPayout?.email || auction.seller_email, 'seller-email')}
+                        onClick={() => copyToClipboard(sellerContactEmail, 'seller-email')}
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs shadow-sm hover:bg-slate-50 transition-all cursor-pointer"
                         title="Copy seller email address"
                       >
@@ -1149,10 +1152,10 @@ export const AuctionDetailPage = () => {
 
                 <div className="text-[11px] text-slate-500 pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-emerald-200/60 font-mono">
                   <div className="flex items-center gap-1.5">
-                    <span>Seller: <strong>{sellerPayout?.name || auction.seller_name}</strong> ({sellerPayout?.email || auction.seller_email})</span>
+                    <span>Seller: <strong>{sellerPayout?.name || auction.seller_name}</strong>{sellerContactEmail ? ` (${sellerContactEmail})` : ''}</span>
                     <button
                       type="button"
-                      onClick={() => copyToClipboard(sellerPayout?.email || auction.seller_email, 'seller-email-small')}
+                      onClick={() => copyToClipboard(sellerContactEmail, 'seller-email-small')}
                       className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition-colors"
                       title="Copy seller email"
                     >
@@ -1161,7 +1164,7 @@ export const AuctionDetailPage = () => {
                   </div>
                   <div className="flex items-center gap-3 font-sans font-semibold">
                     <a
-                      href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sellerPayout?.email || auction.seller_email)}&su=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}`}
+                      href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sellerContactEmail)}&su=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-indigo-600 font-semibold hover:text-indigo-700 underline"
@@ -1170,7 +1173,7 @@ export const AuctionDetailPage = () => {
                     </a>
                     <span className="text-slate-300">|</span>
                     <a
-                      href={`mailto:${sellerPayout?.email || auction.seller_email}?subject=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}`}
+                      href={`mailto:${sellerContactEmail}?subject=${encodeURIComponent(`[AuctionLoom] Winning Bid Settlement - ${auction.title}`)}`}
                       className="text-slate-500 font-semibold hover:text-slate-700 underline"
                     >
                       Desktop Mail App
@@ -1287,7 +1290,7 @@ export const AuctionDetailPage = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {bids.map((b, idx) => {
-                        const bidderDisplayName = formatDisplayName(b.bidder_name, b.bidder_email);
+                        const bidderDisplayName = formatDisplayName(b.bidder_name);
                         return (
                           <tr key={b.id || idx} className={idx === 0 ? 'bg-indigo-50/50' : ''}>
                             <td className="py-3 text-slate-800 font-medium">
@@ -1321,9 +1324,9 @@ export const AuctionDetailPage = () => {
               <div className="space-y-4">
                 <div className="h-64 overflow-y-auto space-y-2.5 pr-2">
                   {chatMessages.map((msg) => {
-                    const isMe = user && ((user.email && msg.senderEmail === user.email) || (user.name && msg.senderName === user.name));
+                    const isMe = Boolean(user && (msg.senderId ? msg.senderId === user.id : (user.name && msg.senderName === user.name)));
                     const isSys = msg.role === 'system';
-                    const senderDisplayName = formatDisplayName(msg.senderName, msg.senderEmail);
+                    const senderDisplayName = formatDisplayName(msg.senderName);
                     return (
                       <div
                         key={msg.id}

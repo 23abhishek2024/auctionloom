@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { walletApi } from '../api/client';
+import { newIdempotencyKey } from '../utils/idempotency';
 import {
   Wallet,
   X,
@@ -17,6 +18,11 @@ export const WithdrawModal = ({ isOpen, onClose, onSuccess, currentBalance = 0 }
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
+  // One key per withdrawal: a retry of the same amount reuses it, so the server pays out once.
+  // A different amount, or a finished withdrawal, gets a new key.
+  const pendingWithdrawal = useRef(null); // { key, amount }
+  // Blocks a second click before React has re-rendered the disabled button
+  const inFlight = useRef(false);
 
   if (!isOpen) return null;
 
@@ -28,6 +34,7 @@ export const WithdrawModal = ({ isOpen, onClose, onSuccess, currentBalance = 0 }
 
   const handleWithdraw = async (e) => {
     e?.preventDefault();
+    if (inFlight.current) return;
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -41,12 +48,21 @@ export const WithdrawModal = ({ isOpen, onClose, onSuccess, currentBalance = 0 }
       return;
     }
 
+    if (!pendingWithdrawal.current || pendingWithdrawal.current.amount !== numericAmount) {
+      pendingWithdrawal.current = { key: newIdempotencyKey(), amount: numericAmount };
+    }
+
     try {
+      inFlight.current = true;
       setLoading(true);
-      const res = await walletApi.withdraw({
-        amount: numericAmount,
-        note: 'Instant simulated cash out',
-      });
+      const res = await walletApi.withdraw(
+        {
+          amount: numericAmount,
+          note: 'Instant simulated cash out',
+        },
+        pendingWithdrawal.current.key
+      );
+      pendingWithdrawal.current = null; // done: the next withdrawal is a new action
 
       const updatedWallet = res.data?.data?.wallet;
       setSuccessMessage(`Successfully cashed out $${numericAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}!`);
@@ -63,6 +79,7 @@ export const WithdrawModal = ({ isOpen, onClose, onSuccess, currentBalance = 0 }
       console.error('Withdrawal error:', err);
       setErrorMessage(err.response?.data?.error || 'Failed to complete withdrawal. Please try again.');
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   };

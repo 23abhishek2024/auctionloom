@@ -93,11 +93,12 @@ const placeBid = async (req, res, next) => {
     // ── REAL-TIME BROADCAST (after commit) ──────────────────────
     const io = getIO();
     const bidderName = req.user.name || (req.user.email ? req.user.email.split('@')[0] : 'Bidder');
+    // Everyone in the room receives this, so it carries the bidder's id and name, never their email
     io.to(auctionId).emit('PRICE_UPDATE', {
       auction_id: auctionId,
       new_price: numericAmount,
       bidder_name: bidderName,
-      bidder_email: req.user.email,
+      bidder_id: req.user.id,
       bid_id: newBid.id,
     });
 

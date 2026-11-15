@@ -1,7 +1,18 @@
 require('dotenv').config();
+
+// Fail fast without a JWT secret: no token could be signed or verified, and there is no safe default.
+if (!process.env.JWT_SECRET) {
+  console.error('[Config] JWT_SECRET is not set. Set it in the environment (see .env.example) and restart.');
+  process.exit(1);
+}
+if (process.env.JWT_SECRET.length < 32) {
+  console.warn('[Config] JWT_SECRET is shorter than 32 characters. Use a long random value in production.');
+}
+
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
+const { getAllowedOrigins } = require('./utils/allowedOrigins');
 
 // Middlewares
 const { loggerMiddleware } = require('./middlewares/logger');
@@ -31,7 +42,17 @@ const server = http.createServer(app);
 initSocket(server);
 
 // ── Global Middlewares ────────────────────────────────────────
-app.use(cors());
+// CORS: only our own frontends may call the API from a browser. Requests without an Origin header
+// (curl, server-to-server, the keep-alive ping) are not cross-site browser calls, so CORS doesn't apply.
+const allowedOrigins = getAllowedOrigins();
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(null, false); // no CORS headers, so the browser blocks the response
+    },
+  })
+);
 app.use(express.json());
 app.use(loggerMiddleware);
 app.use(rateLimiterMiddleware);

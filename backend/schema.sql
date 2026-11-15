@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     status          VARCHAR(50) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED')),
     locked_at       TIMESTAMP WITH TIME ZONE,
     locked_by       VARCHAR(100),                 -- worker PID
+    attempts        INT NOT NULL DEFAULT 0,       -- times claimed; the reaper fails a job after 3
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     -- Unique constraint: prevents scheduler from inserting duplicate jobs

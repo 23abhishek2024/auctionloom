@@ -142,6 +142,12 @@ const getWallet = async (req, res) => {
   }
 };
 
+// Optional client-generated key (one per click, reused on retry), so a repeated request is applied once
+const readIdempotencyKey = (req) => {
+  const key = req.get('Idempotency-Key');
+  return key && /^[A-Za-z0-9_-]{8,100}$/.test(key) ? key : null;
+};
+
 // POST /api/wallet/topup
 const topup = async (req, res) => {
   try {
@@ -152,7 +158,8 @@ const topup = async (req, res) => {
       return res.status(400).json({ error: 'Top-up amount must be greater than 0' });
     }
 
-    const result = await topupService.requestTopup(req.user.id, numAmount, 'INTERNAL', { note });
+    const idempotencyKey = readIdempotencyKey(req);
+    const result = await topupService.requestTopup(req.user.id, numAmount, 'INTERNAL', { note, idempotencyKey });
 
     return res.status(200).json({
       success: true,
@@ -160,6 +167,7 @@ const topup = async (req, res) => {
       data: {
         wallet: result.wallet,
         transaction: result.transaction,
+        alreadyProcessed: Boolean(result.alreadyProcessed),
       },
     });
   } catch (err) {
@@ -390,10 +398,7 @@ const withdraw = async (req, res) => {
       return res.status(400).json({ error: 'Withdrawal amount must be greater than 0' });
     }
 
-    // Optional client-generated key (one per click), so a retried request is not paid out twice
-    const clientKey = req.get('Idempotency-Key');
-    const idempotencyKey = clientKey && /^[A-Za-z0-9_-]{8,100}$/.test(clientKey) ? clientKey : null;
-
+    const idempotencyKey = readIdempotencyKey(req);
     const result = await topupService.requestWithdrawal(req.user.id, numAmount, { note, idempotencyKey });
 
     return res.status(200).json({

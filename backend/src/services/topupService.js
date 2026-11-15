@@ -14,50 +14,91 @@ async function requestTopup(userId, amount, provider = 'INTERNAL', metadata = {}
     throw new Error('Top-up amount must be a positive number');
   }
 
-  const wallet = await walletService.getOrCreateWallet(userId);
+  // Future external gateway workflow: record the request; the gateway's callback credits the wallet later
+  if (provider !== 'INTERNAL') {
+    const wallet = await walletService.getOrCreateWallet(userId);
+    const reqRes = await pool.query(
+      `INSERT INTO payment_requests (wallet_id, amount, currency, type, provider, status, metadata)
+       VALUES ($1, $2, 'USD', 'TOPUP', $3, 'PENDING', $4)
+       RETURNING *`,
+      [wallet.id, numericAmount, provider, JSON.stringify({ note: metadata.note || null })]
+    );
+    return { paymentRequest: reqRes.rows[0], wallet };
+  }
 
-  // 1. Create gateway-ready payment request record
-  const reqRes = await pool.query(
-    `INSERT INTO payment_requests (wallet_id, amount, currency, type, provider, status, metadata)
-     VALUES ($1, $2, 'USD', 'TOPUP', $3, 'PENDING', $4)
-     RETURNING *`,
-    [wallet.id, numericAmount, provider, JSON.stringify(metadata || {})]
-  );
-  const paymentRequest = reqRes.rows[0];
+  // Simulated (INTERNAL) top-up. The payment request, the credit and the ledger row are written in one
+  // transaction. If the browser sends an Idempotency-Key, a double click or a retry with the same key
+  // credits the wallet once. (Before, every request created a new payment request and a new key.)
+  const clientKey = metadata.idempotencyKey ? `topup_${userId}_${metadata.idempotencyKey}` : null;
 
-  // 2. If provider is INTERNAL, fulfill immediately
-  if (provider === 'INTERNAL') {
-    const idempotencyKey = `topup_req_${paymentRequest.id}`;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const wallet = await walletService.getOrCreateWallet(userId, client);
+    // Lock the wallet first: a second request with the same key waits here until the first one
+    // commits, and then finds its ledger row below instead of crediting again.
+    await client.query('SELECT id FROM wallets WHERE id = $1 FOR UPDATE', [wallet.id]);
+
+    if (clientKey) {
+      const existing = await client.query('SELECT * FROM wallet_transactions WHERE idempotency_key = $1', [clientKey]);
+      if (existing.rows.length > 0) {
+        await client.query('COMMIT');
+        const current = await walletService.getOrCreateWallet(userId);
+        return {
+          alreadyProcessed: true,
+          wallet: { ...current, balance: parseFloat(current.balance) },
+          transaction: {
+            ...existing.rows[0],
+            amount: parseFloat(existing.rows[0].amount),
+            balance_after: parseFloat(existing.rows[0].balance_after),
+          },
+        };
+      }
+    }
+
+    // 1. Payment request record (kept for a future real gateway)
+    const reqRes = await client.query(
+      `INSERT INTO payment_requests (wallet_id, amount, currency, type, provider, status, metadata)
+       VALUES ($1, $2, 'USD', 'TOPUP', 'INTERNAL', 'PENDING', $3)
+       RETURNING *`,
+      [wallet.id, numericAmount, JSON.stringify({ note: metadata.note || null })]
+    );
+    const paymentRequest = reqRes.rows[0];
+
+    // 2. Credit the wallet and write the ledger row
     const creditResult = await walletService.creditWallet({
       userId,
       amount: numericAmount,
       type: 'TOPUP',
       referenceType: 'TOPUP_REQUEST',
       referenceId: paymentRequest.id,
-      idempotencyKey,
+      idempotencyKey: clientKey || `topup_req_${paymentRequest.id}`,
       metadata: { provider: 'INTERNAL', note: metadata.note || 'User-initiated wallet top-up' },
+      client,
     });
 
-    // Mark payment request as COMPLETED
-    await pool.query(
-      `UPDATE payment_requests 
+    // 3. Mark the payment request COMPLETED
+    await client.query(
+      `UPDATE payment_requests
        SET status = 'COMPLETED', updated_at = NOW()
        WHERE id = $1`,
       [paymentRequest.id]
     );
+
+    await client.query('COMMIT');
 
     return {
       paymentRequest: { ...paymentRequest, status: 'COMPLETED' },
       wallet: creditResult.wallet,
       transaction: creditResult.transaction,
     };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
-
-  // Future external gateway workflow returns checkout URL / client token
-  return {
-    paymentRequest,
-    wallet,
-  };
 }
 
 async function requestWithdrawal(userId, amount, metadata = {}) {
@@ -80,8 +121,11 @@ async function requestWithdrawal(userId, amount, metadata = {}) {
     await client.query('BEGIN');
 
     const wallet = await walletService.getOrCreateWallet(userId, client);
+    // Lock the wallet before checking the key: two requests with the same key then run one after
+    // the other, and the second finds the first one's ledger row instead of failing on the unique key.
+    await client.query('SELECT id FROM wallets WHERE id = $1 FOR UPDATE', [wallet.id]);
 
-    // 1. Debit wallet first (locks the wallet row and checks the balance)
+    // 1. Debit wallet (checks the key, then the balance)
     const debitResult = await walletService.debitWallet({
       userId,
       amount: numericAmount,

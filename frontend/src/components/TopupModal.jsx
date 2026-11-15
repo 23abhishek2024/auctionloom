@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { walletApi } from '../api/client';
+import { newIdempotencyKey } from '../utils/idempotency';
 import {
   Wallet,
   X,
@@ -17,6 +18,11 @@ export const TopupModal = ({ isOpen, onClose, onSuccess, initialAmount = '', cur
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
+  // One key per top-up: a retry of the same amount reuses it, so the server credits the wallet once.
+  // A different amount, or a finished top-up, gets a new key.
+  const pendingTopup = useRef(null); // { key, amount }
+  // Blocks a second click before React has re-rendered the disabled button
+  const inFlight = useRef(false);
 
   if (!isOpen) return null;
 
@@ -27,6 +33,7 @@ export const TopupModal = ({ isOpen, onClose, onSuccess, initialAmount = '', cur
 
   const handleTopup = async (e) => {
     e?.preventDefault();
+    if (inFlight.current) return;
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -35,12 +42,21 @@ export const TopupModal = ({ isOpen, onClose, onSuccess, initialAmount = '', cur
       return;
     }
 
+    if (!pendingTopup.current || pendingTopup.current.amount !== numericAmount) {
+      pendingTopup.current = { key: newIdempotencyKey(), amount: numericAmount };
+    }
+
     try {
+      inFlight.current = true;
       setLoading(true);
-      const res = await walletApi.topup({
-        amount: numericAmount,
-        note: 'Instant platform simulated top-up',
-      });
+      const res = await walletApi.topup(
+        {
+          amount: numericAmount,
+          note: 'Instant platform simulated top-up',
+        },
+        pendingTopup.current.key
+      );
+      pendingTopup.current = null; // done: the next top-up is a new action
 
       const newWallet = res.data?.data?.wallet;
       setSuccessMessage(`Successfully added $${numericAmount.toLocaleString()} to your wallet!`);
@@ -57,6 +73,7 @@ export const TopupModal = ({ isOpen, onClose, onSuccess, initialAmount = '', cur
       console.error('Top-up error:', err);
       setErrorMessage(err.response?.data?.error || 'Failed to complete top-up. Please try again.');
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   };

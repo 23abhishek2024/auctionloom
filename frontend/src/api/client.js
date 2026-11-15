@@ -110,13 +110,16 @@ export const commissionApi = {
   getMyProofs: () => api.get('/commissions/my-proofs'),
 };
 
+// Money actions send an Idempotency-Key header: one key per action, reused if the same request is sent again
+const withIdempotencyKey = (key) => (key ? { headers: { 'Idempotency-Key': key } } : undefined);
+
 export const walletApi = {
   getWallet: () => api.get('/wallet'),
   getTransactions: (params) => api.get('/wallet/transactions', { params }),
-  topup: (data) => api.post('/wallet/topup', data),
+  topup: (data, idempotencyKey) => api.post('/wallet/topup', data, withIdempotencyKey(idempotencyKey)),
   settleLot: (data) => api.post('/wallet/settle-lot', data),
   settleCommission: (data) => api.post('/wallet/settle-commission', data),
-  withdraw: (data) => api.post('/wallet/withdraw', data),
+  withdraw: (data, idempotencyKey) => api.post('/wallet/withdraw', data, withIdempotencyKey(idempotencyKey)),
 };
 
 export const aiApi = {
