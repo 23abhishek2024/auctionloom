@@ -1,8 +1,4 @@
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const userModel = require('../models/userModel');
-
-const SALT_ROUNDS = 10;
+const authService = require('../services/authService');
 
 /**
  * POST /api/auth/register
@@ -15,23 +11,7 @@ const register = async (req, res, next) => {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-    // Check if user already exists
-    const existing = await userModel.findByEmail(email);
-    if (existing) {
-      return res.status(409).json({ error: 'Email already registered.' });
-    }
-
-    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    // Security: Whitelist roles on public registration (forbid self-assigning 'admin')
-    const assignedRole = (role === 'auctioneer' || role === 'bidder') ? role : 'bidder';
-    const user = await userModel.create(email, passwordHash, assignedRole, name);
-
-    const token = jwt.sign(
-      { id: user.id, name: user.name, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
+    const { user, token } = await authService.register({ email, password, role, name });
     res.status(201).json({ user, token });
   } catch (err) {
     next(err);
@@ -49,29 +29,8 @@ const login = async (req, res, next) => {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const user = await userModel.findByEmail(cleanEmail);
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
-    }
-
-    const displayName = user.name || user.email.split('@')[0];
-
-    const token = jwt.sign(
-      { id: user.id, name: displayName, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.json({
-      user: { id: user.id, name: displayName, email: user.email, role: user.role },
-      token,
-    });
+    const { user, token } = await authService.login(email, password);
+    res.json({ user, token });
   } catch (err) {
     next(err);
   }
@@ -82,8 +41,7 @@ const login = async (req, res, next) => {
  */
 const getMe = async (req, res, next) => {
   try {
-    const user = await userModel.findById(req.user.id);
-    if (!user) return res.status(404).json({ error: 'User not found.' });
+    const user = await authService.getProfile(req.user.id);
     res.json({ user });
   } catch (err) {
     next(err);
@@ -100,18 +58,8 @@ const updateProfile = async (req, res, next) => {
       return res.status(400).json({ error: 'Name is required.' });
     }
 
-    const updatedUser = await userModel.updateName(req.user.id, name.trim());
-    if (!updatedUser) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
-
-    const token = jwt.sign(
-      { id: updatedUser.id, name: updatedUser.name, email: updatedUser.email, role: updatedUser.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.json({ user: updatedUser, token });
+    const { user, token } = await authService.updateName(req.user.id, name.trim());
+    res.json({ user, token });
   } catch (err) {
     next(err);
   }

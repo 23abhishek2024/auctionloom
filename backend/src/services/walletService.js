@@ -586,6 +586,115 @@ async function getWalletSummary(userId) {
   };
 }
 
+/**
+ * Total commission credited to one wallet, and how many commission entries that took
+ * (used for the admin's wallet, which receives the platform's 5%).
+ */
+async function getCommissionTotals(walletId) {
+  const commAgg = await pool.query(`
+    SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
+    FROM wallet_transactions
+    WHERE wallet_id = $1 AND type = 'COMMISSION'
+  `, [walletId]);
+  return {
+    total: parseFloat(commAgg.rows[0]?.total_comm || 0),
+    count: parseInt(commAgg.rows[0]?.count_comm || 0),
+  };
+}
+
+/**
+ * The wallet page: balance and recent ledger entries, plus the commission totals for an admin.
+ * Read-only: no balance "self-heal" here, a balance only changes through ledger-backed credits and debits.
+ */
+async function getWalletOverview(user) {
+  const summary = await getWalletSummary(user.id);
+  if (user.role === 'admin') {
+    const commission = await getCommissionTotals(summary.wallet.id);
+    summary.treasuryBalance = commission.total;
+    summary.totalCommissionEarned = commission.total;
+    summary.totalCommissionTransitions = commission.count;
+  }
+  return summary;
+}
+
+/**
+ * One page of a user's ledger, newest first, optionally only one type (TOPUP, WITHDRAWAL, ...).
+ * Rows that belong to an auction carry its title. An admin also gets the commission totals.
+ * Read-only: a balance changes only through creditWallet/debitWallet, which also write the ledger.
+ * (An old "auto-sync" here reset the admin's balance to total commission earned whenever it was 0,
+ *  which recreated money the admin had already withdrawn.)
+ */
+async function getTransactionHistory(user, { limit, offset, type }) {
+  const wallet = await getOrCreateWallet(user.id);
+
+  const params = [wallet.id];
+  const conditions = ['wt.wallet_id = $1'];
+  if (type) {
+    params.push(type);
+    conditions.push(`wt.type = $${params.length}`);
+  }
+  const where = conditions.join(' AND ');
+
+  const [txRes, countRes] = await Promise.all([
+    pool.query(
+      `SELECT
+         wt.id,
+         wt.type,
+         wt.amount,
+         wt.balance_after,
+         wt.reference_type,
+         wt.reference_id,
+         wt.status,
+         wt.metadata,
+         wt.created_at,
+         a.title AS auction_title,
+         a.id    AS auction_id
+       FROM wallet_transactions wt
+       LEFT JOIN auctions a ON a.id::text = wt.reference_id::text
+       WHERE ${where}
+       ORDER BY wt.created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS total FROM wallet_transactions wt WHERE ${where}`,
+      params
+    ),
+  ]);
+
+  let platformSummary = null;
+  if (user.role === 'admin') {
+    const commission = await getCommissionTotals(wallet.id);
+    platformSummary = {
+      totalCommissionEarned: commission.total,
+      totalCommissionTransitions: commission.count,
+    };
+  }
+
+  return {
+    wallet: {
+      id: wallet.id,
+      balance: parseFloat(wallet.balance),
+      currency: wallet.currency,
+    },
+    platformSummary,
+    transactions: txRes.rows.map((r) => ({
+      id: r.id,
+      type: r.type,
+      amount: parseFloat(r.amount),
+      balanceAfter: parseFloat(r.balance_after),
+      referenceType: r.reference_type,
+      referenceId: r.reference_id,
+      auctionTitle: r.auction_title || null,
+      auctionId: r.auction_id || null,
+      status: r.status,
+      metadata: r.metadata,
+      createdAt: r.created_at,
+    })),
+    total: countRes.rows[0].total,
+  };
+}
+
 module.exports = {
   PLATFORM_TREASURY_USER_ID,
   getPrimaryAdminUserId,
@@ -596,4 +705,6 @@ module.exports = {
   debitWallet,
   settleLotEscrow,
   getWalletSummary,
+  getWalletOverview,
+  getTransactionHistory,
 };

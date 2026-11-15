@@ -1,100 +1,47 @@
-const crypto = require('crypto');
-const pool = require('../db');
 const walletService = require('../services/walletService');
 const topupService = require('../services/topupService');
+const commissionService = require('../services/commissionService');
 const auctionClosureService = require('../services/auctionClosureService');
+const { AppError, sendAppError } = require('../utils/AppError');
+
+/**
+ * Wallet Controller
+ * Exposes endpoints for balance inquiry, simulated top-ups, lot settlements,
+ * and commission clearance. The money moves in the services (walletService, topupService,
+ * commissionService, auctionClosureService) using atomic double-entry operations;
+ * this file checks the input and shapes the responses.
+ */
+
+// The 400 answer when the wallet doesn't hold enough money
+const sendInsufficientFunds = (res, err) => res.status(400).json({
+  error: err.message,
+  code: 'INSUFFICIENT_FUNDS',
+  currentBalance: err.currentBalance,
+  requestedAmount: err.requestedAmount,
+});
+const isInsufficientFunds = (err) => err instanceof walletService.InsufficientFundsError || err.name === 'InsufficientFundsError';
 
 // GET /api/wallet/transactions?page=1&limit=20&type=
 const getTransactions = async (req, res) => {
   try {
-    // Read-only: a balance changes only through creditWallet/debitWallet, which also write the ledger.
-    // (An old "auto-sync" here reset the admin's balance to total commission earned whenever it was 0,
-    //  which recreated money the admin had already withdrawn.)
-    const wallet = await walletService.getOrCreateWallet(req.user.id);
-
     const page = Math.max(1, parseInt(req.query.page || '1'));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20')));
     const offset = (page - 1) * limit;
-    const typeFilter = req.query.type ? req.query.type.toUpperCase() : null;
+    const type = req.query.type ? req.query.type.toUpperCase() : null;
 
-    const walletCondition = 'wt.wallet_id = $1';
-    const params = [wallet.id];
+    const history = await walletService.getTransactionHistory(req.user, { limit, offset, type });
 
-    const conditions = [walletCondition];
-    if (typeFilter) {
-      params.push(typeFilter);
-      conditions.push(`wt.type = $${params.length}`);
-    }
-    const where = conditions.join(' AND ');
-
-    const [txRes, countRes] = await Promise.all([
-      pool.query(
-        `SELECT
-           wt.id,
-           wt.type,
-           wt.amount,
-           wt.balance_after,
-           wt.reference_type,
-           wt.reference_id,
-           wt.status,
-           wt.metadata,
-           wt.created_at,
-           a.title AS auction_title,
-           a.id    AS auction_id
-         FROM wallet_transactions wt
-         LEFT JOIN auctions a ON a.id::text = wt.reference_id::text
-         WHERE ${where}
-         ORDER BY wt.created_at DESC
-         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-        [...params, limit, offset]
-      ),
-      pool.query(
-        `SELECT COUNT(*)::int AS total FROM wallet_transactions wt WHERE ${where}`,
-        params
-      ),
-    ]);
-
-    let platformSummary = null;
-    if (req.user.role === 'admin') {
-      const commAgg = await pool.query(`
-        SELECT COALESCE(SUM(wt.amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
-        FROM wallet_transactions wt
-        WHERE wt.wallet_id = $1 AND wt.type = 'COMMISSION'
-      `, [wallet.id]);
-      platformSummary = {
-        totalCommissionEarned: parseFloat(commAgg.rows[0]?.total_comm || 0),
-        totalCommissionTransitions: parseInt(commAgg.rows[0]?.count_comm || 0),
-      };
-    }
-
-    const total = countRes.rows[0].total;
     return res.status(200).json({
       success: true,
       data: {
-        wallet: {
-          id: wallet.id,
-          balance: parseFloat(wallet.balance),
-          currency: wallet.currency,
-        },
-        platformSummary,
-        transactions: txRes.rows.map((r) => ({
-          id: r.id,
-          type: r.type,
-          amount: parseFloat(r.amount),
-          balanceAfter: parseFloat(r.balance_after),
-          referenceType: r.reference_type,
-          referenceId: r.reference_id,
-          auctionTitle: r.auction_title || null,
-          auctionId: r.auction_id || null,
-          status: r.status,
-          metadata: r.metadata,
-          createdAt: r.created_at,
-        })),
+        wallet: history.wallet,
+        platformSummary: history.platformSummary,
+        transactions: history.transactions,
         pagination: {
           page,
           limit,
-          total,
-          totalPages: Math.ceil(total / limit),
+          total: history.total,
+          totalPages: Math.ceil(history.total / limit),
         },
       },
     });
@@ -107,28 +54,10 @@ const getTransactions = async (req, res) => {
   }
 };
 
-/**
- * Wallet Controller
- * Exposes endpoints for balance inquiry, simulated top-ups, lot settlements,
- * and commission clearance using atomic double-entry operations.
- */
-
 // GET /api/wallet
 const getWallet = async (req, res) => {
   try {
-    const summary = await walletService.getWalletSummary(req.user.id);
-    if (req.user.role === 'admin') {
-      const commAgg = await pool.query(`
-        SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm, COUNT(*)::int AS count_comm
-        FROM wallet_transactions
-        WHERE wallet_id = $1 AND type = 'COMMISSION'
-      `, [summary.wallet.id]);
-      const totalCommission = parseFloat(commAgg.rows[0]?.total_comm || 0);
-      summary.treasuryBalance = totalCommission;
-      summary.totalCommissionEarned = totalCommission;
-      summary.totalCommissionTransitions = parseInt(commAgg.rows[0]?.count_comm || 0);
-      // No balance "self-heal" here: the wallet balance is only changed by ledger-backed credits and debits.
-    }
+    const summary = await walletService.getWalletOverview(req.user);
     return res.status(200).json({
       success: true,
       data: summary,
@@ -185,36 +114,9 @@ const settleLotPayment = async (req, res) => {
       return res.status(400).json({ error: 'Auction ID is required' });
     }
 
-    // 1. Fetch auction and verify lot status
-    let auctionRes = await pool.query('SELECT * FROM auctions WHERE id = $1', [auctionId]);
-    if (auctionRes.rows.length === 0) {
-      return res.status(404).json({ error: 'Auction lot not found' });
-    }
+    const result = await auctionClosureService.settleWonLot(req.user.id, auctionId);
 
-    let auction = auctionRes.rows[0];
-
-    // If auction end time has passed but status is still ACTIVE, auto-close it atomically
-    const isTimeEnded = new Date(auction.end_time) <= new Date();
-    if (auction.status === 'ACTIVE' && isTimeEnded) {
-      await auctionClosureService.closeAuction(auctionId);
-      auctionRes = await pool.query('SELECT * FROM auctions WHERE id = $1', [auctionId]);
-      auction = auctionRes.rows[0];
-    }
-
-    if (auction.status !== 'CLOSED') {
-      return res.status(400).json({ error: 'This auction lot has not concluded yet. Bidding is still active.' });
-    }
-
-    if (!auction.winner_id) {
-      return res.status(400).json({ error: 'This auction concluded with no winning bids placed.' });
-    }
-
-    if (auction.winner_id !== req.user.id) {
-      return res.status(403).json({ error: 'Only the winning bidder can settle this auction lot.' });
-    }
-
-    if (auction.is_settled) {
-      const winnerWallet = await walletService.getOrCreateWallet(req.user.id);
+    if (result.alreadySettled) {
       return res.status(200).json({
         success: true,
         alreadySettled: true,
@@ -223,25 +125,20 @@ const settleLotPayment = async (req, res) => {
         data: {
           auctionId,
           alreadySettled: true,
-          winnerWallet,
+          winnerWallet: result.winnerWallet,
         },
       });
     }
 
-    // 2. Execute atomic settlement
-    const settlement = await walletService.settleLotEscrow({
-      auctionId,
-      winnerId: req.user.id,
-      sellerId: auction.seller_id,
-      hammerPrice: auction.current_price,
-    });
-
     return res.status(200).json({
       success: true,
-      message: `Lot successfully settled! Hammer price of $${parseFloat(auction.current_price).toFixed(2)} transferred.`,
-      data: settlement,
+      message: `Lot successfully settled! Hammer price of $${parseFloat(result.hammerPrice).toFixed(2)} transferred.`,
+      data: result.settlement,
     });
   } catch (err) {
+    if (err instanceof AppError) {
+      return sendAppError(res, err);
+    }
     console.error('[WalletController.settleLotPayment] Error:', err);
     if (err.message && err.message.toLowerCase().includes('already')) {
       return res.status(400).json({
@@ -250,13 +147,8 @@ const settleLotPayment = async (req, res) => {
         isSettled: true,
       });
     }
-    if (err instanceof walletService.InsufficientFundsError || err.name === 'InsufficientFundsError') {
-      return res.status(400).json({
-        error: err.message,
-        code: 'INSUFFICIENT_FUNDS',
-        currentBalance: err.currentBalance,
-        requestedAmount: err.requestedAmount,
-      });
+    if (isInsufficientFunds(err)) {
+      return sendInsufficientFunds(res, err);
     }
     return res.status(500).json({ error: err.message || 'Failed to settle lot from wallet' });
   }
@@ -264,7 +156,6 @@ const settleLotPayment = async (req, res) => {
 
 // POST /api/wallet/settle-commission
 const settleCommission = async (req, res) => {
-  const client = await pool.connect();
   try {
     const { amount } = req.body;
     const numAmount = parseFloat(amount);
@@ -273,118 +164,22 @@ const settleCommission = async (req, res) => {
       return res.status(400).json({ error: 'Commission settlement amount must be greater than 0' });
     }
 
-    await client.query('BEGIN');
-
-    // 0. Lock both wallets (seller and platform) in the same sorted order that lot settlement uses,
-    //    and before the user row, so this can't deadlock with a settlement touching the same wallets.
-    const treasuryId = walletService.PLATFORM_TREASURY_USER_ID;
-    const primaryAdminId = await walletService.getPrimaryAdminUserId(client);
-    const recipientUserId = primaryAdminId || treasuryId;
-    await walletService.lockWalletsInOrder(client, [req.user.id, recipientUserId]);
-
-    // 1. Check user unpaid commission
-    const userRes = await client.query(
-      'SELECT unpaid_commission FROM users WHERE id = $1 FOR UPDATE',
-      [req.user.id]
-    );
-    const unpaid = parseFloat(userRes.rows[0]?.unpaid_commission || 0);
-
-    if (unpaid <= 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'You have no outstanding platform commission balance to settle.' });
-    }
-
-    const payAmount = Math.min(unpaid, numAmount);
-    const idempotencyKey = `commission_debit_${req.user.id}_${crypto.randomUUID()}`;
-
-    // 2. Debit user wallet
-    const debitResult = await walletService.debitWallet({
-      userId: req.user.id,
-      amount: payAmount,
-      type: 'COMMISSION',
-      referenceType: 'COMMISSION_REQUEST',
-      idempotencyKey,
-      metadata: { note: 'Platform commission settlement from wallet' },
-      client,
-    });
-
-    // 2b. Credit Platform Commission to Admin Wallet (single recipient, preventing double entries)
-    if (recipientUserId) {
-      await walletService.creditWallet({
-        userId: recipientUserId,
-        amount: payAmount,
-        type: 'COMMISSION',
-        referenceType: 'COMMISSION_REQUEST',
-        idempotencyKey: `comm_recv_${req.user.id}_${crypto.randomUUID()}`,
-        metadata: {
-          note: `Platform commission payment received from seller`,
-          sellerId: req.user.id,
-        },
-        client,
-      });
-    }
-
-    // 3. Decrement user's unpaid commission
-    const remainingUnpaid = Math.max(0, Math.round((unpaid - payAmount) * 100) / 100);
-    await client.query(
-      'UPDATE users SET unpaid_commission = $1 WHERE id = $2',
-      [remainingUnpaid, req.user.id]
-    );
-
-    const commitRes = await client.query('COMMIT');
-    if (commitRes.command !== 'COMMIT') {
-      throw new Error(`Transaction failed to commit: database returned ${commitRes.command}`);
-    }
-
-    // 4. Log approved proof in commission_proofs (non-critical auxiliary audit, done post-commit)
-    try {
-      await pool.query(
-        `INSERT INTO commission_proofs (user_id, amount, payment_method, comment, proof_url, notes, screenshot_url, status, admin_notes)
-         VALUES ($1, $2, 'WALLET', $3, $4, $5, $6, 'APPROVED', $7)
-         ON CONFLICT DO NOTHING`,
-        [
-          req.user.id,
-          payAmount,
-          'Direct 1-Click Settlement via Platform Wallet',
-          'wallet://internal-balance',
-          'Direct 1-Click Settlement via Platform Wallet',
-          'wallet://internal-balance',
-          `Automated debit of $${payAmount.toFixed(2)} from user wallet`,
-        ]
-      );
-    } catch (proofErr) {
-      console.warn('[WalletController] Notice: commission_proofs log bypassed non-critically:', proofErr.message);
-    }
-
-    const freshWalletRes = await pool.query('SELECT * FROM wallets WHERE user_id = $1', [req.user.id]);
-    const finalWallet = freshWalletRes.rows[0]
-      ? { ...freshWalletRes.rows[0], balance: parseFloat(freshWalletRes.rows[0].balance) }
-      : debitResult.wallet;
+    const result = await commissionService.payFromWallet(req.user.id, numAmount);
 
     return res.status(200).json({
       success: true,
-      message: `Successfully cleared $${payAmount.toFixed(2)} of platform commission!`,
-      data: {
-        paidAmount: payAmount,
-        remainingUnpaid,
-        wallet: finalWallet,
-        transaction: debitResult.transaction,
-      },
+      message: `Successfully cleared $${result.paidAmount.toFixed(2)} of platform commission!`,
+      data: result,
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (err instanceof AppError) {
+      return sendAppError(res, err);
+    }
     console.error('[WalletController.settleCommission] Error:', err);
-    if (err instanceof walletService.InsufficientFundsError || err.name === 'InsufficientFundsError') {
-      return res.status(400).json({
-        error: err.message,
-        code: 'INSUFFICIENT_FUNDS',
-        currentBalance: err.currentBalance,
-        requestedAmount: err.requestedAmount,
-      });
+    if (isInsufficientFunds(err)) {
+      return sendInsufficientFunds(res, err);
     }
     return res.status(500).json({ error: err.message || 'Failed to settle commission' });
-  } finally {
-    client.release();
   }
 };
 
@@ -408,13 +203,8 @@ const withdraw = async (req, res) => {
     });
   } catch (err) {
     console.error('[WalletController.withdraw] Error:', err);
-    if (err instanceof walletService.InsufficientFundsError || err.name === 'InsufficientFundsError') {
-      return res.status(400).json({
-        error: err.message,
-        code: 'INSUFFICIENT_FUNDS',
-        currentBalance: err.currentBalance,
-        requestedAmount: err.requestedAmount,
-      });
+    if (isInsufficientFunds(err)) {
+      return sendInsufficientFunds(res, err);
     }
     return res.status(500).json({ error: err.message || 'Failed to process withdrawal' });
   }

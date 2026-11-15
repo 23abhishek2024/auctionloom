@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const pool = require('../db');
+const userModel = require('../models/userModel');
 const { isUuidFormat } = require('../utils/validators');
 
 /**
@@ -33,11 +33,11 @@ const authMiddleware = async (req, res, next) => {
   }
 
   try {
-    const result = await pool.query('SELECT role FROM users WHERE id = $1', [decoded.id]);
-    if (result.rowCount === 0) {
+    const current = await userModel.findRoleById(decoded.id);
+    if (!current) {
       return res.status(401).json({ error: 'This account no longer exists.' });
     }
-    req.user = { ...decoded, role: result.rows[0].role }; // { id, name, email, role }
+    req.user = { ...decoded, role: current.role }; // { id, name, email, role }
     next();
   } catch (err) {
     next(err);

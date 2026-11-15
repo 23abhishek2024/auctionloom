@@ -13,6 +13,7 @@ const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { getAllowedOrigins } = require('./utils/allowedOrigins');
+const { AppError, sendAppError } = require('./utils/AppError');
 
 // Middlewares
 const { loggerMiddleware } = require('./middlewares/logger');
@@ -158,6 +159,10 @@ app.use((req, res) => {
 
 // ── Global Error Handler ──────────────────────────────────────
 app.use((err, req, res, next) => {
+  // An expected failure reported by a service (not found, not allowed, ...): answer with its status
+  if (err instanceof AppError) {
+    return sendAppError(res, err);
+  }
   const reqId = req.id || 'unknown';
   console.error(`[${reqId}] ❌ Unhandled Error:`, err.message);
   res.status(err.status || 500).json({

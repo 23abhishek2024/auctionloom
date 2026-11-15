@@ -22,6 +22,15 @@ const userModel = {
   },
 
   /**
+   * A user's current role, read fresh (a token's role can be out of date).
+   * Returns { role }, or undefined if the account no longer exists.
+   */
+  findRoleById: async (id) => {
+    const result = await pool.query('SELECT role FROM users WHERE id = $1', [id]);
+    return result.rows[0];
+  },
+
+  /**
    * Create a new user
    */
   create: async (email, passwordHash, role = 'bidder', name = null) => {

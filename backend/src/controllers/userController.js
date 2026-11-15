@@ -1,67 +1,13 @@
-const jwt = require('jsonwebtoken');
-const pool = require('../db');
+const userService = require('../services/userService');
 
 /**
  * GET /api/users/me/stats
- * Summary metrics for the logged-in user:
- * - listedCount: Number of auctions created by this user
- * - activeBidsCount: Number of ACTIVE auctions the user has placed bids on
- * - wonCount: Number of auctions won by this user
- * - totalBidsCount: Total number of individual bids placed by this user
+ * Summary metrics for the logged-in user (listings, active bids, wins, bids placed, unpaid commission)
  */
 const getMyStats = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-
-    // 1. Auctions listed by user
-    const listedRes = await pool.query(
-      'SELECT COUNT(*)::int AS count FROM auctions WHERE seller_id = $1',
-      [userId]
-    );
-
-    // 2. Active auctions user is currently bidding on
-    const activeBidsRes = await pool.query(
-      `SELECT COUNT(DISTINCT b.auction_id)::int AS count
-       FROM bids b
-       JOIN auctions a ON b.auction_id = a.id
-       WHERE b.bidder_id = $1 AND a.status = 'ACTIVE' AND a.end_time > NOW()`,
-      [userId]
-    );
-
-    // 3. Auctions won by user
-    const wonRes = await pool.query(
-      `SELECT COUNT(*)::int AS count
-       FROM auctions
-       WHERE winner_id = $1 OR (
-         status = 'CLOSED' AND id IN (
-           SELECT b1.auction_id FROM bids b1
-           WHERE b1.bidder_id = $1 AND b1.amount = (
-             SELECT MAX(b2.amount) FROM bids b2 WHERE b2.auction_id = b1.auction_id
-           )
-         )
-       )`,
-      [userId]
-    );
-
-    // 4. Total bids placed
-    const totalBidsRes = await pool.query(
-      'SELECT COUNT(*)::int AS count, COALESCE(SUM(amount), 0)::numeric AS total_volume FROM bids WHERE bidder_id = $1',
-      [userId]
-    );
-
-    // 5. Unpaid commission debt
-    const userRes = await pool.query('SELECT unpaid_commission FROM users WHERE id = $1', [userId]);
-
-    res.json({
-      stats: {
-        listedCount: listedRes.rows[0].count || 0,
-        activeBidsCount: activeBidsRes.rows[0].count || 0,
-        wonCount: wonRes.rows[0].count || 0,
-        totalBidsCount: totalBidsRes.rows[0].count || 0,
-        totalVolume: parseFloat(totalBidsRes.rows[0].total_volume || 0),
-        unpaidCommission: parseFloat(userRes.rows[0]?.unpaid_commission || 0),
-      },
-    });
+    const stats = await userService.getStats(req.user.id);
+    res.json({ stats });
   } catch (err) {
     next(err);
   }
@@ -73,25 +19,10 @@ const getMyStats = async (req, res, next) => {
  */
 const getMyAuctions = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-
-    const result = await pool.query(
-      `SELECT a.*,
-              COUNT(b.id)::int AS total_bids,
-              COALESCE(NULLIF(w.name, ''), split_part(w.email, '@', 1)) AS winner_name,
-              w.email AS winner_email
-       FROM auctions a
-       LEFT JOIN bids b ON a.id = b.auction_id
-       LEFT JOIN users w ON a.winner_id = w.id
-       WHERE a.seller_id = $1
-       GROUP BY a.id, w.name, w.email
-       ORDER BY a.created_at DESC`,
-      [userId]
-    );
-
+    const auctions = await userService.getListedAuctions(req.user.id);
     res.json({
-      auctions: result.rows,
-      count: result.rows.length,
+      auctions,
+      count: auctions.length,
     });
   } catch (err) {
     next(err);
@@ -100,44 +31,16 @@ const getMyAuctions = async (req, res, next) => {
 
 /**
  * GET /api/users/me/bids
- * Returns all auctions where the user has placed bids, with:
- * - my_highest_bid
- * - current_price
- * - is_highest_bidder (true if user holds current highest bid)
- * - is_winner (true if auction closed and user is winner)
+ * Returns all auctions where the user has placed bids, with my_highest_bid,
+ * is_highest_bidder and is_winner
  */
 const getMyBids = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-
-    const result = await pool.query(
-      `SELECT a.*,
-              my_bids.my_highest_bid,
-              my_bids.my_bid_count,
-              (a.current_price <= my_bids.my_highest_bid) AS is_highest_bidder,
-              COALESCE(NULLIF(s.name, ''), split_part(s.email, '@', 1)) AS seller_name,
-              s.email AS seller_email,
-              COALESCE(NULLIF(w.name, ''), split_part(w.email, '@', 1)) AS winner_name,
-              (a.winner_id = $1 OR (a.status = 'CLOSED' AND a.current_price <= my_bids.my_highest_bid)) AS is_winner
-       FROM (
-         SELECT auction_id, 
-                MAX(amount)::numeric AS my_highest_bid,
-                COUNT(id)::int AS my_bid_count
-         FROM bids
-         WHERE bidder_id = $1
-         GROUP BY auction_id
-       ) my_bids
-       JOIN auctions a ON my_bids.auction_id = a.id
-       JOIN users s ON a.seller_id = s.id
-       LEFT JOIN users w ON a.winner_id = w.id
-       ORDER BY a.created_at DESC`,
-      [userId]
-    );
-
+    const participations = await userService.getBidParticipations(req.user.id);
     res.json({
-      participations: result.rows,
-      bids: result.rows,
-      count: result.rows.length,
+      participations,
+      bids: participations,
+      count: participations.length,
     });
   } catch (err) {
     next(err);
@@ -150,31 +53,11 @@ const getMyBids = async (req, res, next) => {
  */
 const getMyWon = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-
-    const result = await pool.query(
-      `SELECT a.*,
-              COALESCE(NULLIF(s.name, ''), split_part(s.email, '@', 1)) AS seller_name,
-              s.email AS seller_email,
-              MAX(b.amount)::numeric AS winning_bid
-       FROM auctions a
-       JOIN users s ON a.seller_id = s.id
-       LEFT JOIN bids b ON a.id = b.auction_id AND b.bidder_id = $1
-       WHERE a.winner_id = $1 OR (
-         a.status = 'CLOSED' AND a.id IN (
-           SELECT b1.auction_id FROM bids b1
-           WHERE b1.bidder_id = $1 AND b1.amount = a.current_price
-         )
-       )
-       GROUP BY a.id, s.name, s.email
-       ORDER BY a.end_time DESC`,
-      [userId]
-    );
-
+    const won = await userService.getWonAuctions(req.user.id);
     res.json({
-      wonAuctions: result.rows,
-      won: result.rows,
-      count: result.rows.length,
+      wonAuctions: won,
+      won,
+      count: won.length,
     });
   } catch (err) {
     next(err);
@@ -187,24 +70,7 @@ const getMyWon = async (req, res, next) => {
  */
 const upgradeToSeller = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-    const result = await pool.query(
-      "UPDATE users SET role = 'auctioneer' WHERE id = $1 RETURNING id, name, email, role, created_at",
-      [userId]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
-
-    // Send a fresh token with the new role, so the browser doesn't keep using the old one
-    const user = result.rows[0];
-    const token = jwt.sign(
-      { id: user.id, name: user.name || user.email.split('@')[0], email: user.email, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
+    const { user, token } = await userService.upgradeToSeller(req.user.id);
     res.json({
       message: 'Account successfully upgraded to full member (Bidder & Seller).',
       user,
@@ -218,58 +84,13 @@ const upgradeToSeller = async (req, res, next) => {
 /**
  * GET /api/users/leaderboard (or /api/analytics/leaderboard)
  * Public leaderboard of top bidders by bid volume & won auctions (display names only, no emails)
- *
- * Each total is computed in its own subquery. Joining users to auctions AND bids in one query
- * multiplied the rows (every bid repeated once per auction won), which inflated the bid volume.
  */
 const getLeaderboard = async (req, res, next) => {
   try {
-    const result = await pool.query(`
-      SELECT
-        u.id,
-        COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS username,
-        u.role,
-        COALESCE(bid_totals.total_volume, 0)::numeric AS total_spent,
-        COALESCE(win_totals.auctions_won, 0)::int AS auctions_won,
-        COALESCE(bid_totals.total_bids, 0)::int AS total_bids
-      FROM users u
-      LEFT JOIN (
-        SELECT bidder_id, SUM(amount) AS total_volume, COUNT(*) AS total_bids
-        FROM bids
-        GROUP BY bidder_id
-      ) bid_totals ON bid_totals.bidder_id = u.id
-      LEFT JOIN (
-        SELECT winner_id, COUNT(*) AS auctions_won
-        FROM auctions
-        WHERE status = 'CLOSED' AND winner_id IS NOT NULL
-        GROUP BY winner_id
-      ) win_totals ON win_totals.winner_id = u.id
-      WHERE bid_totals.bidder_id IS NOT NULL OR win_totals.winner_id IS NOT NULL
-      ORDER BY total_spent DESC, auctions_won DESC, total_bids DESC
-      LIMIT 100
-    `);
-
-    const ranked = result.rows.map((row, index) => {
-      const rank = index + 1;
-      let tier = 'Active Bidder';
-      if (rank === 1) tier = 'Grand Master';
-      else if (rank <= 3) tier = 'High Roller';
-      else if (parseFloat(row.total_spent) > 1000) tier = 'VIP Collector';
-
-      return {
-        rank,
-        id: row.id,
-        username: row.username,
-        totalSpent: parseFloat(row.total_spent),
-        auctionsWon: row.auctions_won,
-        totalBids: row.total_bids,
-        tier,
-      };
-    });
-
+    const leaderboard = await userService.getLeaderboard();
     res.json({
-      leaderboard: ranked,
-      count: ranked.length,
+      leaderboard,
+      count: leaderboard.length,
     });
   } catch (err) {
     next(err);
@@ -281,8 +102,8 @@ const getLeaderboard = async (req, res, next) => {
  */
 const getPayoutMethods = async (req, res, next) => {
   try {
-    const result = await pool.query('SELECT payout_methods FROM users WHERE id = $1', [req.user.id]);
-    res.json({ payoutMethods: result.rows[0]?.payout_methods || {} });
+    const payoutMethods = await userService.getPayoutMethods(req.user.id);
+    res.json({ payoutMethods });
   } catch (err) {
     next(err);
   }
@@ -290,6 +111,7 @@ const getPayoutMethods = async (req, res, next) => {
 
 /**
  * PUT /api/users/me/payout-methods
+ * Accepts both snake_case and camelCase field names (bank_name or bankName, ...)
  */
 const updatePayoutMethods = async (req, res, next) => {
   try {
@@ -308,14 +130,10 @@ const updatePayoutMethods = async (req, res, next) => {
       updated_at: new Date().toISOString(),
     };
 
-    const result = await pool.query(
-      'UPDATE users SET payout_methods = $1 WHERE id = $2 RETURNING id, payout_methods',
-      [JSON.stringify(methods), req.user.id]
-    );
-
+    const payoutMethods = await userService.savePayoutMethods(req.user.id, methods);
     res.json({
       message: 'Payout coordinates saved successfully.',
-      payoutMethods: result.rows[0].payout_methods,
+      payoutMethods,
     });
   } catch (err) {
     next(err);
@@ -323,38 +141,13 @@ const updatePayoutMethods = async (req, res, next) => {
 };
 
 /**
- * GET /api/users/auction-payout/:auctionId
+ * GET /api/users/auction-payout/:auctionId (also /api/users/auctions/:auctionId/seller-payout)
  * Allows winning bidder to view seller's payout instructions
  */
 const getSellerPayoutForWinner = async (req, res, next) => {
   try {
-    const { auctionId } = req.params;
-    const auctionRes = await pool.query('SELECT * FROM auctions WHERE id = $1', [auctionId]);
-    if (auctionRes.rowCount === 0) return res.status(404).json({ error: 'Auction not found.' });
-
-    const auction = auctionRes.rows[0];
-    if (req.user.id !== auction.winner_id && req.user.id !== auction.seller_id && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Only the winning bidder can view seller payout instructions.' });
-    }
-
-    const sellerRes = await pool.query(
-      "SELECT id, name, email, payout_methods FROM users WHERE id = $1",
-      [auction.seller_id]
-    );
-
-    res.json({
-      seller: {
-        id: sellerRes.rows[0]?.id,
-        name: sellerRes.rows[0]?.name || sellerRes.rows[0]?.email?.split('@')[0],
-        email: sellerRes.rows[0]?.email,
-        payoutMethods: sellerRes.rows[0]?.payout_methods || {},
-      },
-      auction: {
-        id: auction.id,
-        title: auction.title,
-        winningBid: parseFloat(auction.current_price),
-      },
-    });
+    const payout = await userService.getSellerPayoutForAuction(req.params.auctionId, req.user);
+    res.json(payout);
   } catch (err) {
     next(err);
   }
@@ -371,4 +164,3 @@ module.exports = {
   updatePayoutMethods,
   getSellerPayoutForWinner,
 };
-

@@ -161,9 +161,12 @@ const auctionModel = {
   },
 
   /**
-   * Delete an auction by ID
+   * Delete an auction together with its bids and any queued jobs for it.
+   * Returns the deleted auction row, or undefined if there was no such auction.
    */
-  delete: async (id) => {
+  deleteWithBidsAndJobs: async (id) => {
+    await pool.query(`DELETE FROM jobs WHERE payload->>'auction_id' = $1`, [id]);
+    await pool.query('DELETE FROM bids WHERE auction_id = $1', [id]);
     const result = await pool.query('DELETE FROM auctions WHERE id = $1 RETURNING *', [id]);
     return result.rows[0];
   },

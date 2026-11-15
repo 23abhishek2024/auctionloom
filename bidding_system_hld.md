@@ -49,7 +49,7 @@ graph TD
     Clients <-->|WebSocket / Socket.IO| LB
 
     %% Node.js Application Layer (Clusterized)
-    subgraph Express Application Layer (MVC Pattern)
+    subgraph AppLayer["Express Application Layer (MVC Pattern)"]
         LB --> Worker1(Worker Process 1 - PID A)
         LB --> Worker2(Worker Process 2 - PID B)
         
@@ -65,21 +65,22 @@ graph TD
         RateLimiter --> Auth
         Auth --> Multer
         
-        Multer --> Controllers[REST Controllers\nAuth, Auction, Bid, Wallet, Admin, AI]
+        Multer --> Controllers[REST Controllers\nHTTP only: check input, send response]
+        Controllers --> Services[Domain Services\nAuction, Bid, Wallet, Commission, User, Report]
         Worker1 --> Socket[Socket.IO Hub\nRoom-Based Partitioning]
         Worker1 --> WalletService[Wallet & Escrow Service\nDouble-Entry Invariants]
         Worker1 -.-> AIService[AI Appraisal Service\nGemini 3.6 Flash + Heuristic]
     end
 
     %% Distributed Background Workers & Schedulers
-    subgraph Distributed Background System
+    subgraph Background["Distributed Background System"]
         Scheduler[Auction Scheduler\n30s Cron Sweep]
         JobWorkers[Job Worker Pool\nSKIP LOCKED Queue]
         EmailService[Email Service\nSmart Ethereal / SMTP Gateway]
     end
 
     %% Data Layer
-    subgraph Storage & Persistence Layer
+    subgraph Storage["Storage & Persistence Layer"]
         DB[(PostgreSQL 15 Cluster\nACID & Row-Level Locking)]
     end
 
@@ -88,7 +89,8 @@ graph TD
     SMTP[SMTP Gateway / Ethereal Mail Server]
 
     %% Connections
-    Controllers -->|ACID Tx: SELECT FOR UPDATE| DB
+    Services -->|ACID Tx: SELECT FOR UPDATE| DB
+    Services --> WalletService
     WalletService -->|Double-Entry Atomic Ledger| DB
     Socket -->|Sub-15ms Broadcasts| Clients
     AIService -.->|Structured JSON Prompt| Gemini
@@ -102,7 +104,7 @@ graph TD
     classDef database fill:#fff3e0,stroke:#e65100,stroke-width:2px;
     classDef ai fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
     
-    class Worker1,Worker2,Controllers,Logger,RateLimiter,Auth,Multer,WalletService primary;
+    class Worker1,Worker2,Controllers,Services,Logger,RateLimiter,Auth,Multer,WalletService primary;
     class DB database;
     class Clients secondary;
     class AIService,Gemini,EmailService,SMTP ai;
@@ -132,13 +134,13 @@ aution-bid/
 │   │   │   ├── userRoutes.js     # /api/users (user metrics, listings, won lots, payout methods)
 │   │   │   ├── aiRoutes.js       # /api/ai (appraisal copy generation)
 │   │   │   └── uploadRoutes.js   # /api/upload (Multer multipart image ingestion)
-│   │   ├── controllers/
-│   │   │   ├── authController.js # Bcrypt hashing & JWT signing
-│   │   │   ├── auctionController.js # Auction lifecycle & catalog queries
-│   │   │   ├── bidController.js  # Concurrency control & SELECT FOR UPDATE
+│   │   ├── controllers/          # HTTP only: check input, call a service, send JSON/CSV (no SQL)
+│   │   │   ├── authController.js # Register, login, profile
+│   │   │   ├── auctionController.js # Auction catalog, create, delete, republish
+│   │   │   ├── bidController.js  # Bid input checks (admin ban, UUID, positive amount)
 │   │   │   ├── walletController.js # Balance inquiry, topups, lot settlement, withdrawals
-│   │   │   ├── adminController.js  # Platform governance & restriction freeze
-│   │   │   ├── commissionController.js # Wire proof submission & review
+│   │   │   ├── adminController.js  # Platform governance, restriction freeze, CSV exports
+│   │   │   ├── commissionController.js # Wire proof submission
 │   │   │   └── userController.js # User metrics & Hall of Fame leaderboard
 │   │   ├── models/
 │   │   │   ├── auctionModel.js   # SQL queries with findByIdForUpdate, findEndedActive
@@ -149,14 +151,22 @@ aution-bid/
 │   │   │   ├── auth.js           # JWT verification & RBAC roleMiddleware
 │   │   │   ├── rateLimiter.js    # Token bucket DDoS defense (5,000 req/15m)
 │   │   │   └── upload.js         # Multer diskStorage, 5MB limit, UUID sanitization
-│   │   ├── services/
+│   │   ├── services/             # Business rules, transactions & SQL (never touch req/res)
 │   │   │   ├── socketService.js  # Socket.IO room isolation & broadcast dispatch
-│   │   │   ├── walletService.js  # Double-entry ledger, zero-overdraft, settleLotEscrow
-│   │   │   ├── auctionClosureService.js # JIT lot closure & auto-settlement
+│   │   │   ├── bidService.js     # Bid transaction: SELECT FOR UPDATE, checks, PRICE_UPDATE
+│   │   │   ├── auctionService.js # Catalog, create/delete/republish, admin moderation
+│   │   │   ├── walletService.js  # Double-entry ledger, zero-overdraft, settleLotEscrow, history
+│   │   │   ├── commissionService.js # Seller commission debt: wallet payment, receipts, review
+│   │   │   ├── userService.js    # Dashboards, leaderboard, payout details, roles
+│   │   │   ├── authService.js    # Bcrypt hashing & JWT signing
+│   │   │   ├── reportService.js  # Admin metrics, revenue chart, commission ledger
+│   │   │   ├── systemService.js  # Purge-and-reseed, live locking benchmark
+│   │   │   ├── auctionClosureService.js # JIT lot closure, auto-settlement, settle-lot checks
 │   │   │   ├── aiService.js      # Google Gemini 3.6 Flash + Heuristic fallback
 │   │   │   ├── emailService.js   # Dual-mode Smart Ethereal / SMTP dispatcher
 │   │   │   └── topupService.js   # Wallet funding abstraction
 │   │   ├── utils/
+│   │   │   ├── AppError.js       # Expected failures (404/403/409...) a service reports to HTTP
 │   │   │   └── validators.js     # UUID, email, and numeric format validators
 │   │   └── workers/
 │   │       ├── scheduler.js      # Cron scanner (runs every 30s, enqueues jobs)
@@ -335,6 +345,7 @@ sequenceDiagram
     actor Bidder
     participant MW as Express Middleware Chain
     participant Ctrl as Bid Controller
+    participant Svc as Bid Service
     participant DB as PostgreSQL 15 Engine
     participant WS as Socket.IO Hub
     actor Room as Other Connected Bidders
@@ -343,24 +354,25 @@ sequenceDiagram
     Note over MW: 1. Injects req.id (UUIDv4)<br/>2. Rate Limiter checks 5000/15m<br/>3. JWT Auth verifies signature & populates req.user
     MW->>Ctrl: Passes Request Context
 
-    Ctrl->>Ctrl: Verify bidder != 'admin' (Marketplace Neutrality)
-    Ctrl->>DB: Dedicated Client: BEGIN TRANSACTION
-    Ctrl->>DB: SELECT * FROM auctions WHERE id = $1 FOR UPDATE
+    Ctrl->>Ctrl: Verify bidder != 'admin' (Marketplace Neutrality)<br/>Validate UUID and amount > 0 (no database yet)
+    Ctrl->>Svc: placeBid({ auctionId, bidder, amount })
+    Svc->>DB: Dedicated Client: BEGIN TRANSACTION
+    Svc->>DB: SELECT * FROM auctions WHERE id = $1 FOR UPDATE
     Note over DB: Exclusive Row Lock acquired on this auction row.<br/>All concurrent bids on this lot WAIT here.<br/>Bids on other lots execute in parallel!
-    DB-->>Ctrl: Current Auction State
+    DB-->>Svc: Current Auction State
 
-    Ctrl->>Ctrl: Invariant Checks under Lock:<br/>• Status == ACTIVE (not RESTRICTED)<br/>• now() <= end_time (not expired)<br/>• user.id != seller_id (anti-shill)<br/>• amount > current_price (monotonic)
+    Svc->>Svc: Invariant Checks under Lock (failure = AppError + ROLLBACK):<br/>• Status == ACTIVE (not RESTRICTED)<br/>• now() <= end_time (not expired)<br/>• user.id != seller_id (anti-shill)<br/>• amount > current_price (monotonic)
 
-    Ctrl->>DB: INSERT INTO bids (auction_id, bidder_id, amount)
-    Ctrl->>DB: UPDATE auctions SET current_price = 2500 WHERE id = $1
-    Ctrl->>DB: COMMIT TRANSACTION
+    Svc->>DB: INSERT INTO bids (auction_id, bidder_id, amount)
+    Svc->>DB: UPDATE auctions SET current_price = 2500 WHERE id = $1
+    Svc->>DB: COMMIT TRANSACTION
     Note over DB: Row lock released. Next queued bid advances.
 
-    Ctrl-->>Bidder: HTTP 201 Created { bid }
-
     %% Real-time broadcast strictly POST-COMMIT
-    Ctrl->>WS: Broadcast 'PRICE_UPDATE' { auction_id, new_price: 2500, bidder_name }
+    Svc->>WS: Broadcast 'PRICE_UPDATE' { auction_id, new_price: 2500, bidder_name, bidder_id }
     WS-->>Room: Sub-15ms WebSocket push (UI price flashes)
+    Svc-->>Ctrl: new bid
+    Ctrl-->>Bidder: HTTP 201 Created { bid }
 ```
 
 ---
@@ -407,36 +419,37 @@ sequenceDiagram
     autonumber
     actor Winner
     participant WalletCtrl as Wallet Controller
+    participant Closure as Auction Closure Service
     participant WalletSvc as Wallet Service
     participant DB as PostgreSQL 15
     actor Seller
 
     Winner->>WalletCtrl: POST /api/wallet/settle-lot { auctionId }
-    WalletCtrl->>WalletSvc: settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice: 2000 })
+    WalletCtrl->>Closure: settleWonLot(winnerId, auctionId)
+    Note over Closure: Closes the lot first if its time is up but it is still ACTIVE.<br/>Checks: lot exists (404), CLOSED with a winner (400),<br/>caller is the winner (403), not already settled.
+    Closure->>WalletSvc: settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice: 2000 })
     
     WalletSvc->>DB: Dedicated Client: BEGIN TRANSACTION
     WalletSvc->>DB: SELECT * FROM auctions WHERE id = $1 FOR UPDATE
     Note over DB: Verify lot is CLOSED and is_settled = false
+    WalletSvc->>DB: Lock winner, seller and platform wallets in sorted id order (FOR UPDATE)
+    Note over DB: One fixed lock order for every multi-wallet transaction: no deadlocks
 
     %% Step 1: Debit Winner
-    WalletSvc->>DB: SELECT * FROM wallets WHERE user_id = winnerId FOR UPDATE
     Note over DB: Verify balance >= 2000 (Zero-Overdraft Check)
     WalletSvc->>DB: UPDATE wallets SET balance = balance - 2000 WHERE user_id = winnerId
     WalletSvc->>DB: INSERT INTO wallet_transactions (wallet_id, type='SETTLEMENT_DEBIT', amount=2000, idempotency_key='lot_debit_X')
 
     %% Step 2: Credit Seller 95%
-    WalletSvc->>DB: SELECT * FROM wallets WHERE user_id = sellerId FOR UPDATE
     WalletSvc->>DB: UPDATE wallets SET balance = balance + 1900 WHERE user_id = sellerId
     WalletSvc->>DB: INSERT INTO wallet_transactions (wallet_id, type='SETTLEMENT_CREDIT', amount=1900, idempotency_key='lot_credit_X')
 
-    %% Step 3: Credit Platform Treasury 5%
-    WalletSvc->>DB: SELECT * FROM wallets WHERE user_id = treasuryId FOR UPDATE
-    WalletSvc->>DB: UPDATE wallets SET balance = balance + 100 WHERE user_id = treasuryId
+    %% Step 3: Credit Platform 5% (primary admin's wallet, or the treasury if there is no admin)
+    WalletSvc->>DB: UPDATE wallets SET balance = balance + 100 WHERE user_id = platformId
     WalletSvc->>DB: INSERT INTO wallet_transactions (wallet_id, type='COMMISSION', amount=100, idempotency_key='lot_platform_fee_X')
 
-    %% Step 4: Mark Lot Settled & Decrement Debt
+    %% Step 4: Mark Lot Settled (the fee was taken here, so the seller owes nothing for this lot)
     WalletSvc->>DB: UPDATE auctions SET is_settled = true, settled_at = NOW(), commission_calculated = true, commission_amount = 100 WHERE id = $1
-    WalletSvc->>DB: UPDATE users SET unpaid_commission = GREATEST(0.00, unpaid_commission - 100) WHERE id = sellerId
     WalletSvc->>DB: COMMIT TRANSACTION
     Note over DB: Conservation of Balance preserved:<br/>Debit($2000) = Credit($1900) + Commission($100).<br/>Zero money created or lost!
 

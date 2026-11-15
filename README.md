@@ -227,12 +227,12 @@ auctionloom/
 │
 ├── backend/                         # Express 5 REST API & WebSocket Server
 │   ├── src/
-│   │   ├── controllers/             # HTTP Route Handlers
-│   │   │   ├── adminController.js   # Platform metrics, user roles, moderation, purge/reset
+│   │   ├── controllers/             # HTTP layer only: check the request, call a service, send the response (no SQL)
+│   │   │   ├── adminController.js   # Admin routes: metrics, ledgers (JSON/CSV), users, moderation, purge, benchmark
 │   │   │   ├── aiController.js      # Google Gemini copy & appraisal handler
 │   │   │   ├── auctionController.js # Auction CRUD, filtering, sorting, and republishing
-│   │   │   ├── authController.js    # Registration, login, JWT issuance, profile updates
-│   │   │   ├── bidController.js     # Concurrency-safe bidding & price updates
+│   │   │   ├── authController.js    # Registration, login, profile updates
+│   │   │   ├── bidController.js     # Bid input checks (the locked transaction is in bidService)
 │   │   │   ├── commissionController.js # Proof submission & seller debt tracking
 │   │   │   ├── userController.js    # User stats, listings, bids, payout profiles
 │   │   │   └── walletController.js  # Top-ups, lot settlements, withdrawals, balance feeds
@@ -255,14 +255,22 @@ auctionloom/
 │   │   │   ├── uploadRoutes.js      # /api/upload multipart image endpoint
 │   │   │   ├── userRoutes.js        # /api/users profile, stats & payout methods
 │   │   │   └── walletRoutes.js      # /api/wallet double-entry ledger endpoints
-│   │   ├── services/                # Encapsulated Business & External Services
+│   │   ├── services/                # Business rules, transactions & SQL (never touch req/res)
 │   │   │   ├── aiService.js         # Gemini 3.6 Flash & fallback heuristic copywriter
-│   │   │   ├── auctionClosureService.js # Atomic lot closure & escrow settlement
+│   │   │   ├── auctionClosureService.js # Atomic lot closure, auto-settlement & the winner's settle-lot
+│   │   │   ├── auctionService.js    # List/read/create/delete/republish auctions, admin moderation
+│   │   │   ├── authService.js       # Password hashing, login checks, JWT issuance
+│   │   │   ├── bidService.js        # Bid transaction with SELECT FOR UPDATE + PRICE_UPDATE event
+│   │   │   ├── commissionService.js # Seller commission debt: pay from wallet, receipts, admin review
 │   │   │   ├── emailService.js      # Nodemailer dual-delivery engine (Ethereal + SMTP)
+│   │   │   ├── reportService.js     # Admin metrics, revenue chart, commission ledger & report
 │   │   │   ├── socketService.js     # Socket.IO room manager & event broadcaster
+│   │   │   ├── systemService.js     # Purge-and-reseed and the live bid-locking benchmark
 │   │   │   ├── topupService.js      # Wallet funding & payment request abstraction
-│   │   │   └── walletService.js     # ACID double-entry ledger & zero-overdraft engine
+│   │   │   ├── userService.js       # Dashboards, leaderboard, payout details, admin user management
+│   │   │   └── walletService.js     # ACID double-entry ledger, wallet page & transaction history
 │   │   ├── utils/                   # Shared Helper Utilities
+│   │   │   ├── AppError.js          # Expected failures (404, 403, ...) a service reports to the HTTP layer
 │   │   │   └── validators.js        # UUID, email, and numeric format validators
 │   │   ├── workers/                 # Asynchronous Distributed Processors
 │   │   │   ├── jobWorker.js         # SELECT FOR UPDATE SKIP LOCKED job executor

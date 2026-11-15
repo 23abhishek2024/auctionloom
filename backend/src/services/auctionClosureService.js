@@ -2,10 +2,13 @@ const pool = require('../db');
 const auctionModel = require('../models/auctionModel');
 const bidModel = require('../models/bidModel');
 const emailService = require('./emailService');
+const walletService = require('./walletService');
+const { AppError } = require('../utils/AppError');
 
 /**
  * Auction Closure Service
- * Provides atomic, just-in-time and worker-driven auction lot closure.
+ * Everything that happens when an auction ends: atomic, just-in-time and worker-driven
+ * lot closure (winner, 5% fee, auto-settlement, emails), and the winner paying for the lot later.
  */
 async function closeAuction(auctionId) {
   const client = await pool.connect();
@@ -55,7 +58,6 @@ async function closeAuction(auctionId) {
     // 2b. Attempt immediate auto-settlement if winner has sufficient wallet balance
     if (winnerId && highestBid) {
       try {
-        const walletService = require('./walletService');
         const winnerWallet = await walletService.getOrCreateWallet(winnerId);
         if (parseFloat(winnerWallet.balance) >= parseFloat(highestBid.amount)) {
           console.log(`[AuctionClosure] ⚡ Auto-settling lot ${auctionId} from winner's wallet ($${winnerWallet.balance} >= $${highestBid.amount})...`);
@@ -136,6 +138,58 @@ async function closeAuction(auctionId) {
 }
 
 /**
+ * The winner pays for a lot they won: the hammer price moves from their wallet to the seller (95%)
+ * and the platform (5%) in one transaction (settleLotEscrow).
+ * An auction whose time is up but that is still ACTIVE is closed first.
+ * Returns { alreadySettled: true, winnerWallet } if it was paid before,
+ * otherwise { alreadySettled: false, hammerPrice, settlement }.
+ */
+async function settleWonLot(userId, auctionId) {
+  // 1. Fetch auction and verify lot status
+  let auctionRes = await pool.query('SELECT * FROM auctions WHERE id = $1', [auctionId]);
+  if (auctionRes.rows.length === 0) {
+    throw new AppError(404, 'Auction lot not found');
+  }
+
+  let auction = auctionRes.rows[0];
+
+  // If auction end time has passed but status is still ACTIVE, auto-close it atomically
+  const isTimeEnded = new Date(auction.end_time) <= new Date();
+  if (auction.status === 'ACTIVE' && isTimeEnded) {
+    await closeAuction(auctionId);
+    auctionRes = await pool.query('SELECT * FROM auctions WHERE id = $1', [auctionId]);
+    auction = auctionRes.rows[0];
+  }
+
+  if (auction.status !== 'CLOSED') {
+    throw new AppError(400, 'This auction lot has not concluded yet. Bidding is still active.');
+  }
+
+  if (!auction.winner_id) {
+    throw new AppError(400, 'This auction concluded with no winning bids placed.');
+  }
+
+  if (auction.winner_id !== userId) {
+    throw new AppError(403, 'Only the winning bidder can settle this auction lot.');
+  }
+
+  if (auction.is_settled) {
+    const winnerWallet = await walletService.getOrCreateWallet(userId);
+    return { alreadySettled: true, winnerWallet };
+  }
+
+  // 2. Execute atomic settlement
+  const settlement = await walletService.settleLotEscrow({
+    auctionId,
+    winnerId: userId,
+    sellerId: auction.seller_id,
+    hammerPrice: auction.current_price,
+  });
+
+  return { alreadySettled: false, hammerPrice: auction.current_price, settlement };
+}
+
+/**
  * Check and close any auctions whose end_time has passed but are still ACTIVE
  */
 async function closeExpiredAuctions() {
@@ -162,4 +216,5 @@ async function closeExpiredAuctions() {
 module.exports = {
   closeAuction,
   closeExpiredAuctions,
+  settleWonLot,
 };
