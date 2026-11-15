@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const pool = require('../db');
 const walletService = require('./walletService');
 
@@ -65,31 +66,63 @@ async function requestWithdrawal(userId, amount, metadata = {}) {
     throw new Error('Withdrawal amount must be a positive number');
   }
 
-  const wallet = await walletService.getOrCreateWallet(userId);
-  const idempotencyKey = `withdrawal_${Date.now()}_${userId.slice(0, 8)}`;
+  // One key per withdrawal. If the browser sends an Idempotency-Key header, a retry of the same
+  // click reuses it and is not paid out twice; otherwise every request gets a fresh random key.
+  // (The old key was built from Date.now(), so two withdrawals in the same millisecond shared a key
+  //  and the second one was reported as successful without debiting the wallet.)
+  const idempotencyKey = metadata.idempotencyKey
+    ? `withdrawal_${userId}_${metadata.idempotencyKey}`
+    : `withdrawal_${userId}_${crypto.randomUUID()}`;
 
-  // 1. Debit wallet first (ensures sufficient balance and locks funds)
-  const debitResult = await walletService.debitWallet({
-    userId,
-    amount: numericAmount,
-    type: 'WITHDRAWAL',
-    referenceType: 'PAYOUT_REQUEST',
-    idempotencyKey,
-    metadata: { note: metadata.note || 'Platform payout withdrawal' },
-  });
+  // The debit and the payout record are written in one transaction: both happen or neither does.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  const reqRes = await pool.query(
-    `INSERT INTO payment_requests (wallet_id, amount, currency, type, provider, status, metadata)
-     VALUES ($1, $2, 'USD', 'PAYOUT', 'INTERNAL', 'COMPLETED', $3)
-     RETURNING *`,
-    [wallet.id, numericAmount, JSON.stringify(metadata || {})]
-  );
+    const wallet = await walletService.getOrCreateWallet(userId, client);
 
-  return {
-    paymentRequest: reqRes.rows[0],
-    wallet: debitResult.wallet,
-    transaction: debitResult.transaction,
-  };
+    // 1. Debit wallet first (locks the wallet row and checks the balance)
+    const debitResult = await walletService.debitWallet({
+      userId,
+      amount: numericAmount,
+      type: 'WITHDRAWAL',
+      referenceType: 'PAYOUT_REQUEST',
+      idempotencyKey,
+      metadata: { note: metadata.note || 'Platform payout withdrawal' },
+      client,
+    });
+
+    // A retry of a withdrawal that already went through: don't record a second payout
+    if (debitResult.alreadyProcessed) {
+      await client.query('COMMIT');
+      return {
+        alreadyProcessed: true,
+        wallet: debitResult.wallet,
+        transaction: debitResult.transaction,
+      };
+    }
+
+    // 2. Record the payout
+    const reqRes = await client.query(
+      `INSERT INTO payment_requests (wallet_id, amount, currency, type, provider, status, metadata)
+       VALUES ($1, $2, 'USD', 'PAYOUT', 'INTERNAL', 'COMPLETED', $3)
+       RETURNING *`,
+      [wallet.id, numericAmount, JSON.stringify({ note: metadata.note || null })]
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      paymentRequest: reqRes.rows[0],
+      wallet: debitResult.wallet,
+      transaction: debitResult.transaction,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function createPaymentRequest({ userId, amount, provider = 'INTERNAL', type = 'TOPUP', metadata = {} }) {

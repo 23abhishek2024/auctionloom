@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const pool = require('../db');
 const walletService = require('../services/walletService');
 const topupService = require('../services/topupService');
@@ -6,20 +7,10 @@ const auctionClosureService = require('../services/auctionClosureService');
 // GET /api/wallet/transactions?page=1&limit=20&type=
 const getTransactions = async (req, res) => {
   try {
+    // Read-only: a balance changes only through creditWallet/debitWallet, which also write the ledger.
+    // (An old "auto-sync" here reset the admin's balance to total commission earned whenever it was 0,
+    //  which recreated money the admin had already withdrawn.)
     const wallet = await walletService.getOrCreateWallet(req.user.id);
-
-    // Auto-sync for admin if their wallet balance is 0 but commission exists
-    if (req.user.role === 'admin' && parseFloat(wallet.balance) === 0) {
-      const commAgg = await pool.query(`
-        SELECT COALESCE(SUM(amount), 0)::numeric AS total_comm
-        FROM wallet_transactions WHERE wallet_id = $1 AND type = 'COMMISSION'
-      `, [wallet.id]);
-      const totalComm = parseFloat(commAgg.rows[0]?.total_comm || 0);
-      if (totalComm > 0) {
-        await pool.query('UPDATE wallets SET balance = $1, updated_at = NOW() WHERE id = $2', [totalComm, wallet.id]);
-        wallet.balance = totalComm;
-      }
-    }
 
     const page = Math.max(1, parseInt(req.query.page || '1'));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20')));
@@ -136,12 +127,7 @@ const getWallet = async (req, res) => {
       summary.treasuryBalance = totalCommission;
       summary.totalCommissionEarned = totalCommission;
       summary.totalCommissionTransitions = parseInt(commAgg.rows[0]?.count_comm || 0);
-
-      // Self-heal admin wallet balance if currently 0 but platform commission exists
-      if (parseFloat(summary.wallet.balance) === 0 && totalCommission > 0) {
-        await pool.query('UPDATE wallets SET balance = $1, updated_at = NOW() WHERE id = $2', [totalCommission, summary.wallet.id]);
-        summary.wallet.balance = totalCommission;
-      }
+      // No balance "self-heal" here: the wallet balance is only changed by ledger-backed credits and debits.
     }
     return res.status(200).json({
       success: true,
@@ -281,6 +267,13 @@ const settleCommission = async (req, res) => {
 
     await client.query('BEGIN');
 
+    // 0. Lock both wallets (seller and platform) in the same sorted order that lot settlement uses,
+    //    and before the user row, so this can't deadlock with a settlement touching the same wallets.
+    const treasuryId = walletService.PLATFORM_TREASURY_USER_ID;
+    const primaryAdminId = await walletService.getPrimaryAdminUserId(client);
+    const recipientUserId = primaryAdminId || treasuryId;
+    await walletService.lockWalletsInOrder(client, [req.user.id, recipientUserId]);
+
     // 1. Check user unpaid commission
     const userRes = await client.query(
       'SELECT unpaid_commission FROM users WHERE id = $1 FOR UPDATE',
@@ -294,7 +287,7 @@ const settleCommission = async (req, res) => {
     }
 
     const payAmount = Math.min(unpaid, numAmount);
-    const idempotencyKey = `commission_debit_${req.user.id}_${Date.now()}`;
+    const idempotencyKey = `commission_debit_${req.user.id}_${crypto.randomUUID()}`;
 
     // 2. Debit user wallet
     const debitResult = await walletService.debitWallet({
@@ -308,17 +301,13 @@ const settleCommission = async (req, res) => {
     });
 
     // 2b. Credit Platform Commission to Admin Wallet (single recipient, preventing double entries)
-    const treasuryId = walletService.PLATFORM_TREASURY_USER_ID;
-    const primaryAdminId = await walletService.getPrimaryAdminUserId(client);
-    const recipientUserId = primaryAdminId || treasuryId;
-
     if (recipientUserId) {
       await walletService.creditWallet({
         userId: recipientUserId,
         amount: payAmount,
         type: 'COMMISSION',
         referenceType: 'COMMISSION_REQUEST',
-        idempotencyKey: `comm_recv_${req.user.id}_${Date.now()}`,
+        idempotencyKey: `comm_recv_${req.user.id}_${crypto.randomUUID()}`,
         metadata: {
           note: `Platform commission payment received from seller`,
           sellerId: req.user.id,
@@ -401,7 +390,11 @@ const withdraw = async (req, res) => {
       return res.status(400).json({ error: 'Withdrawal amount must be greater than 0' });
     }
 
-    const result = await topupService.requestWithdrawal(req.user.id, numAmount, { note });
+    // Optional client-generated key (one per click), so a retried request is not paid out twice
+    const clientKey = req.get('Idempotency-Key');
+    const idempotencyKey = clientKey && /^[A-Za-z0-9_-]{8,100}$/.test(clientKey) ? clientKey : null;
+
+    const result = await topupService.requestWithdrawal(req.user.id, numAmount, { note, idempotencyKey });
 
     return res.status(200).json({
       success: true,

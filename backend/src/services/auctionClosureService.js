@@ -18,8 +18,12 @@ async function closeAuction(auctionId) {
       return null;
     }
 
-    // If already closed, return existing state
-    if (auction.status === 'CLOSED') {
+    // Re-check under the lock: close only an ACTIVE auction whose end time has really passed.
+    // The caller looked at the auction before taking this lock, and in that gap it may have been
+    // closed by another path, frozen by an admin, or republished by its seller with a new end time.
+    // The database clock decides, so a wrong server clock can't close an auction early.
+    const due = await client.query('SELECT end_time <= NOW() AS ended FROM auctions WHERE id = $1', [auctionId]);
+    if (auction.status !== 'ACTIVE' || !due.rows[0].ended) {
       await client.query('ROLLBACK');
       return auction;
     }

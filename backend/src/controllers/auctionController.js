@@ -174,6 +174,19 @@ const republishAuction = async (req, res, next) => {
       return res.status(400).json({ error: 'Auction is currently active. Cannot republish an active auction.' });
     }
 
+    // An auction frozen by an admin stays frozen: only an admin may republish it.
+    if (auction.status === 'RESTRICTED' && req.user.role !== 'admin') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'This auction was frozen by an admin and cannot be republished.' });
+    }
+
+    // A lot the winner has already paid for is sold. Republishing it would sell the same item twice,
+    // and the second sale's settlement would reuse this lot's idempotency keys and charge the new winner $0.
+    if (auction.is_settled) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'This lot has been sold and paid for, so it cannot be republished. Create a new listing instead.' });
+    }
+
     const updatedAuction = await auctionModel.republish(
       client,
       id,

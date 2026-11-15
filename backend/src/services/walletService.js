@@ -66,6 +66,38 @@ async function getOrCreateWallet(userId, externalClient = null) {
 }
 
 /**
+ * Lock the wallets of several users in one fixed order (sorted user ids).
+ * Every transaction that changes more than one wallet calls this before moving money,
+ * so two transactions can never each hold one wallet while waiting for the other's (a deadlock).
+ * Must be called inside an open transaction on `client`.
+ */
+async function lockWalletsInOrder(client, userIds) {
+  const ids = [...new Set(userIds.filter(Boolean))].sort();
+  for (const id of ids) {
+    await getOrCreateWallet(id, client);
+    await client.query('SELECT id FROM wallets WHERE user_id = $1 FOR UPDATE', [id]);
+  }
+  return ids;
+}
+
+/**
+ * Run a whole transaction again if PostgreSQL aborts it as a deadlock victim (error 40P01).
+ * Safe because the aborted attempt was rolled back completely, and settlement is idempotent.
+ */
+async function withDeadlockRetry(fn, attempts = 3) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err.code !== '40P01' || attempt >= attempts) throw err;
+      const delayMs = 50 + Math.floor(Math.random() * 150);
+      console.warn(`[walletService] Deadlock detected; retrying in ${delayMs}ms (attempt ${attempt + 1} of ${attempts})`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+/**
  * Credit user wallet with strict row-locking & double-entry ledger entry.
  */
 async function creditWallet({
@@ -323,7 +355,11 @@ async function debitWallet({
  * - Credits seller the hammer price minus 5% platform commission
  * - Emits audit logs in one atomic transaction
  */
-async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, idempotencyPrefix = '' }) {
+async function settleLotEscrow(args) {
+  return withDeadlockRetry(() => settleLotEscrowOnce(args));
+}
+
+async function settleLotEscrowOnce({ auctionId, winnerId, sellerId, hammerPrice, idempotencyPrefix = '' }) {
   const numericPrice = parseFloat(hammerPrice);
   if (isNaN(numericPrice) || numericPrice <= 0) {
     throw new Error('Valid hammer price required for settlement');
@@ -364,6 +400,15 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
         sellerWallet,
       };
     }
+
+    // 1b. Lock all three wallets up front, in sorted order, before any money moves.
+    // Without this, a lot where X buys from Y and another where Y buys from X lock the same
+    // two wallets in opposite orders and can deadlock.
+    let platformUserId = null;
+    if (commission > 0) {
+      platformUserId = (await getPrimaryAdminUserId(client)) || PLATFORM_TREASURY_USER_ID;
+    }
+    await lockWalletsInOrder(client, [winnerId, sellerId, platformUserId]);
 
     // 2. Debit Winner
     const debitKey = `${idempotencyPrefix || 'lot'}_debit_${auctionId}`;
@@ -422,11 +467,9 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
     // 4. Credit Platform Commission to Admin Wallet (single immutable entry)
     let platformWallet = null;
     if (commission > 0) {
-      const primaryAdminId = await getPrimaryAdminUserId(client);
-      const recipientUserId = primaryAdminId || PLATFORM_TREASURY_USER_ID;
       const platformKey = `${idempotencyPrefix || 'lot'}_platform_fee_${auctionId}`;
       const platformCreditResult = await creditWallet({
-        userId: recipientUserId,
+        userId: platformUserId,
         amount: commission,
         type: 'COMMISSION',
         referenceType: 'AUCTION',
@@ -472,11 +515,11 @@ async function settleLotEscrow({ auctionId, winnerId, sellerId, hammerPrice, ide
     }
 
     // 8. Retrieve confirmed committed wallet states from database ground-truth
-    const [freshWinnerRes, freshSellerRes, freshPlatformRes] = await Promise.all([
-      pool.query('SELECT * FROM wallets WHERE user_id = $1', [winnerId]),
-      pool.query('SELECT * FROM wallets WHERE user_id = $1', [sellerId]),
-      pool.query('SELECT * FROM wallets WHERE user_id = $1', [PLATFORM_TREASURY_USER_ID]),
-    ]);
+    // Read them on the connection we already hold: borrowing three more from the pool here
+    // could starve the pool when many settlements run at once (each would hold one and wait for three).
+    const freshWinnerRes = await client.query('SELECT * FROM wallets WHERE user_id = $1', [winnerId]);
+    const freshSellerRes = await client.query('SELECT * FROM wallets WHERE user_id = $1', [sellerId]);
+    const freshPlatformRes = await client.query('SELECT * FROM wallets WHERE user_id = $1', [platformUserId || PLATFORM_TREASURY_USER_ID]);
 
     const finalWinnerWallet = freshWinnerRes.rows[0]
       ? { ...freshWinnerRes.rows[0], balance: parseFloat(freshWinnerRes.rows[0].balance) }
@@ -552,6 +595,7 @@ module.exports = {
   getPrimaryAdminUserId,
   InsufficientFundsError,
   getOrCreateWallet,
+  lockWalletsInOrder,
   creditWallet,
   debitWallet,
   settleLotEscrow,

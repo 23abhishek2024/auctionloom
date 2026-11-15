@@ -1,7 +1,5 @@
 const pool = require('../db');
-const auctionModel = require('../models/auctionModel');
-const bidModel = require('../models/bidModel');
-const emailService = require('../services/emailService');
+const auctionClosureService = require('../services/auctionClosureService');
 
 /**
  * Job Worker — Phase 6 (Distributed Background Workers)
@@ -11,7 +9,9 @@ const emailService = require('../services/emailService');
  * can run in parallel without processing the same job twice.
  */
 const processNextJob = async () => {
+  // ── 1. Claim one job ─────────────────────────────────────────────
   const client = await pool.connect();
+  let job = null;
 
   try {
     await client.query('BEGIN');
@@ -25,7 +25,7 @@ const processNextJob = async () => {
        LIMIT 1`
     );
 
-    const job = result.rows[0];
+    job = result.rows[0];
     if (!job) {
       await client.query('ROLLBACK');
       return; // No pending jobs right now
@@ -39,156 +39,43 @@ const processNextJob = async () => {
     );
 
     await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(`[Worker ${process.pid}] Could not claim a job:`, err.message);
+    return;
+  } finally {
+    // The claim is committed, so give the connection back before doing the work
+    client.release();
+  }
 
-    console.log(`[Worker ${process.pid}] Processing job: ${job.type} (${job.id})`);
+  // ── 2. Do the work ───────────────────────────────────────────────
+  console.log(`[Worker ${process.pid}] Processing job: ${job.type} (${job.id})`);
 
-    // ── Process the job ─────────────────────────────────────────
+  try {
     if (job.type === 'CLOSE_AUCTION') {
-      await handleCloseAuction(job.payload.auction_id);
+      // Same closing function as the 15-second sweep and the lazy close:
+      // it locks the row, re-checks status and end time, picks the winner,
+      // records the 5% fee, auto-settles if the wallet covers it, and sends emails.
+      await auctionClosureService.closeAuction(job.payload.auction_id);
     }
 
-    // Mark job as COMPLETED
     await pool.query(
       `UPDATE jobs SET status = 'COMPLETED', updated_at = NOW() WHERE id = $1`,
       [job.id]
     );
     console.log(`[Worker ${process.pid}] Job completed: ${job.id}`);
   } catch (err) {
-    await client.query('ROLLBACK');
-    // Mark job as FAILED so it can be retried or inspected
-    if (err.jobId) {
+    // Mark the job FAILED (using the job we claimed) so it can be inspected or retried,
+    // instead of leaving it IN_PROGRESS forever.
+    console.error(`[Worker ${process.pid}] Job ${job.id} failed:`, err.message);
+    try {
       await pool.query(
         `UPDATE jobs SET status = 'FAILED', updated_at = NOW() WHERE id = $1`,
-        [err.jobId]
+        [job.id]
       );
+    } catch (markErr) {
+      console.error(`[Worker ${process.pid}] Could not mark job ${job.id} as FAILED:`, markErr.message);
     }
-    console.error(`[Worker ${process.pid}] Job error:`, err.message);
-  } finally {
-    client.release();
-  }
-};
-
-/**
- * Handle the CLOSE_AUCTION job type:
- * 1. Find the highest bidder
- * 2. Mark the auction as CLOSED with the winner
- */
-const handleCloseAuction = async (auctionId) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const auction = await auctionModel.findByIdForUpdate(client, auctionId);
-    if (!auction || auction.status !== 'ACTIVE') {
-      await client.query('ROLLBACK');
-      return; // Already closed or doesn't exist
-    }
-
-    const highestBid = await bidModel.findHighestBid(client, auctionId);
-    const winnerId = highestBid ? highestBid.bidder_id : null;
-
-    // 1. Close auction and record winner
-    await auctionModel.close(client, auctionId, winnerId);
-
-    // 2. If auction concluded with a winner, calculate 5% platform commission (Piyush Garg / Sachin Reference)
-    if (winnerId && highestBid) {
-      const commission = parseFloat((highestBid.amount * 0.05).toFixed(2));
-      await client.query(
-        `UPDATE auctions 
-         SET commission_amount = $1, commission_calculated = TRUE 
-         WHERE id = $2`,
-        [commission, auctionId]
-      );
-
-      console.log(`[Worker] Recorded $${commission} (5% platform commission) on Lot ${auctionId} for escrow settlement`);
-    }
-
-    await client.query('COMMIT');
-
-    // 2b. Auto-settle if winner has sufficient wallet balance
-    if (winnerId && highestBid) {
-      try {
-        const walletService = require('../services/walletService');
-        const winnerWallet = await walletService.getOrCreateWallet(winnerId);
-        if (parseFloat(winnerWallet.balance) >= parseFloat(highestBid.amount)) {
-          console.log(`[Worker] ⚡ Auto-settling lot ${auctionId} from winner's wallet...`);
-          await walletService.settleLotEscrow({
-            auctionId,
-            winnerId,
-            sellerId: auction.seller_id,
-            hammerPrice: highestBid.amount,
-            idempotencyPrefix: 'worker_auto_settle',
-          });
-          console.log(`[Worker] ✅ Lot ${auctionId} auto-settled successfully!`);
-        }
-      } catch (settleErr) {
-        console.warn(`[Worker] Auto-settle deferred for lot ${auctionId}:`, settleErr.message);
-      }
-    }
-
-    console.log(
-      `[Worker] Auction ${auctionId} closed. Winner: ${winnerId || 'No bids placed'}`
-    );
-
-    // 3. Dispatch Winner & Seller Transactional Notifications via EmailService
-    if (winnerId && highestBid) {
-      try {
-        const winnerRes = await pool.query('SELECT id, name, email FROM users WHERE id = $1', [winnerId]);
-        const sellerRes = await pool.query('SELECT id, name, email, payout_methods FROM users WHERE id = $1', [auction.seller_id]);
-        const winner = winnerRes.rows[0];
-        const seller = sellerRes.rows[0];
-
-        if (winner && seller) {
-          const emailResult = await emailService.sendAuctionWonNotification({
-            winnerEmail: winner.email,
-            winnerName: winner.name || winner.email.split('@')[0],
-            auction: {
-              id: auctionId,
-              title: auction.title,
-              current_price: highestBid.amount,
-            },
-            seller: {
-              name: seller.name || seller.email.split('@')[0],
-              email: seller.email,
-              payout_methods: seller.payout_methods || {},
-            },
-            hammerPrice: highestBid.amount,
-          });
-
-          if (emailResult && emailResult.previewUrl) {
-            await pool.query(
-              'UPDATE auctions SET winner_email_preview_url = $1 WHERE id = $2',
-              [emailResult.previewUrl, auctionId]
-            );
-            console.log(`[Worker] ✉️ Stored Ethereal email preview URL for auction ${auctionId}`);
-          }
-
-          // Also notify seller
-          await emailService.sendAuctionSoldNotification({
-            sellerEmail: seller.email,
-            sellerName: seller.name || seller.email.split('@')[0],
-            auction: {
-              id: auctionId,
-              title: auction.title,
-              current_price: highestBid.amount,
-            },
-            winner: {
-              name: winner.name || winner.email.split('@')[0],
-              email: winner.email,
-            },
-            hammerPrice: highestBid.amount,
-          });
-        }
-      } catch (emailErr) {
-        console.error('[Worker] ⚠️ Transactional email notification failed non-critically:', emailErr.message);
-      }
-    }
-
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
   }
 };
 
