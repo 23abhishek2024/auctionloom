@@ -811,6 +811,16 @@ async function runVerification() {
   for (const id of fanLots) await endAuctionNow(id);
   const adminUsers = await request('GET', `/api/admin/users?search=fanout_${uniqueId}`, null, adminToken);
   const fanRow = adminUsers.data.users.find(u => u.id === multiId);
+  // 9. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
+  const bruteEmail = `brute_${uniqueId}@test.com`;
+  let lastBrute;
+  for (let i = 0; i < 11; i++) {
+    lastBrute = await request('POST', '/api/auth/login', { email: bruteEmail, password: `wrong-${i}` });
+  }
+  assert('Phase 11', 'Login limiter: 11th failed login for one account answered 429', lastBrute.status === 429);
+  const otherLogin = await request('POST', '/api/auth/login', { email: sellerEmail, password: 'Password@123' });
+  assert('Phase 11', 'Other accounts can still log in from the same IP', otherLogin.status === 200);
+
   assert('Phase 11', 'Admin users table shows real totals (2 listings, 2 bids, 2 wins, $230 bid volume)',
     fanRow && fanRow.listings_count === 2 && fanRow.total_bids === 2 && fanRow.auctions_won === 2 && fanRow.total_spent === 230,
     fanRow ? `listings ${fanRow.listings_count}, bids ${fanRow.total_bids}, wins ${fanRow.auctions_won}, volume ${fanRow.total_spent}` : 'user not listed');

@@ -40,6 +40,15 @@ const { initSocket } = require('./services/socketService');
 const app = express();
 const server = http.createServer(app);
 
+// Behind a load balancer every request arrives from the proxy's address and the client's own IP is
+// in X-Forwarded-For. "trust proxy" = how many proxy hops to trust when reading it, so req.ip (used by
+// the rate limiters) is the real client. Default: 1 in production (Render), 0 locally. If /health
+// shows a "clientIp" that isn't yours after deploying, set TRUST_PROXY to the right number of hops.
+const trustProxyHops = process.env.TRUST_PROXY !== undefined
+  ? parseInt(process.env.TRUST_PROXY, 10) || 0
+  : (process.env.NODE_ENV === 'production' ? 1 : 0);
+if (trustProxyHops > 0) app.set('trust proxy', trustProxyHops);
+
 // ── Init Socket.IO ────────────────────────────────────────────
 initSocket(server);
 
@@ -135,7 +144,8 @@ app.get('/', (req, res) => {
 
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', pid: process.pid, time: new Date().toISOString() });
+  // clientIp: the caller's own address as the server sees it (to check the trust proxy setting)
+  res.json({ status: 'ok', pid: process.pid, time: new Date().toISOString(), clientIp: req.ip });
 });
 
 // REST API Discovery Catalog
