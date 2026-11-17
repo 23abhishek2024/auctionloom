@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS bids (
 
 -- Index for fast retrieval of bids per auction
 CREATE INDEX IF NOT EXISTS idx_bids_auction_id ON bids(auction_id);
+-- Index for one user's bids (their stats, "my bids", the leaderboard and the admin user totals)
+CREATE INDEX IF NOT EXISTS idx_bids_bidder_id ON bids(bidder_id);
 
 -- ============================================================
 -- 4. JOBS (Distributed Job Queue - PostgreSQL-backed)

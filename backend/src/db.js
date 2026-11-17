@@ -86,6 +86,9 @@ async function upgradeSchema() {
       -- Job queue: count how many times a job was claimed, so a job that keeps crashing workers ends FAILED
       ALTER TABLE IF EXISTS jobs ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0;
 
+      -- One user's bids (their stats, "my bids", the leaderboard, admin totals) were found by a full scan
+      CREATE INDEX IF NOT EXISTS idx_bids_bidder_id ON bids(bidder_id);
+
       -- Job queue: only OPEN jobs must be unique. The old UNIQUE (type, payload) also counted finished
       -- jobs, so a republished auction (or one whose close failed) could never be queued again.
       DO $$
