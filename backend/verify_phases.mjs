@@ -823,9 +823,11 @@ async function runVerification() {
   const totalInDb = (await pool.query('SELECT COUNT(*)::int AS c FROM auctions')).rows[0].c;
   const bigPage = await request('GET', '/api/auctions?limit=1000');
   const onePage = await request('GET', '/api/auctions?limit=1');
-  assert('Phase 11', 'Auctions list capped at 100 per page and reports the full total',
-    bigPage.data.count === Math.min(100, totalInDb) && bigPage.data.total === totalInDb && onePage.data.count === 1 && onePage.data.total === totalInDb,
-    `db ${totalInDb}, limit=1000 -> ${bigPage.data.count} (total ${bigPage.data.total}), limit=1 -> ${onePage.data.count}`);
+  const pastEnd = await request('GET', `/api/auctions?limit=10&offset=${totalInDb + 10}`);
+  assert('Phase 11', 'Auctions list capped at 100 per page and reports the full total (also on a page past the end)',
+    bigPage.data.count === Math.min(100, totalInDb) && bigPage.data.total === totalInDb && onePage.data.count === 1 && onePage.data.total === totalInDb &&
+    pastEnd.data.count === 0 && pastEnd.data.total === totalInDb,
+    `db ${totalInDb}, limit=1000 -> ${bigPage.data.count} (total ${bigPage.data.total}), limit=1 -> ${onePage.data.count}, past the end -> ${pastEnd.data.count} (total ${pastEnd.data.total})`);
 
   // 15. Change password: wrong current password is a 400 (not 401, which would log the browser out);
   //     after a change the old token stops working everywhere and the returned token works

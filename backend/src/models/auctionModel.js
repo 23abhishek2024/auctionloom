@@ -60,7 +60,16 @@ const auctionModel = {
     `;
 
     const result = await pool.query(query, params);
-    const total = result.rows.length ? result.rows[0].total_count : 0;
+    let total = result.rows.length ? result.rows[0].total_count : 0;
+    // A page past the end has no rows to carry the window count (it used to report total 0):
+    // count the matching auctions on their own, with the same filters and no LIMIT/OFFSET
+    if (!result.rows.length && pageOffset > 0) {
+      const countRes = await pool.query(
+        `SELECT COUNT(*)::int AS total FROM auctions a ${whereClause}`,
+        params.slice(0, params.length - 2)
+      );
+      total = countRes.rows[0].total;
+    }
     const rows = result.rows.map(({ total_count, ...auction }) => auction);
     return { rows, total, limit: pageSize, offset: pageOffset };
   },
