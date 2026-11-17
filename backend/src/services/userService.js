@@ -265,7 +265,12 @@ async function getSellerPayoutForAuction(auctionId, user) {
 
 /**
  * Admin: registered users (newest first, max 100) with their platform statistics,
- * optionally only those whose email or name matches `search`
+ * optionally only those whose email or name matches `search`.
+ *
+ * Each statistic is computed in its own subquery, one row per user. Joining users to their
+ * listings, bids and wins in one query multiplied the rows (listings x bids x wins), so SUM(bids)
+ * came out several times too big (a user with $230 of bids showed $920); COUNT(DISTINCT) hid it
+ * for the counts. Same bug and same fix as the leaderboard.
  */
 async function listUsers(search) {
   const pattern = search ? `%${search.trim()}%` : null;
@@ -277,14 +282,22 @@ async function listUsers(search) {
       u.role,
       u.unpaid_commission::numeric AS unpaid_commission,
       u.created_at,
-      COUNT(DISTINCT a.id)::int AS listings_count,
-      COUNT(DISTINCT b.id)::int AS total_bids,
-      COUNT(DISTINCT w.id)::int AS auctions_won,
-      COALESCE(SUM(b.amount), 0)::numeric AS total_spent
+      COALESCE(listings.listings_count, 0)::int AS listings_count,
+      COALESCE(bid_totals.total_bids, 0)::int AS total_bids,
+      COALESCE(wins.auctions_won, 0)::int AS auctions_won,
+      COALESCE(bid_totals.total_volume, 0)::numeric AS total_spent
     FROM users u
-    LEFT JOIN auctions a ON a.seller_id = u.id
-    LEFT JOIN bids b ON b.bidder_id = u.id
-    LEFT JOIN auctions w ON w.winner_id = u.id AND w.status = 'CLOSED'
+    LEFT JOIN (
+      SELECT seller_id, COUNT(*) AS listings_count FROM auctions GROUP BY seller_id
+    ) listings ON listings.seller_id = u.id
+    LEFT JOIN (
+      SELECT bidder_id, COUNT(*) AS total_bids, SUM(amount) AS total_volume FROM bids GROUP BY bidder_id
+    ) bid_totals ON bid_totals.bidder_id = u.id
+    LEFT JOIN (
+      SELECT winner_id, COUNT(*) AS auctions_won
+      FROM auctions WHERE status = 'CLOSED' AND winner_id IS NOT NULL
+      GROUP BY winner_id
+    ) wins ON wins.winner_id = u.id
   `;
   const params = [];
 
@@ -294,7 +307,6 @@ async function listUsers(search) {
   }
 
   query += `
-    GROUP BY u.id
     ORDER BY u.created_at DESC
     LIMIT 100
   `;

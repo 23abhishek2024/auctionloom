@@ -666,7 +666,7 @@ export const AdminDashboardPage = () => {
                   <th className="py-3 px-4 text-center">Listings</th>
                   <th className="py-3 px-4 text-center">Total Bids</th>
                   <th className="py-3 px-4 text-center">Wins</th>
-                  <th className="py-3 px-4 text-right">Spent Volume</th>
+                  <th className="py-3 px-4 text-right" title="Sum of every bid placed, including bids that were outbid">Bid Volume</th>
                   <th className="py-3 px-4 text-right">Unpaid Commission</th>
                   <th className="py-3 px-4 text-center">Modify Role</th>
                 </tr>

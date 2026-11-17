@@ -795,6 +795,26 @@ async function runVerification() {
   const benchTooBig = await request('POST', '/api/admin/system/run-benchmark', { requests: 100000 }, adminToken);
   assert('Phase 11', 'Admin benchmark size is capped (100000 requests -> 400)', benchTooBig.status === 400);
 
+  // 8. Admin users table: a user with 2 listings, 2 bids ($110 + $120) and 2 wins must show $230, not 2 x 2 x $230
+  const multiReg = await request('POST', '/api/auth/register', { email: `fanout_${uniqueId}@test.com`, password: 'Password@123', role: 'auctioneer', name: `Fanout ${uniqueId}` });
+  const multiToken = multiReg.data.token;
+  const multiId = multiReg.data.user.id;
+  for (const t of ['Fan-out listing A', 'Fan-out listing B']) {
+    await request('POST', '/api/auctions', { title: t, starting_price: 50, duration_minutes: 60 }, multiToken);
+  }
+  const fanLots = [];
+  for (const price of [110, 120]) {
+    const lot = await request('POST', '/api/auctions', { title: `Fan-out lot ${price}`, starting_price: 100, duration_minutes: 60 }, sellerToken);
+    await request('POST', `/api/auctions/${lot.data.auction.id}/bids`, { amount: price }, multiToken);
+    fanLots.push(lot.data.auction.id);
+  }
+  for (const id of fanLots) await endAuctionNow(id);
+  const adminUsers = await request('GET', `/api/admin/users?search=fanout_${uniqueId}`, null, adminToken);
+  const fanRow = adminUsers.data.users.find(u => u.id === multiId);
+  assert('Phase 11', 'Admin users table shows real totals (2 listings, 2 bids, 2 wins, $230 bid volume)',
+    fanRow && fanRow.listings_count === 2 && fanRow.total_bids === 2 && fanRow.auctions_won === 2 && fanRow.total_spent === 230,
+    fanRow ? `listings ${fanRow.listings_count}, bids ${fanRow.total_bids}, wins ${fanRow.auctions_won}, volume ${fanRow.total_spent}` : 'user not listed');
+
   console.log('\n===========================================================');
   console.log('   🎉 ALL PHASES (1 TO 11) PASSED  ');
   console.log('===========================================================');
