@@ -18,7 +18,9 @@ const submitProof = async (req, res, next) => {
     const amount = requireMoney(req.body.amount, 'Payment amount');
     const comment = optionalString(req.body.comment, 'Comment', 500);
 
-    // The receipt image is stored only after the other fields passed their checks
+    // The receipt image is stored only after the other fields passed their checks,
+    // and only if there is commission to pay
+    await commissionService.assertOwesCommission(req.user.id);
     const saved = await uploadService.saveImage(req.file, req.user.id);
     const proof = await commissionService.submitProof(req.user.id, {
       amount,

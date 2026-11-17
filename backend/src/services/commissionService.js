@@ -10,20 +10,26 @@ const { AppError } = require('../utils/AppError');
  */
 
 /**
- * Seller: record a payment receipt for review. Only allowed while the seller owes commission.
- * `proofUrl` is where the uploaded screenshot is served from.
+ * Throws 400 unless the seller currently owes commission (404 if there is no such user).
+ * Checked before a receipt image is stored, so a seller who owes nothing leaves no orphan upload.
  */
-async function submitProof(userId, { amount, comment, proofUrl }) {
-  // Verify user exists and check unpaid commission balance
+async function assertOwesCommission(userId) {
   const userRes = await pool.query('SELECT unpaid_commission FROM users WHERE id = $1', [userId]);
   if (userRes.rowCount === 0) {
     throw new AppError(404, 'User not found.');
   }
-
   const unpaidCommission = parseFloat(userRes.rows[0].unpaid_commission || 0);
   if (unpaidCommission <= 0) {
     throw new AppError(400, 'You do not currently have any unpaid platform commission.', { unpaidCommission: 0 });
   }
+}
+
+/**
+ * Seller: record a payment receipt for review. Only allowed while the seller owes commission.
+ * `proofUrl` is where the uploaded screenshot is served from.
+ */
+async function submitProof(userId, { amount, comment, proofUrl }) {
+  await assertOwesCommission(userId);
 
   const result = await pool.query(
     `INSERT INTO commission_proofs (user_id, amount, comment, proof_url, status)
@@ -199,8 +205,10 @@ async function listProofs(status) {
 }
 
 /**
- * Admin: approve or reject a receipt and adjust the seller's debt to match.
- * Approving lowers what they owe; rejecting a receipt that was approved earlier adds it back.
+ * Admin: approve or reject a receipt that is still PENDING. Approving lowers what the seller owes
+ * (never below zero). A decision is final: before, the API let an admin flip an APPROVED receipt to
+ * REJECTED, which added the amount back to the debt - even for the APPROVED records written by a
+ * wallet payment, whose money had really been taken. (The admin page only ever offered PENDING ones.)
  */
 async function reviewProof(proofId, status, adminNotes) {
   const client = await pool.connect();
@@ -213,30 +221,22 @@ async function reviewProof(proofId, status, adminNotes) {
     }
 
     const proof = proofRes.rows[0];
-    const previousStatus = proof.status;
+    if (proof.status !== 'PENDING') {
+      throw new AppError(409, `This receipt was already reviewed (${proof.status}); a decision can't be changed.`);
+    }
 
-    // Update proof status
     const updatedProofRes = await client.query(
       `UPDATE commission_proofs
-       SET status = $1, admin_notes = COALESCE($2, admin_notes), updated_at = NOW()
+       SET status = $1, admin_notes = COALESCE($2, admin_notes), reviewed_at = NOW(), updated_at = NOW()
        WHERE id = $3
        RETURNING *`,
       [status, adminNotes || null, proofId]
     );
 
-    // If approving now (and was not previously approved), decrement seller's unpaid commission
-    if (status === 'APPROVED' && previousStatus !== 'APPROVED') {
+    if (status === 'APPROVED') {
       await client.query(
         `UPDATE users
          SET unpaid_commission = GREATEST(0.00, unpaid_commission - $1)
-         WHERE id = $2`,
-        [proof.amount, proof.user_id]
-      );
-    } else if (status === 'REJECTED' && previousStatus === 'APPROVED') {
-      // Revert if previously approved but now rejected
-      await client.query(
-        `UPDATE users
-         SET unpaid_commission = unpaid_commission + $1
          WHERE id = $2`,
         [proof.amount, proof.user_id]
       );
@@ -253,6 +253,7 @@ async function reviewProof(proofId, status, adminNotes) {
 }
 
 module.exports = {
+  assertOwesCommission,
   submitProof,
   getMyProofs,
   payFromWallet,

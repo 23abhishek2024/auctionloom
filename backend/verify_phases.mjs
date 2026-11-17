@@ -49,14 +49,19 @@ function request(method, path, body = null, token = null) {
   });
 }
 
-function uploadMultipart(filePathOrBuffer, filename, token = null) {
+// POST one PNG as multipart/form-data (by default to /api/upload as "image"; extra text fields go first)
+function uploadMultipart(filePathOrBuffer, filename, token = null, { path = '/api/upload', field = 'image', fields = {} } = {}) {
   return new Promise((resolve, reject) => {
     const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
     const crlf = '\r\n';
 
+    const textParts = Object.entries(fields).map(([name, value]) =>
+      `--${boundary}${crlf}Content-Disposition: form-data; name="${name}"${crlf}${crlf}${value}${crlf}`
+    ).join('');
     const postDataStart = Buffer.from(
+      textParts +
       `--${boundary}${crlf}` +
-      `Content-Disposition: form-data; name="image"; filename="${filename}"${crlf}` +
+      `Content-Disposition: form-data; name="${field}"; filename="${filename}"${crlf}` +
       `Content-Type: image/png${crlf}${crlf}`
     );
     const postDataEnd = Buffer.from(`${crlf}--${boundary}--${crlf}`);
@@ -67,7 +72,7 @@ function uploadMultipart(filePathOrBuffer, filename, token = null) {
     const req = http.request({
       hostname: 'localhost',
       port: API_PORT,
-      path: '/api/upload',
+      path,
       method: 'POST',
       headers: {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
@@ -925,6 +930,30 @@ async function runVerification() {
   assert('Phase 11', 'Wallet history with non-numeric page/limit falls back to page 1, 20 per page (not a 500)',
     oddPaging.status === 200 && oddPaging.data.data.pagination.page === 1 && oddPaging.data.data.pagination.limit === 20,
     `${oddPaging.status} ${JSON.stringify(oddPaging.data?.data?.pagination || oddPaging.data)}`);
+
+  // 21. Commission receipts: no debt = 400 and no image stored; an admin decides a PENDING receipt once
+  //     (approving lowers the debt; a second decision, or flipping the APPROVED record a wallet payment
+  //     wrote, is refused - it used to add the amount back to the debt although the money was paid)
+  const proofSeller = await request('POST', '/api/auth/register', { email: `proof_${uniqueId}@test.com`, password: 'Password@123', role: 'auctioneer' });
+  const proofToken = proofSeller.data.token;
+  const proofSellerId = proofSeller.data.user.id;
+  const uploadsBefore = (await pool.query('SELECT COUNT(*)::int AS c FROM uploads WHERE user_id = $1', [proofSellerId])).rows[0].c;
+  const proofNoDebt = await uploadMultipart(dummyPngBuffer, 'receipt.png', proofToken, { path: '/api/commissions/proof', field: 'proof', fields: { amount: '10.00' } });
+  const uploadsAfterNoDebt = (await pool.query('SELECT COUNT(*)::int AS c FROM uploads WHERE user_id = $1', [proofSellerId])).rows[0].c;
+  await pool.query('UPDATE users SET unpaid_commission = 30.00 WHERE id = $1', [proofSellerId]);
+  const proofSent = await uploadMultipart(dummyPngBuffer, 'receipt.png', proofToken, { path: '/api/commissions/proof', field: 'proof', fields: { amount: '10.00', comment: 'NEFT ref 123' } });
+  const proofId = proofSent.data?.proof?.id;
+  const approveProof = await request('PUT', `/api/admin/commission-proofs/${proofId}/status`, { status: 'APPROVED' }, adminToken);
+  const flipProof = await request('PUT', `/api/admin/commission-proofs/${proofId}/status`, { status: 'REJECTED' }, adminToken);
+  const debtAfterProof = (await pool.query('SELECT unpaid_commission FROM users WHERE id = $1', [proofSellerId])).rows[0].unpaid_commission;
+  const walletProof = (await pool.query(`SELECT id FROM commission_proofs WHERE user_id = $1 AND payment_method = 'WALLET' LIMIT 1`, [payer.data.user.id])).rows[0];
+  const flipWalletProof = await request('PUT', `/api/admin/commission-proofs/${walletProof?.id}/status`, { status: 'REJECTED' }, adminToken);
+  const payerDebt = (await pool.query('SELECT unpaid_commission FROM users WHERE id = $1', [payer.data.user.id])).rows[0].unpaid_commission;
+  assert('Phase 11', 'Commission receipt: no debt = 400 (no image kept); approve once lowers the debt; later flips refused (409)',
+    proofNoDebt.status === 400 && uploadsAfterNoDebt === uploadsBefore && proofSent.status === 201 &&
+    approveProof.status === 200 && !!approveProof.data.proof.reviewed_at && flipProof.status === 409 && debtAfterProof === '20.00' &&
+    !!walletProof && flipWalletProof.status === 409 && payerDebt === '0.00',
+    `no debt ${proofNoDebt.status} (uploads ${uploadsBefore}->${uploadsAfterNoDebt}), sent ${proofSent.status}, approve ${approveProof.status}, flip ${flipProof.status}, debt ${debtAfterProof}, wallet-record flip ${flipWalletProof.status}, payer debt ${payerDebt}`);
 
   assert('Phase 11', 'Admin users table shows real totals (2 listings, 2 bids, 2 wins, $230 bid volume)',
     fanRow && fanRow.listings_count === 2 && fanRow.total_bids === 2 && fanRow.auctions_won === 2 && fanRow.total_spent === 230,
