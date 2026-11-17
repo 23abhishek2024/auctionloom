@@ -551,6 +551,15 @@ export const AuctionDetailPage = () => {
   // because 20.3 + 0.01 is 20.310000000000002 in floating point, and as the input's min that
   // made the browser refuse a bid of 20.31.
   const minNextBid = ((Math.round(parseFloat(auction?.current_price || 0) * 100) + 1) / 100).toFixed(2);
+  // What the seller was credited: the hammer price minus the 5% fee saved when the lot closed (or the
+  // server's formula, in whole cents rounded half up). price × 0.95 in floating point was a cent off
+  // for prices such as $2.50: it showed 2.38 while the wallet got 2.37.
+  const sellerNetAmount = (() => {
+    const priceCents = Math.round(parseFloat(auction?.current_price || 0) * 100);
+    const savedFeeCents = Math.round(parseFloat(auction?.commission_amount || 0) * 100);
+    const feeCents = savedFeeCents > 0 ? savedFeeCents : Math.round((priceCents * 5) / 100);
+    return ((priceCents - feeCents) / 100).toFixed(2);
+  })();
   const isSeller = user?.id === auction?.seller_id;
   const isAdmin = user?.role === 'admin';
   const highestBid = bids && bids.length > 0 ? bids[0] : null;
@@ -1246,7 +1255,7 @@ export const AuctionDetailPage = () => {
                 </div>
                 {auction.is_settled ? (
                   <p className="text-slate-600">
-                    This auction concluded with a winning bid of <strong>${parseFloat(auction.current_price).toFixed(2)}</strong> by <strong>{winnerName || 'Winner'}</strong> and was <strong>settled via platform escrow</strong>. Net proceeds of <strong>${(parseFloat(auction.current_price) * 0.95).toFixed(2)}</strong> (after 5% platform fee) have been credited directly to your platform wallet.
+                    This auction concluded with a winning bid of <strong>${parseFloat(auction.current_price).toFixed(2)}</strong> by <strong>{winnerName || 'Winner'}</strong> and was <strong>settled via platform escrow</strong>. Net proceeds of <strong>${sellerNetAmount}</strong> (after 5% platform fee) have been credited directly to your platform wallet.
                   </p>
                 ) : (
                   <p className="text-slate-600">
