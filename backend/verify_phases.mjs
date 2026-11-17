@@ -893,6 +893,31 @@ async function runVerification() {
     feeLotRows.data.data.pagination.total === 1 && feeLotRows.data.data.transactions[0].commission === 1.04,
     `collected +${grewBy('collected')}, listed +${grewBy('listed')}, rows +${afterPay.rows - beforePay.rows}, seller ${payerRows.data.data.transactions[0]?.sellerEmail}, lot fee rows ${feeLotRows.data.data.pagination.total} (${feeLotRows.data.data.transactions[0]?.commission})`);
 
+  // 20. CSV export: a title with quotes and a comma stays one field
+  const parseCsvLine = (line) => {
+    const fields = []; let cur = ''; let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (quoted) {
+        if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (c === '"') quoted = false; else cur += c;
+      } else if (c === '"') quoted = true; else if (c === ',') { fields.push(cur); cur = ''; } else cur += c;
+    }
+    fields.push(cur);
+    return fields;
+  };
+  const csvRes = await new Promise((resolve, reject) => {
+    http.get({ hostname: 'localhost', port: API_PORT, path: `/api/admin/commission-ledger?format=csv&search=${encodeURIComponent(`Lot ${uniqueId}`)}`, headers: { Authorization: `Bearer ${adminToken}` } }, (res) => {
+      let body = '';
+      res.on('data', (c) => body += c);
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    }).on('error', reject);
+  });
+  const [csvHeader, csvRow] = csvRes.body.split('\n');
+  const csvFields = csvRow ? parseCsvLine(csvRow) : [];
+  assert('Phase 11', 'CSV export keeps a title with quotes and a comma in one field',
+    csvRes.status === 200 && parseCsvLine(csvHeader).length === 8 && csvFields.length === 8 && csvFields[0] === `Fee "Rounding", Lot ${uniqueId}`,
+    `${csvFields.length} fields, first: ${csvFields[0]}`);
+
   // 19. Wallet history with a page or limit that isn't a number: page 1, 20 per page (it was a 500)
   const oddPaging = await request('GET', '/api/wallet/transactions?page=abc&limit=xyz', null, bidderToken);
   assert('Phase 11', 'Wallet history with non-numeric page/limit falls back to page 1, 20 per page (not a 500)',

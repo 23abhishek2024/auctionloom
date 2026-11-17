@@ -37,6 +37,16 @@ const readReportQuery = (query, maxLimit) => {
 
 // ── CSV exports (presentation only: the rows come from reportService) ──
 
+// One text field: quoted, with quotes doubled, so commas, quotes and line breaks in user-typed titles
+// and names stay inside the field. Text starting with = + - @ gets a leading ' so a spreadsheet shows
+// it instead of running it as a formula (CSV injection).
+const csvText = (value) => {
+  const text = String(value ?? '');
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${safe.replace(/"/g, '""')}"`;
+};
+const csvDate = (value) => csvText(value ? new Date(value).toISOString() : '');
+
 const sendCsv = (res, filename, lines) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -45,23 +55,26 @@ const sendCsv = (res, filename, lines) => {
 
 const sellerLedgerCsvLines = (rows) => [
   'Seller Name,Seller Email,Auctions,Total Volume ($),Total Commission ($),First Settlement,Last Settlement',
-  ...rows.map((r) =>
-    `"${r.sellerName}","${r.sellerEmail}",${r.auctionsCount},${r.totalVolume.toFixed(2)},${r.totalCommission.toFixed(2)},"${r.firstSettlement ? new Date(r.firstSettlement).toISOString() : ''}","${r.lastSettlement ? new Date(r.lastSettlement).toISOString() : ''}"`
-  ),
+  ...rows.map((r) => [
+    csvText(r.sellerName), csvText(r.sellerEmail), r.auctionsCount, r.totalVolume.toFixed(2), r.totalCommission.toFixed(2),
+    csvDate(r.firstSettlement), csvDate(r.lastSettlement),
+  ].join(',')),
 ];
 
 const auctionLedgerCsvLines = (rows) => [
   'Auction Title,Seller,Seller Email,Winner,Winner Email,Hammer Price ($),Commission 5% ($),Settled At',
-  ...rows.map((r) =>
-    `"${r.auctionTitle}","${r.sellerName}","${r.sellerEmail}","${r.winnerName}","${r.winnerEmail}",${r.hammerPrice.toFixed(2)},${r.commission.toFixed(2)},"${r.settledAt ? new Date(r.settledAt).toISOString() : ''}"`
-  ),
+  ...rows.map((r) => [
+    csvText(r.auctionTitle), csvText(r.sellerName), csvText(r.sellerEmail), csvText(r.winnerName), csvText(r.winnerEmail),
+    r.hammerPrice.toFixed(2), r.commission.toFixed(2), csvDate(r.settledAt),
+  ].join(',')),
 ];
 
 const commissionTransactionsCsvLines = (transactions) => [
   'Transaction ID,Date,Type,Auction Title,Seller Name,Seller Email,Winner Name,Winner Email,Gross Amount ($),Commission ($),Status',
-  ...transactions.map((r) =>
-    `"${r.id}","${new Date(r.date).toISOString()}","${r.type}","${r.auctionTitle.replace(/"/g, '""')}","${r.sellerName.replace(/"/g, '""')}","${r.sellerEmail || ''}","${r.winnerName || ''}","${r.winnerEmail || ''}",${r.grossAmount.toFixed(2)},${r.commission.toFixed(2)},"${r.status}"`
-  ),
+  ...transactions.map((r) => [
+    csvText(r.id), csvDate(r.date), csvText(r.type), csvText(r.auctionTitle), csvText(r.sellerName), csvText(r.sellerEmail),
+    csvText(r.winnerName), csvText(r.winnerEmail), r.grossAmount.toFixed(2), r.commission.toFixed(2), csvText(r.status),
+  ].join(',')),
 ];
 
 /**
