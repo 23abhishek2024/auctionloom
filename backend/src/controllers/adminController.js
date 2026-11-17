@@ -3,6 +3,7 @@ const userService = require('../services/userService');
 const commissionService = require('../services/commissionService');
 const reportService = require('../services/reportService');
 const systemService = require('../services/systemService');
+const walletService = require('../services/walletService');
 const {
   isUUID,
   requireUuid,
@@ -131,6 +132,14 @@ const updateUserRole = async (req, res, next) => {
 
     if (!['admin', 'auctioneer', 'bidder'].includes(role)) {
       return res.status(400).json({ error: "Invalid role. Must be 'admin', 'auctioneer', or 'bidder'." });
+    }
+    // Same rules as the admin page: no admin changes their own role (the last admin could lock
+    // everyone out), and the platform treasury is a system account that keeps its role
+    if (id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot change your own role. Ask another admin.' });
+    }
+    if (id === walletService.PLATFORM_TREASURY_USER_ID) {
+      return res.status(400).json({ error: 'The platform treasury is a system account; its role cannot change.' });
     }
 
     const user = await userService.changeRole(id, role);

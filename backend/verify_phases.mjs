@@ -959,6 +959,17 @@ async function runVerification() {
     fanRow && fanRow.listings_count === 2 && fanRow.total_bids === 2 && fanRow.auctions_won === 2 && fanRow.total_spent === 230,
     fanRow ? `listings ${fanRow.listings_count}, bids ${fanRow.total_bids}, wins ${fanRow.auctions_won}, volume ${fanRow.total_spent}` : 'user not listed');
 
+  // 23. Role guards: "become a seller" never demotes an admin; an admin can't change their own role
+  //     (the last admin could lock everyone out), and the platform treasury keeps its role
+  const adminUpgrade = await request('POST', '/api/users/me/upgrade-seller', {}, adminToken);
+  const adminRoleNow = (await pool.query(`SELECT role FROM users WHERE id = '11111111-1111-1111-1111-111111111111'`)).rows[0].role;
+  const selfDemote = await request('PUT', '/api/admin/users/11111111-1111-1111-1111-111111111111/role', { role: 'bidder' }, adminToken);
+  const treasuryRole = await request('PUT', '/api/admin/users/00000000-0000-0000-0000-000000000000/role', { role: 'bidder' }, adminToken);
+  const adminRoleAfter = (await pool.query(`SELECT role FROM users WHERE id = '11111111-1111-1111-1111-111111111111'`)).rows[0].role;
+  assert('Phase 11', 'Role guards: upgrade-seller keeps an admin an admin; self role change and treasury role change refused (400)',
+    adminUpgrade.status === 200 && adminRoleNow === 'admin' && selfDemote.status === 400 && treasuryRole.status === 400 && adminRoleAfter === 'admin',
+    `upgrade ${adminUpgrade.status} -> ${adminRoleNow}, self ${selfDemote.status}, treasury ${treasuryRole.status}, role after ${adminRoleAfter}`);
+
   // 22. Public auction pages check a token like protected routes do: after the seller changes the
   //     password, the old token no longer shows the seller's private field (the winner email preview link).
   //     Runs last: it retires sellerToken.

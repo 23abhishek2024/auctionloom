@@ -134,14 +134,13 @@ async function getWonAuctions(userId) {
 }
 
 /**
- * Give an existing user (e.g. a legacy 'bidder') full seller privileges.
- * Returns the updated user and a fresh token with the new role, so the browser doesn't keep using the old one.
+ * Give a bidder seller privileges ('bidder' -> 'auctioneer'). An auctioneer or an admin already can
+ * sell, so their role stays as it is (before, an admin who called this was demoted to auctioneer).
+ * Returns the user and a fresh token with the current role, so the browser doesn't keep using the old one.
  */
 async function upgradeToSeller(userId) {
-  const result = await pool.query(
-    "UPDATE users SET role = 'auctioneer' WHERE id = $1 RETURNING id, name, email, role, created_at",
-    [userId]
-  );
+  await pool.query("UPDATE users SET role = 'auctioneer' WHERE id = $1 AND role = 'bidder'", [userId]);
+  const result = await pool.query('SELECT id, name, email, role, created_at FROM users WHERE id = $1', [userId]);
 
   if (result.rowCount === 0) {
     throw new AppError(404, 'User not found.');
