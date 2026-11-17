@@ -75,11 +75,11 @@ export const DashboardPage = () => {
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 mb-4 leading-tight">
             High-Speed Live Bidding.{' '}
             <span className="bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent">
-              Zero Delays.
+              Live Prices.
             </span>
           </h1>
           <p className="text-slate-600 text-sm sm:text-base leading-relaxed mb-6">
-            Experience real-time interactive auctions with instantaneous live price broadcasts and verified authentic listings.
+            Experience real-time interactive auctions with live price broadcasts and a chat room for every lot.
             Discover luxury timepieces, collector vehicles, and rare fine art.
           </p>
 
@@ -126,8 +126,8 @@ export const DashboardPage = () => {
             <div className="text-xs text-slate-500">Active Now</div>
           </div>
           <div className="col-span-2 sm:col-span-1">
-            <div className="text-2xl font-extrabold text-indigo-600 font-mono">100%</div>
-            <div className="text-xs text-slate-500">ACID Guaranteed</div>
+            <div className="text-2xl font-extrabold text-indigo-600 font-mono">Locked</div>
+            <div className="text-xs text-slate-500">Every bid row-locked (ACID)</div>
           </div>
         </div>
       </div>

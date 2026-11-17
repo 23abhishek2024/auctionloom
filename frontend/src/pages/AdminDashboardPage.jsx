@@ -1015,7 +1015,7 @@ export const AdminDashboardPage = () => {
                   Group by Seller
                 </label>
               ) : (
-                <span className="text-xs text-slate-400 font-mono">Real-time immutable double-entry platform commission transitions</span>
+                <span className="text-xs text-slate-400 font-mono">Platform commission entries from the wallet ledger</span>
               )}
               <button onClick={handleCommExportCsv}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-medium hover:bg-emerald-100 transition-all cursor-pointer" id="comm-export-csv">

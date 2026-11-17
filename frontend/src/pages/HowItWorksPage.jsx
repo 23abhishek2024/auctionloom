@@ -17,15 +17,15 @@ export const HowItWorksPage = () => {
       icon: <Gavel className="w-6 h-6 text-indigo-600" />,
       title: 'Real-Time Competitive Bidding',
       description:
-        'Place live bids powered by persistent WebSockets and PostgreSQL row-level pessimistic locking. Race conditions are mathematically eliminated so you never lose a legitimate bid to latency.',
+        'Place live bids powered by persistent WebSockets and PostgreSQL row-level pessimistic locking. Each bid locks the auction row while it is checked and saved, so two bids can never both win against the same price.',
       badge: 'Step 2',
     },
     {
       number: '03',
       icon: <Timer className="w-6 h-6 text-indigo-600" />,
-      title: 'Anti-Snipe Fair Clock Extension',
+      title: 'The Clock Decides',
       description:
-        'If a bid is placed in the final moments, our distributed scheduler automatically grants overtime. This guarantees fair opportunity for all collectors without unfair bot sniping.',
+        'Every auction ends at its posted time. The last valid bid before that moment wins, and the auction is closed automatically (by the in-process sweep, the job queue, or as soon as someone opens it).',
       badge: 'Step 3',
     },
     {

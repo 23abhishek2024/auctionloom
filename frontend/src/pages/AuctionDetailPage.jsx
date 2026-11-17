@@ -880,7 +880,7 @@ export const AuctionDetailPage = () => {
               )}
             </div>
 
-            {/* ── 1-CLICK DOUBLE-ENTRY WALLET ESCROW SETTLEMENT CONSOLE ── */}
+            {/* ── 1-CLICK WALLET ESCROW SETTLEMENT CONSOLE ── */}
             {isWinnerMe && (
               <div className="rounded-3xl p-6 bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 text-white shadow-xl border border-indigo-700/50 relative overflow-hidden space-y-4">
                 <div className="flex items-center justify-between gap-3">
