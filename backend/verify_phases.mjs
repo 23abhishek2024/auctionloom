@@ -893,6 +893,12 @@ async function runVerification() {
     feeLotRows.data.data.pagination.total === 1 && feeLotRows.data.data.transactions[0].commission === 1.04,
     `collected +${grewBy('collected')}, listed +${grewBy('listed')}, rows +${afterPay.rows - beforePay.rows}, seller ${payerRows.data.data.transactions[0]?.sellerEmail}, lot fee rows ${feeLotRows.data.data.pagination.total} (${feeLotRows.data.data.transactions[0]?.commission})`);
 
+  // 19. Wallet history with a page or limit that isn't a number: page 1, 20 per page (it was a 500)
+  const oddPaging = await request('GET', '/api/wallet/transactions?page=abc&limit=xyz', null, bidderToken);
+  assert('Phase 11', 'Wallet history with non-numeric page/limit falls back to page 1, 20 per page (not a 500)',
+    oddPaging.status === 200 && oddPaging.data.data.pagination.page === 1 && oddPaging.data.data.pagination.limit === 20,
+    `${oddPaging.status} ${JSON.stringify(oddPaging.data?.data?.pagination || oddPaging.data)}`);
+
   assert('Phase 11', 'Admin users table shows real totals (2 listings, 2 bids, 2 wins, $230 bid volume)',
     fanRow && fanRow.listings_count === 2 && fanRow.total_bids === 2 && fanRow.auctions_won === 2 && fanRow.total_spent === 230,
     fanRow ? `listings ${fanRow.listings_count}, bids ${fanRow.total_bids}, wins ${fanRow.auctions_won}, volume ${fanRow.total_spent}` : 'user not listed');

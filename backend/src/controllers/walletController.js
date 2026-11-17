@@ -39,8 +39,9 @@ const handleWalletError = (err, res, next) => {
 // GET /api/wallet/transactions?page=1&limit=20&type=
 const getTransactions = async (req, res, next) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page || '1'));
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20')));
+    // Anything that isn't a positive number means the default (page=abc used to reach SQL as NaN: a 500)
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const offset = (page - 1) * limit;
     const typeParam = optionalQueryString(req.query.type, 'type', 30);
     const type = typeParam ? typeParam.toUpperCase() : null;
