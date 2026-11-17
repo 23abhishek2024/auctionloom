@@ -772,12 +772,26 @@ async function runVerification() {
   for (const id of fanLots) await endAuctionNow(id);
   const adminUsers = await request('GET', `/api/admin/users?search=fanout_${uniqueId}`, null, adminToken);
   const fanRow = adminUsers.data.users.find(u => u.id === multiId);
-  // 9. A lot that was paid for can't be deleted, not even by an admin (it is part of the money records)
+  // 9. Settlement re-checks the lot under its row lock: a stale winner or price moves no money
+  const lotForRecheck = (await pool.query('SELECT winner_id, seller_id FROM auctions WHERE id = $1', [centsAuctionId])).rows[0];
+  const settleScript = (args) => new Promise((resolve) => execFile(process.execPath, ['-e', `
+    const w = require('./src/services/walletService');
+    w.settleLotEscrow(${JSON.stringify(args)})
+      .then(() => console.log('SETTLED'), (e) => console.log('REFUSED ' + (e.statusCode || e.message)))
+      .finally(() => require('./src/db').end());
+  `], { env: process.env, timeout: 30000 }, (err, stdout) => resolve((stdout || '').trim().split('\n').pop())));
+  const wrongPrice = await settleScript({ auctionId: centsAuctionId, winnerId: lotForRecheck.winner_id, sellerId: lotForRecheck.seller_id, hammerPrice: 1 });
+  const wrongWinner = await settleScript({ auctionId: centsAuctionId, winnerId: bidderId, sellerId: lotForRecheck.seller_id, hammerPrice: 101.01 });
+  const debitsForLot = (await pool.query(`SELECT count(*)::int AS c FROM wallet_transactions WHERE reference_id = $1`, [centsAuctionId])).rows[0].c;
+  assert('Phase 11', 'Settlement with a stale price or winner is refused (409) and moves no money',
+    wrongPrice === 'REFUSED 409' && wrongWinner === 'REFUSED 409' && debitsForLot === 0, `${wrongPrice} / ${wrongWinner} / ledger rows ${debitsForLot}`);
+
+  // 10. A lot that was paid for can't be deleted, not even by an admin (it is part of the money records)
   const deletePaidLot = await request('DELETE', `/api/admin/auctions/${testAucId}`, null, adminToken);
   const paidLotStill = await pool.query('SELECT 1 FROM auctions WHERE id = $1', [testAucId]);
   assert('Phase 11', 'Admin delete of a paid lot refused (409) and the lot stays', deletePaidLot.status === 409 && paidLotStill.rowCount === 1);
 
-  // 10. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
+  // 11. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
   const bruteEmail = `brute_${uniqueId}@test.com`;
   let lastBrute;
   for (let i = 0; i < 11; i++) {

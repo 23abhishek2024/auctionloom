@@ -1,5 +1,6 @@
 const pool = require('../db');
 const { AppError } = require('../utils/AppError');
+const { toCents } = require('../utils/validators');
 
 /**
  * Production-Grade Wallet Service
@@ -371,7 +372,7 @@ async function settleLotEscrowOnce({ auctionId, winnerId, sellerId, hammerPrice,
   try {
     await client.query('BEGIN');
 
-    // 1. Verify auction exists and is CLOSED
+    // 1. Lock the auction row, then check (under the lock) that it is still the lot the caller saw
     const auctionRes = await client.query(
       'SELECT * FROM auctions WHERE id = $1 FOR UPDATE',
       [auctionId]
@@ -380,6 +381,20 @@ async function settleLotEscrowOnce({ auctionId, winnerId, sellerId, hammerPrice,
       throw new AppError(404, 'Auction not found');
     }
     const auction = auctionRes.rows[0];
+
+    if (!auction.is_settled) {
+      // The callers read the auction before this lock. In between it may have been reopened by an admin
+      // or changed in some other way; then no money must move for the old winner and price.
+      if (auction.status !== 'CLOSED') {
+        throw new AppError(409, 'This lot is not closed any more, so it cannot be settled.');
+      }
+      if (auction.winner_id !== winnerId || auction.seller_id !== sellerId) {
+        throw new AppError(409, 'The winner or seller of this lot has changed. Please reload the page.');
+      }
+      if (toCents(auction.current_price) !== toCents(numericPrice)) {
+        throw new AppError(409, 'The hammer price of this lot has changed. Please reload the page.');
+      }
+    }
 
     if (auction.is_settled) {
       const [winnerWallet, sellerWallet] = await Promise.all([
