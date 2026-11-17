@@ -1,9 +1,10 @@
-databases:
-  - name: auctionloom-db
-    databaseName: auctionloom
-    user: postgres
-    plan: free
-    region: oregon
+# Render Blueprint for the AuctionLoom backend, matching the live setup:
+#   - one free web service: Express + Socket.IO + the 15-second in-process closing sweep
+#   - the database is Supabase (set DATABASE_URL in the Render dashboard)
+#   - the React frontend is deployed on Vercel (vercel.json)
+#
+# Render's free plan has no background workers, so the job worker and the scheduler run only
+# in Docker Compose. On a paid plan they can run here too: see the commented services below.
 
 services:
   # ==========================================
@@ -11,7 +12,7 @@ services:
   # ==========================================
   - type: web
     name: auctionloom-backend
-    env: node
+    runtime: docker
     region: oregon
     plan: free
     dockerContext: ./backend
@@ -22,70 +23,44 @@ services:
         value: production
       - key: PORT
         value: 5000
-      - key: DATABASE_URL
-        fromDatabase:
-          name: auctionloom-db
-          property: connectionString
+      - key: DATABASE_URL # Supabase connection string, entered in the dashboard
+        sync: false
       - key: JWT_SECRET
         generateValue: true
-      - key: GEMINI_API_KEY
-        sync: false
       - key: FRONTEND_URL
-        value: https://auctionloom-frontend.onrender.com
+        value: https://auctionloom.vercel.app
+      - key: GEMINI_API_KEY # optional: without it the built-in copy generator is used
+        sync: false
+      - key: TRUST_PROXY # proxy hops in front of the app; check /health -> clientIp after deploying
+        value: 1
 
   # ==========================================
-  # AuctionLoom Background Worker (Job Queue)
+  # Paid plan only: background job worker and scheduler
   # ==========================================
-  - type: worker
-    name: auctionloom-worker
-    env: node
-    region: oregon
-    plan: free
-    dockerContext: ./backend
-    dockerfilePath: ./backend/Dockerfile
-    dockerCommand: npm run worker
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: auctionloom-db
-          property: connectionString
-
-  # ==========================================
-  # AuctionLoom Job Scheduler
-  # ==========================================
-  - type: worker
-    name: auctionloom-scheduler
-    env: node
-    region: oregon
-    plan: free
-    dockerContext: ./backend
-    dockerfilePath: ./backend/Dockerfile
-    dockerCommand: npm run scheduler
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: auctionloom-db
-          property: connectionString
-
-  # ==========================================
-  # AuctionLoom React SPA Static Site
-  # ==========================================
-  - type: web
-    name: auctionloom-frontend
-    env: static
-    region: oregon
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: ./frontend/dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: VITE_API_URL
-        value: https://auctionloom-backend.onrender.com/api
-      - key: VITE_SOCKET_URL
-        value: https://auctionloom-backend.onrender.com
+  # - type: worker
+  #   name: auctionloom-worker
+  #   runtime: docker
+  #   region: oregon
+  #   plan: starter
+  #   dockerContext: ./backend
+  #   dockerfilePath: ./backend/Dockerfile
+  #   dockerCommand: npm run worker
+  #   envVars:
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: DATABASE_URL
+  #       sync: false
+  #
+  # - type: worker
+  #   name: auctionloom-scheduler
+  #   runtime: docker
+  #   region: oregon
+  #   plan: starter
+  #   dockerContext: ./backend
+  #   dockerfilePath: ./backend/Dockerfile
+  #   dockerCommand: npm run scheduler
+  #   envVars:
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: DATABASE_URL
+  #       sync: false

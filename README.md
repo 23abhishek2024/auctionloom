@@ -9,34 +9,34 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![Docker](https://img.shields.io/badge/Docker-Multi--Container-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Google Gemini](https://img.shields.io/badge/Gemini_AI-3.6_Flash-8E75B2?logo=google&logoColor=white)](https://deepmind.google/technologies/gemini/)
-[![Financial Ledger](https://img.shields.io/badge/Ledger-Double--Entry%20ACID-10B981)](https://github.com/23abhishek2024/auctionloom)
-[![Automated Tests](https://img.shields.io/badge/Tests-103%2F103_Passing-brightgreen)](https://github.com/23abhishek2024/auctionloom)
+[![Wallet Ledger](https://img.shields.io/badge/Ledger-Append--only%20ACID-10B981)](https://github.com/23abhishek2024/auctionloom)
+[![Automated Tests](https://img.shields.io/badge/Tests-104_checks_%2B_6_stress_scenarios-brightgreen)](https://github.com/23abhishek2024/auctionloom/actions)
 [![Live Demo](https://img.shields.io/badge/Live_Demo-auctionloom.vercel.app-00C7B7?logo=vercel&logoColor=white)](https://auctionloom.vercel.app/)
 
 > 🌐 **Production Web Application**: [https://auctionloom.vercel.app/](https://auctionloom.vercel.app/)  
 > ⚡ **Live Production API Gateway**: [https://primebid-backend-e971.onrender.com/api](https://primebid-backend-e971.onrender.com/api) *(Render Cloud Host)*  
 > 🩺 **Service Health Endpoint**: [https://primebid-backend-e971.onrender.com/health](https://primebid-backend-e971.onrender.com/health)  
-> 🗄️ **Primary Relational Store**: Managed PostgreSQL 15 on Supabase (Mumbai Cluster)  
+> 🗄️ **Primary Relational Store**: Managed PostgreSQL on Supabase (Mumbai region)  
 > 📐 **Systems Architecture & HLD/LLD Specification**: [bidding_system_hld.md](bidding_system_hld.md)  
 
 ---
 
 ## 1. Executive Overview
 
-**AuctionLoom** is an enterprise-grade, distributed real-time auction engine architected to handle high-frequency concurrent bidding, prevent race conditions, and guarantee transactional consistency across digital assets and physical lots.
+**AuctionLoom** is a real-time auction platform built to stay correct when many people bid, pay and withdraw at the same moment: bids on one lot are serialized with row locks, money moves in locked transactions with an append-only ledger, and ended auctions are closed by a PostgreSQL job queue.
 
 ### The Problem It Solves
 In traditional auction applications, rapid-fire bids submitted in the same millisecond frequently result in:
 1. **Race Conditions & Dirty Writes**: Concurrent database writes overwrite higher bids or allow multiple users to believe they placed the highest bid at the same price.
-2. **Negative Balance & Double Spending**: Buyers can participate in multiple concurrent auctions with money they do not have, resulting in ledger anomalies upon final settlement.
+2. **Negative Balance & Double Spending**: Concurrent payments or withdrawals from one wallet can overdraw it or charge a buyer twice for the same lot.
 3. **Ghost Settlements**: Lots closing at scheduled deadlines without synchronized background workers result in orphaned records, delayed payments, and uncollected platform fees.
 
 ### The Solution Architecture
 AuctionLoom resolves these challenges through a strict, zero-trust engineering approach:
 * **Pessimistic Row-Level Locking (`SELECT FOR UPDATE`)**: Synchronizes concurrent bid submissions directly inside atomic PostgreSQL transactions, serializing simultaneous bids on the same auction row.
-* **Double-Entry Financial Ledger**: Built directly into the database schema with an unbreakable zero-overdraft invariant (`CHECK balance >= 0`) and strict idempotency key deduplication.
-* **Distributed Outbox Job Queue (`FOR UPDATE SKIP LOCKED`)**: Decoupled asynchronous workers process lot conclusions, calculate 5% platform fees, and trigger automated escrow settlements without blocking the primary HTTP event loop.
-* **Sub-Millisecond Bi-Directional WebSockets**: Broadcasts instant price updates, live auction room chat, and interactive audience reactions to connected clients via isolated Socket.IO rooms.
+* **Append-Only Wallet Ledger**: Every balance change writes a ledger row with `balance_after`; a settlement writes the buyer's debit, the seller's 95% credit and the platform's 5% fee in one transaction. `CHECK (balance >= 0)`, row locks and idempotency keys stop overdrafts and double charges. (Top-ups are simulated, so there is no external "bank" account on the other side; settlements balance exactly.)
+* **PostgreSQL Job Queue (`FOR UPDATE SKIP LOCKED`)**: A scheduler queues a close job for every ended auction and workers close them (winner, 5% fee, auto-settlement, emails) without ever taking the same job twice.
+* **Real-Time WebSockets**: Price updates, live auction room chat (logged-in users, identity set by the server) and audience reactions, scoped to Socket.IO rooms per auction.
 * **AI-Powered Appraisal Engine**: Integrates Google Gemini 3.6 Flash to appraise items, construct provenance narratives, and recommend starting reserve prices based on seller keywords.
 
 ---
@@ -45,29 +45,29 @@ AuctionLoom resolves these challenges through a strict, zero-trust engineering a
 
 ### ⚡ Real-Time High-Concurrency Bidding Engine
 * **Atomic Bid Transactions**: Every bid runs inside an ACID database transaction acquiring a row lock via `SELECT * FROM auctions WHERE id = $1 FOR UPDATE`.
-* **Sub-Millisecond Price Broadcasts**: Committed bids emit a `PRICE_UPDATE` payload directly to the auction's isolated WebSocket room, synchronizing all active bidders instantly.
-* **Anti-Snipe & Integrity Validations**: Prevents sellers from bidding on their own lots, blocks bids below current highest offers, and rejects submissions on expired or administratively frozen listings.
+* **Instant Price Broadcasts**: Committed bids emit a `PRICE_UPDATE` payload to the auction's WebSocket room (only after COMMIT, so nobody sees a bid that was rolled back).
+* **Integrity Validations**: Sellers can't bid on their own lots, admins can't bid, amounts must be whole cents and strictly higher than the current price, and expired or frozen lots refuse bids. (There is no anti-sniping time extension.)
 
-### 💰 Double-Entry Financial Wallet & Escrow Ledger
-* **Double-Entry Invariants**: All balance modifications strictly originate from `walletService.js` and record immutable transaction entries (`TOPUP`, `SETTLEMENT_DEBIT`, `SETTLEMENT_CREDIT`, `COMMISSION`, `WITHDRAWAL`).
+### 💰 Wallet & Escrow Ledger
+* **Ledger Entries**: All balance changes go through `walletService.js` (or the services that call it) and append a ledger entry (`TOPUP`, `SETTLEMENT_DEBIT`, `SETTLEMENT_CREDIT`, `COMMISSION`, `WITHDRAWAL`) with the balance after it.
 * **Zero Overdraft Protection**: Database-level constraint `CHECK (balance >= 0)` guarantees negative balances are structurally impossible at the engine layer.
 * **Idempotency Deduplication**: Unique constraint `idempotency_key UNIQUE` ensures retried network requests or client double-clicks cannot duplicate wallet deductions or top-ups.
 * **1-Click Atomic Escrow Settlement**: When an auction concludes, the winning bidder can execute an atomic settlement. The winner's wallet is debited, the seller's wallet is credited (95% net payout), and the platform treasury/admin is credited (5% commission) in a single database transaction.
 
-### 🔄 Distributed Background Workers & Outbox Queue
-* **PostgreSQL-Backed Job Queue**: Independent background processes poll the `jobs` table using `SELECT * FROM jobs WHERE status = 'PENDING' FOR UPDATE SKIP LOCKED LIMIT 1`.
-* **Zero Worker Collisions**: Multiple worker instances can run across containers without ever acquiring or executing the same job twice.
-* **Scheduled Expiration Sweep**: An autonomous scheduler scans for expired active auctions every 30 seconds and queues idempotent `CLOSE_AUCTION` jobs.
-* **In-Process Fallback Sweep**: Built-in 15-second interval sweep in the API process ensures single-instance local setups close auctions seamlessly without dedicated worker containers.
+### 🔄 Background Workers & Job Queue
+* **PostgreSQL-Backed Job Queue**: Worker processes drain the `jobs` table oldest-first with `SELECT ... WHERE status = 'PENDING' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`.
+* **No Worker Collisions**: Several workers can run at once without ever taking the same job.
+* **Scheduler**: Every 30 seconds it queues one `CLOSE_AUCTION` job per ended auction; a partial unique index allows only one *open* job per auction, so finished jobs don't block a republished auction, and a stuck job is handed back (or failed after 3 claims).
+* **In-Process Sweep**: The API process also closes ended auctions every 15 seconds (and an auction opened after its end time is closed on the spot). This is what closes auctions on the live demo: Render's free plan can't run separate worker processes. All paths call the same `closeAuction`, which locks the row and re-checks, so an auction is never closed twice.
 
 ### 💬 Multi-Channel Real-Time Communications
-* **Live Room Chat**: Active auction rooms feature real-time participant chat (`SEND_MESSAGE` → `CHAT_MESSAGE`) with auto-joined room mechanics and sender identity tagging.
+* **Live Room Chat**: Logged-in users chat in each auction room (`SEND_MESSAGE` → `CHAT_MESSAGE`). The server reads the sender's name and role from the login token sent in the socket handshake, so nobody can post as someone else; 5 messages per 10 seconds per connection.
 * **Floating Reactions**: Audience members can emit animated floating emoji reactions (`🔥`, `🚀`, `💎`, `👏`, `❤️`, `⚡`, `🎉`) broadcast live to all observers.
 * **Administrative Broadcast Alerts**: Real-time administrative actions immediately broadcast status changes (`AUCTION_STATUS_CHANGED`), freezing the bidding UI on active clients.
 
 ### ✉️ Dual-Strategy Transactional Email Delivery
-* **Smart Routing Engine**: Automatically routes test and demo accounts (`@gmail.com`, `@test.com`, `@example.com`) to disposable Ethereal accounts with instant web preview URLs, while routing production emails to real SMTP servers.
-* **Settlement Notifications**: Winning bidders and sellers receive automated email dispatches containing lot details, hammer price, and seller payout coordinates.
+* **Smart Routing Engine**: Sends demo addresses (`@test.com`, `@example.com`, the `test1`-`test5@gmail.com` seed accounts, anything starting with `test`) to disposable Ethereal inboxes with web preview links, and real addresses through SMTP when it is configured.
+* **Settlement Notifications**: Winners and sellers get an email with the lot, hammer price and the seller's payout details (all user-typed text is HTML-escaped).
 
 ### 🤖 Google Gemini AI Appraisal Assistant
 * **Luxury Copywriting Pipeline**: Uses Google Gemini (`gemini-3.6-flash`) with structured JSON schema prompt engineering to generate appraisal-grade titles, descriptions, and suggested starting bids.
@@ -75,13 +75,13 @@ AuctionLoom resolves these challenges through a strict, zero-trust engineering a
 
 ### 🛡️ Platform Moderation & Role-Based Access Control (RBAC)
 * **Granular RBAC**: Strict middleware enforcement across `bidder`, `auctioneer`, and `admin` roles.
-* **Administrative Auction Freeze**: Super Administrators can instantly freeze suspicious listings by switching them to `RESTRICTED`, locking bid submission across the cluster.
-* **Cascading Lot Deletion**: Safe administrative deletion purges corresponding bids, queued jobs, and audit proofs without leaving orphaned database rows.
+* **Administrative Auction Freeze**: Admins can freeze a running auction (`ACTIVE` → `RESTRICTED`) and resume it; closed auctions can't change status.
+* **Lot Deletion**: Deleting a lot removes its bids and queued jobs in one locked transaction; a lot that has been paid for can't be deleted (it is part of the money records).
 * **Payment Proof Verification**: Sellers submitting manual commission proofs have their uploads verified and approved or rejected via the Admin Dashboard.
 
-### 🖼️ Multer Multipart Media Processing
-* **Local Asset Pipeline**: High-performance image ingestion engine utilizing `multer.diskStorage`.
-* **Security & Size Guards**: Enforces strict MIME-type allowlists (JPEG, PNG, WebP) and a 5MB maximum file size limit with sanitized, collision-resistant timestamped filenames.
+### 🖼️ Image Uploads (Multer)
+* **Stored in PostgreSQL**: Images (auction photos, commission receipts) are read into memory and saved in an `uploads` table, served from `/uploads/<id>.<ext>`. The free Render disk is wiped on every restart, so files on disk disappeared; a production setup would use object storage (S3, Supabase Storage).
+* **Security & Size Guards**: JPEG, PNG, WebP or GIF only, at most 5 MB; the file's first bytes must match the declared type, the extension comes from that type (never from the file name), and images are served with `X-Content-Type-Options: nosniff`.
 
 ---
 
@@ -94,14 +94,14 @@ AuctionLoom resolves these challenges through a strict, zero-trust engineering a
 | **Client Routing** | React Router | `7.18.3` | Declarative client-side routing with protected route authorization guards. |
 | **Styling & Icons** | Tailwind CSS / Lucide | `3.4.19` / `1.44.0` | Utility-first responsive design system and modern iconography. |
 | **API Gateway** | Express.js | `5.2.1` | RESTful API server with route modularization and centralized error handling. |
-| **Process Clustering** | Node.js Cluster | `v20+` / `v22+` | Multi-core CPU worker distribution for horizontal process scaling. |
+| **Process Clustering** | Node.js Cluster | `v20+` / `v22+` | Optional multi-process mode (`WEB_CONCURRENCY`); production runs one process by default. |
 | **Relational Database**| PostgreSQL | `15-alpine` | Primary ACID relational database with row-level pessimistic locking. |
 | **Database Driver** | `pg` (node-postgres) | `8.23.0` | High-performance client pool with cloud SSL connection support. |
 | **Real-Time Layer** | Socket.IO | `4.8.3` | Low-latency bi-directional event distribution across auction rooms. |
 | **Authentication** | JSON Web Tokens (JWT) | `9.0.3` | Stateless Bearer token authentication and authorization claims. |
 | **Password Hashing** | bcrypt | `6.0.0` | Salted cryptographic password hashing (10 rounds). |
-| **Rate Limiting** | express-rate-limit | `8.7.0` | IP-based request throttling protecting API endpoints against DDoS. |
-| **Multipart Ingestion**| Multer | `2.3.0` | Streaming multipart/form-data image upload processing and disk storage. |
+| **Rate Limiting** | express-rate-limit | `8.x` | Per-IP throttling, plus limits on failed logins and sign-ups. |
+| **Multipart Ingestion**| Multer | `2.x` | multipart/form-data image uploads (memory storage, saved to PostgreSQL). |
 | **AI Appraisal** | Google Gemini API | `3.6-flash` | Automated appraisal valuations, titles, and copywriting generation. |
 | **Email Transporter** | Nodemailer | `10.0.10` | Transactional email delivery with Ethereal web previews and SMTP support. |
 | **Containerization** | Docker & Compose | `3.8` | Multi-container orchestration (`db`, `backend`, `frontend`, `worker`, `scheduler`). |
@@ -119,7 +119,7 @@ flowchart TB
     end
 
     subgraph Ingress["Ingress & Real-Time Gateway"]
-        API["Express 5 REST API Gateway<br/>Cluster Master + Workers"]
+        API["Express 5 REST API<br/>+ 15s closing sweep"]
         WS["Socket.IO Real-Time Gateway<br/>Isolated Auction Rooms"]
     end
 
@@ -131,18 +131,18 @@ flowchart TB
 
     subgraph CoreServices["Backend Application Core"]
         AuctionService["Auction & Bid Controller<br/>Pessimistic Locking"]
-        WalletService["Double-Entry Wallet Service<br/>Zero-Overdraft Invariant"]
+        WalletService["Wallet Service<br/>Append-only ledger, no overdraft"]
         AIService["Gemini 3.6 Flash Engine<br/>Structured JSON Appraisals"]
-        UploadService["Multer Storage Pipeline<br/>MIME & Size Enforcement"]
+        UploadService["Upload Service<br/>Byte check, stored in PostgreSQL"]
     end
 
-    subgraph StorageLayer["PostgreSQL 15 Cluster"]
-        DB[(PostgreSQL Primary Store<br/>Users, Auctions, Bids, Wallets,<br/>Transactions, Jobs, Proofs)]
+    subgraph StorageLayer["PostgreSQL"]
+        DB[(PostgreSQL Primary Store<br/>Users, Auctions, Bids, Wallets,<br/>Transactions, Jobs, Proofs, Uploads)]
     end
 
     subgraph AsyncWorkers["Background Worker Pool"]
         Scheduler["Auction Scheduler<br/>Polls Expired Lots (30s)"]
-        JobWorker["Distributed Job Worker<br/>SELECT FOR UPDATE SKIP LOCKED (10s)"]
+        JobWorker["Job Worker<br/>SELECT FOR UPDATE SKIP LOCKED (drains every 10s)"]
     end
 
     subgraph External["External Integrations"]
@@ -221,7 +221,7 @@ auctionloom/
 ├── .gitignore                       # Ignored node_modules, build bundles, and local secrets
 ├── README.md                        # Production system documentation
 ├── docker-compose.yml               # Multi-container orchestration (5 microservices)
-├── render.yaml                      # Infrastructure-as-Code blueprint for cloud deployment
+├── render.yaml                      # Render blueprint: free web service (workers need a paid plan)
 ├── vercel.json                      # Vercel SPA routing rewrite rules and cache headers
 ├── aws-ecs-task-definition.json     # AWS ECS container task definition template
 │
@@ -231,16 +231,16 @@ auctionloom/
 │   │   │   ├── adminController.js   # Admin routes: metrics, ledgers (JSON/CSV), users, moderation, purge, benchmark
 │   │   │   ├── aiController.js      # Google Gemini copy & appraisal handler
 │   │   │   ├── auctionController.js # Auction CRUD, filtering, sorting, and republishing
-│   │   │   ├── authController.js    # Registration, login, profile updates
+│   │   │   ├── authController.js    # Registration, login, profile and password changes
 │   │   │   ├── bidController.js     # Bid input checks (the locked transaction is in bidService)
 │   │   │   ├── commissionController.js # Proof submission & seller debt tracking
 │   │   │   ├── userController.js    # User stats, listings, bids, payout profiles
 │   │   │   └── walletController.js  # Top-ups, lot settlements, withdrawals, balance feeds
 │   │   ├── middlewares/             # Security & Request Processing Pipeline
-│   │   │   ├── auth.js              # JWT Bearer verification & Role-Based Access Control
-│   │   │   ├── logger.js            # Structured console logging with unique request IDs
-│   │   │   ├── rateLimiter.js       # IP rate limiting via express-rate-limit (5,000 req/15m)
-│   │   │   └── upload.js            # Multer disk storage, MIME filter, and 5MB size limit
+│   │   │   ├── auth.js              # JWT verification (role + password-change check from the DB) & RBAC
+│   │   │   ├── logger.js            # Request id (X-Request-Id) and access log
+│   │   │   ├── rateLimiter.js       # Per-IP limits: API 5,000/15m, failed logins 10/15m, sign-ups 50/h
+│   │   │   └── upload.js            # Multer memory storage, image type filter, 5MB limit
 │   │   ├── models/                  # Data Access & SQL Query Layer
 │   │   │   ├── auctionModel.js      # Auction queries and row locking helpers
 │   │   │   ├── bidModel.js          # Bid creation and highest-bid retrieval
@@ -254,7 +254,7 @@ auctionloom/
 │   │   │   ├── commissionRoutes.js  # /api/commissions proof submission endpoints
 │   │   │   ├── uploadRoutes.js      # /api/upload multipart image endpoint
 │   │   │   ├── userRoutes.js        # /api/users profile, stats & payout methods
-│   │   │   └── walletRoutes.js      # /api/wallet double-entry ledger endpoints
+│   │   │   └── walletRoutes.js      # /api/wallet balance, ledger and payments
 │   │   ├── services/                # Business rules, transactions & SQL (never touch req/res)
 │   │   │   ├── aiService.js         # Gemini 3.6 Flash & fallback heuristic copywriter
 │   │   │   ├── auctionClosureService.js # Atomic lot closure, auto-settlement & the winner's settle-lot
@@ -265,13 +265,14 @@ auctionloom/
 │   │   │   ├── emailService.js      # Nodemailer dual-delivery engine (Ethereal + SMTP)
 │   │   │   ├── reportService.js     # Admin metrics, revenue chart, commission ledger & report
 │   │   │   ├── socketService.js     # Socket.IO room manager & event broadcaster
-│   │   │   ├── systemService.js     # Purge-and-reseed and the live bid-locking benchmark
+│   │   │   ├── systemService.js     # Purge-and-reseed (off in production) and the bid benchmark
+│   │   │   ├── uploadService.js     # Image byte check, storage in PostgreSQL, serving
 │   │   │   ├── topupService.js      # Wallet funding & payment request abstraction
 │   │   │   ├── userService.js       # Dashboards, leaderboard, payout details, admin user management
-│   │   │   └── walletService.js     # ACID double-entry ledger, wallet page & transaction history
+│   │   │   └── walletService.js     # Locked credits/debits, ledger, settlement, wallet history
 │   │   ├── utils/                   # Shared Helper Utilities
 │   │   │   ├── AppError.js          # Expected failures (404, 403, ...) a service reports to the HTTP layer
-│   │   │   └── validators.js        # UUID, email, and numeric format validators
+│   │   │   └── validators.js        # Input checks: UUIDs, money (whole cents), text, dates, email, password
 │   │   ├── workers/                 # Asynchronous Distributed Processors
 │   │   │   ├── jobWorker.js         # SELECT FOR UPDATE SKIP LOCKED job executor
 │   │   │   └── scheduler.js         # Periodic lot expiration poller (every 30s)
@@ -282,7 +283,9 @@ auctionloom/
 │   │   ├── migrate.js               # Database schema initialization script
 │   │   └── reset_and_seed.js        # Database reset and test user seed script
 │   ├── clean_reset_and_verify.js    # Automated end-to-end database wipe & ledger test
-│   ├── verify_phases.mjs            # 103-assertion comprehensive verification test suite
+│   ├── verify_phases.mjs            # End-to-end test suite (11 phases, 104 checks), run in CI
+│   ├── stress_test.js               # Concurrency stress tests (6 scenarios), run in CI
+│   ├── benchmark_concurrency.js     # 100 simultaneous bids: latency + database checks
 │   ├── schema.sql                   # Authoritative PostgreSQL DDL schema definition
 │   ├── Dockerfile                   # Production Node.js Alpine container
 │   └── package.json                 # Backend scripts and dependencies
@@ -358,7 +361,7 @@ cp .env.example .env
 | `DB_NAME` | No | `auctionloom` | PostgreSQL database name. |
 | `DB_USER` | No | `postgres` | PostgreSQL database user. |
 | `DB_PASSWORD` | No | `<your-db-password>` | PostgreSQL database password. |
-| `DB_POOL_MAX` | No | `10` | Maximum concurrent connections permitted in the `pg.Pool`. |
+| `DB_POOL_MAX` | No | `20` | Maximum concurrent connections permitted in the `pg.Pool`. |
 | `DISABLE_DB_SSL`| No | `false` | Set to `true` to disable SSL when connecting to local PostgreSQL instances in production mode. |
 | `JWT_SECRET` | **Yes** | `<generate-strong-secret>` | Secret key used to sign and verify HMAC-SHA256 JWT tokens. |
 | `FRONTEND_URL` | No | `http://localhost:3000` | Comma-separated list of permitted CORS origins and Socket.IO allowed clients. |
@@ -371,6 +374,10 @@ cp .env.example .env
 | `SMTP_PASS` | No | `<smtp-password>` | Application password or token for SMTP delivery. |
 | `VITE_API_URL` | No | `http://localhost:5000/api` | Base REST API endpoint injected during the frontend Vite build. |
 | `VITE_SOCKET_URL` | No | `http://localhost:5000` | WebSocket endpoint injected during the frontend Vite build. |
+| `TRUST_PROXY` | No | `1` in production, `0` otherwise | Proxy hops to trust for the client IP (rate limits). `/health` shows the `clientIp` the server sees. |
+| `ALLOW_DEMO_RESET` | No | `false` | Set to `true` to allow the admin "Purge & Reset" when `NODE_ENV=production`. |
+| `SWEEP_INTERVAL_MS` | No | `15000` | How often the API process closes ended auctions; `0` turns it off (CI does this to test the worker). |
+| `WEB_CONCURRENCY` | No | `1` in production | Number of cluster processes started by `npm start`. |
 
 ---
 
@@ -453,8 +460,9 @@ The frontend will be available at [http://localhost:5173](http://localhost:5173)
 | `npm run scheduler` | `node src/workers/scheduler.js` | Starts background poller queuing expired lots every 30s. |
 | `npm run migrate` | `node scripts/migrate.js` | Executes DDL schema migrations against configured database. |
 | `npm run clean-verify` | `node clean_reset_and_verify.js` | Full DB purge, 6-user reseed, live bid race, and ledger audit. |
-| `npm run benchmark` | `node benchmark_concurrency.js` | Stress tests SELECT FOR UPDATE with 100 concurrent bids & latency percentiles (also available via 1-click in the Admin Dashboard UI). |
-| `npm test` | `node verify_phases.mjs` | Executes the 10-phase, 103-assertion verification test suite. |
+| `npm run benchmark` | `node benchmark_concurrency.js` | 100 simultaneous bids over HTTP: latency percentiles plus database checks (exit code 1 if a check fails). The Admin Dashboard has a similar 1-click benchmark. |
+| `npm test` | `node verify_phases.mjs` | End-to-end suite: 11 phases, 104 checks (server must be running). |
+| `npm run stress` | `node stress_test.js` | 6 concurrency scenarios: bid race, double spend, double settlement, republish of a paid lot, cross settlement, bid vs delete. |
 
 ### Frontend (`frontend/package.json`)
 
@@ -518,14 +526,15 @@ The database schema is defined in [backend/schema.sql](backend/schema.sql) and a
 
 ### Key Database Entities
 
-1. **`users`**: Manages credentials, display identities, account roles (`admin`, `auctioneer`, `bidder`), accumulated unpaid commissions, and JSONB payout configurations.
+1. **`users`**: Credentials, display names, roles (`admin`, `auctioneer`, `bidder`), unpaid commission (legacy, see below), JSONB payout details and `password_changed_at` (tokens issued before it are refused).
 2. **`auctions`**: Stores lot metadata, starting/current prices, timestamps, statuses (`ACTIVE`, `CLOSED`, `RESTRICTED`), foreign-key winner associations, escrow settlement state (`is_settled`, `settled_at`), and calculated commission records.
 3. **`bids`**: Immutable record of all accepted bids placed per auction, indexed by `auction_id` for instantaneous price-ladder reconstruction.
 4. **`wallets`**: Secure balance store with row versioning, constrained by `CHECK (balance >= 0)` to guarantee zero overdraft.
-5. **`wallet_transactions`**: Immutable double-entry transaction ledger tracking all balance adjustments with unique `idempotency_key` guarantees.
-6. **`jobs`**: Distributed outbox table for asynchronous tasks with unique constraints preventing duplicate pending executions: `CONSTRAINT unique_pending_job UNIQUE (type, payload)`.
-7. **`payment_requests`**: Gateway-ready abstraction layer for financial top-up and withdrawal requests.
-8. **`commission_proofs`**: Audit log of seller payment receipts submitted for manual commission reconciliation.
+5. **`wallet_transactions`**: Append-only ledger of every balance change, with `balance_after` and a unique `idempotency_key`.
+6. **`jobs`**: Job queue for background work. A partial unique index allows one open job per auction: `CREATE UNIQUE INDEX unique_open_job ON jobs (type, payload) WHERE status IN ('PENDING', 'IN_PROGRESS')`.
+7. **`payment_requests`**: Gateway-ready record of top-up and withdrawal requests (top-ups are simulated today).
+8. **`commission_proofs`**: Seller receipts for commission paid outside the platform. The 5% fee is now taken automatically at settlement, so nothing creates new commission debt; this path is kept for manual reconciliation.
+9. **`uploads`**: Uploaded images (bytes, type, size), served from `/uploads/<id>.<ext>`.
 
 ---
 
@@ -558,51 +567,53 @@ All protected endpoints require an `Authorization: Bearer <jwt_token>` header.
 | `POST` | `/api/auth/login` | Public | Authenticate user & receive JWT token | `{ email, password }` |
 | `GET` | `/api/auth/me` | Bearer | Retrieve authenticated profile | _None_ |
 | `PUT` | `/api/auth/profile` | Bearer | Update profile name | `{ name }` |
+| `PUT` | `/api/auth/password` | Bearer | Change password (logs out other sessions, returns a new token) | `{ currentPassword, newPassword }` |
 
 ### 🏷️ Auctions (`/api/auctions`)
 
 | Method | Endpoint | Auth | Description | Request Body / Parameters |
 |---|---|---|---|---|
-| `GET` | `/api/auctions` | Public | List auctions with filtering & search | Query: `status`, `search`, `category`, `sort`, `limit`, `offset` |
+| `GET` | `/api/auctions` | Public | List auctions with filtering & search (max 100 per page; response includes `total`) | Query: `status`, `search`, `seller_id`, `sort`, `limit`, `offset` |
 | `GET` | `/api/auctions/:id` | Public | Retrieve single auction details | Path: `id` (UUID) |
-| `POST` | `/api/auctions` | Auctioneer / Admin | Create a new auction listing | `{ title, description, starting_price, end_time, category, image_url }` |
-| `DELETE` | `/api/auctions/:id` | Owner / Admin | Delete auction listing (pre-bidding) | Path: `id` (UUID) |
+| `POST` | `/api/auctions` | Auctioneer / Admin | Create a new auction listing | `{ title, description, starting_price, end_time or duration_minutes, image_url }` |
+| `DELETE` | `/api/auctions/:id` | Owner (before bids) / Admin | Delete auction listing (never a paid lot) | Path: `id` (UUID) |
 | `POST` | `/api/auctions/:id/republish` | Owner / Admin | 1-Click republish closed auction lot | Path: `id` (UUID), Body: `{ end_time?, starting_price? }` |
 | `GET` | `/api/auctions/:id/bids` | Public | Get all bids placed on an auction | Path: `id` (UUID) |
 | `POST` | `/api/auctions/:id/bids` | Bearer | Submit a concurrency-safe bid | Path: `id` (UUID), Body: `{ amount }` |
 
-### 💼 Wallet & Double-Entry Ledger (`/api/wallet`)
+### 💼 Wallet & Ledger (`/api/wallet`)
 
 | Method | Endpoint | Auth | Description | Request Body / Parameters |
 |---|---|---|---|---|
 | `GET` | `/api/wallet` | Bearer | Retrieve balance, stats & ledger summary | _None_ |
-| `GET` | `/api/wallet/transactions` | Bearer | Paginated immutable ledger transactions | Query: `limit`, `offset`, `type` |
-| `POST` | `/api/wallet/topup` | Bearer | Simulated self-service balance credit | `{ amount }` |
+| `GET` | `/api/wallet/transactions` | Bearer | Paginated ledger entries | Query: `page`, `limit`, `type` |
+| `POST` | `/api/wallet/topup` | Bearer | Simulated self-service balance credit (optional `Idempotency-Key` header) | `{ amount, note? }` |
 | `POST` | `/api/wallet/settle-lot` | Bearer | Winning bidder lot escrow settlement | `{ auctionId }` |
 | `POST` | `/api/wallet/settle-commission` | Bearer | Seller commission direct settlement | `{ amount }` |
-| `POST` | `/api/wallet/withdraw` | Bearer | Withdraw funds from available balance | `{ amount, payoutMethod? }` |
+| `POST` | `/api/wallet/withdraw` | Bearer | Withdraw funds from available balance (optional `Idempotency-Key` header) | `{ amount, note? }` |
 
 ### 🛡️ Administration (`/api/admin`)
 
 | Method | Endpoint | Auth | Description | Request Body / Parameters |
 |---|---|---|---|---|
 | `GET` | `/api/admin/metrics` | Admin | Aggregate platform metrics (GMV, volume) | _None_ |
-| `GET` | `/api/admin/revenue-chart` | Admin | Daily platform revenue & commission history | _None_ |
+| `GET` | `/api/admin/revenue-chart` | Admin | Monthly sales & commission, latest 12 months (`isSample: true` when there are no sales yet) | _None_ |
 | `GET` | `/api/admin/commission-ledger` | Admin | Platform commission ledger & summary | _None_ |
 | `GET` | `/api/admin/commission-transactions`| Admin | Complete feed of platform fee credits | _None_ |
 | `GET` | `/api/admin/users` | Admin | Retrieve all platform users | _None_ |
 | `PUT` | `/api/admin/users/:id/role` | Admin | Update a user's role | Path: `id` (UUID), Body: `{ role: 'admin' \| 'auctioneer' \| 'bidder' }` |
-| `PUT` | `/api/admin/auctions/:id/status`| Admin | Freeze or unfreeze auction status | Path: `id` (UUID), Body: `{ status: 'ACTIVE' \| 'RESTRICTED' }` |
-| `DELETE`| `/api/admin/auctions/:id` | Admin | Force delete lot with cascading purge | Path: `id` (UUID) |
+| `PUT` | `/api/admin/auctions/:id/status`| Admin | Freeze a running auction or resume a frozen one | Path: `id` (UUID), Body: `{ status: 'ACTIVE' \| 'RESTRICTED', reason? }` |
+| `DELETE`| `/api/admin/auctions/:id` | Admin | Delete a lot with its bids and jobs (not a paid lot) | Path: `id` (UUID) |
 | `GET` | `/api/admin/commission-proofs`| Admin | List submitted offline payment proofs | _None_ |
 | `PUT` | `/api/admin/commission-proofs/:id/status` | Admin | Approve or reject payment proof | Path: `id` (UUID), Body: `{ status: 'APPROVED' \| 'REJECTED', admin_notes? }` |
-| `POST` | `/api/admin/system/purge-and-reset` | Admin | 1-Click clean DB reset & test suite run | _None_ |
+| `POST` | `/api/admin/system/purge-and-reset` | Admin | Wipe and re-seed the database (403 in production unless `ALLOW_DEMO_RESET=true`) | `{ runTestAuctions? }` |
+| `POST` | `/api/admin/system/run-benchmark` | Admin | Bid benchmark on a temporary lot, with database checks | `{ requests }` (2-500) |
 
 ### 🧾 Commissions & Offline Wire Proofs (`/api/commissions`)
 
 | Method | Endpoint | Auth | Description | Request Body / Parameters |
 |---|---|---|---|---|
-| `POST` | `/api/commissions/proof` | Bearer | Submit offline wire payment receipt image | Form field: `proof` (image ≤ 5MB), Body: `{ amount, paymentMethod?, notes? }` |
+| `POST` | `/api/commissions/proof` | Bearer | Submit offline wire payment receipt image | Form field: `proof` (image ≤ 5MB), fields: `amount`, `comment?` |
 | `GET` | `/api/commissions/my-proofs` | Bearer | Retrieve user's submitted commission receipts & debt | _None_ |
 
 ### 🤖 AI Valuations & Media (`/api/ai` & `/api/upload`)
@@ -610,7 +621,7 @@ All protected endpoints require an `Authorization: Bearer <jwt_token>` header.
 | Method | Endpoint | Auth | Description | Request Body / Parameters |
 |---|---|---|---|---|
 | `POST` | `/api/ai/generate` | Auctioneer / Admin | Generate luxury copy & starting price | `{ keywords, category }` |
-| `POST` | `/api/upload` | Bearer | Upload image via Multer (`multipart/form-data`) | Form field: `image` (JPEG, PNG, WebP ≤ 5MB) |
+| `POST` | `/api/upload` | Bearer | Upload image via Multer (`multipart/form-data`) | Form field: `image` (JPEG, PNG, WebP, GIF ≤ 5MB) |
 
 ### 📊 Users & Analytics (`/api/users` & `/api/leaderboard`)
 
@@ -623,13 +634,14 @@ All protected endpoints require an `Authorization: Bearer <jwt_token>` header.
 | `GET` | `/api/users/me/won` | Bearer | Retrieve won lots with settlement status | _None_ |
 | `POST` | `/api/users/me/upgrade-seller`| Bearer | Upgrade account privileges to seller | _None_ |
 | `GET` | `/api/users/me/payout-methods`| Bearer | Retrieve saved payout accounts | _None_ |
-| `PUT` | `/api/users/me/payout-methods`| Bearer | Update seller payout configuration | `{ bank, upi, paypal, crypto }` |
+| `PUT` | `/api/users/me/payout-methods`| Bearer | Update seller payout configuration | `{ bank_name, account_number, ifsc_swift, upi_id, paypal_email }` |
+| `GET` | `/api/users/auction-payout/:auctionId`| Bearer (winner, seller, admin) | Seller's payout details for a won lot | Path: `auctionId` (UUID) |
 
 ---
 
 ## 13. Real-Time WebSocket Event Matrix
 
-WebSocket connections are managed by Socket.IO attached to the main HTTP server. Clients connect and join specific auction rooms to scope real-time traffic.
+WebSocket connections are managed by Socket.IO attached to the main HTTP server. Clients connect and join specific auction rooms to scope real-time traffic. A logged-in client sends its JWT in the handshake (`auth: { token }`); the server loads the user's name and role from the database. Without a token the client is a guest (can watch and react, not chat).
 
 ### Client-to-Server Inbound Events
 
@@ -637,30 +649,31 @@ WebSocket connections are managed by Socket.IO attached to the main HTTP server.
 |---|---|---|
 | `JOIN_AUCTION` | `auctionId` (UUID string) | Joins the socket to the isolated channel `auctionId`. |
 | `LEAVE_AUCTION` | `auctionId` (UUID string) | Removes the socket from channel `auctionId`. |
-| `SEND_MESSAGE` | `{ auctionId, text, senderName?, senderEmail?, role? }` | Auto-joins sender to room, sanitizes message text (max 500 chars), constructs payload, and emits `CHAT_MESSAGE`. |
-| `SEND_REACTION` | `{ auctionId, emoji, senderName? }` | Validates emoji against allowlist (`🔥`, `🚀`, `💎`, `👏`, `❤️`, `⚡`, `🎉`) and emits `REACTION` to room. |
+| `SEND_MESSAGE` | `{ auctionId, text, clientId? }` | Logged-in users only (guests get `CHAT_ERROR`). Text trimmed to 500 chars; sender name, id and role come from the server; 5 per 10 s. |
+| `SEND_REACTION` | `{ auctionId, emoji }` | Emoji from the allowlist (`🔥`, `🚀`, `💎`, `👏`, `❤️`, `⚡`, `🎉`); sender set by the server ("Guest" if not logged in). |
 
 ### Server-to-Client Outbound Broadcasts
 
 | Event Name | Broadcast Scope | Payload Structure | Triggering Action |
 |---|---|---|---|
-| `PRICE_UPDATE` | Room (`auctionId`) | `{ auction_id, new_price, bidder_name, bidder_email, bid_id }` | Dispatched immediately after a valid bid commits to PostgreSQL. |
-| `CHAT_MESSAGE` | Room (`auctionId`) | `{ id, auctionId, text, senderName, senderEmail, role, timestamp }` | Broadcasts new room chat messages to all connected participants. |
+| `PRICE_UPDATE` | Room (`auctionId`) | `{ auction_id, new_price, bidder_name, bidder_id, bid_id }` | Dispatched immediately after a valid bid commits to PostgreSQL. |
+| `CHAT_MESSAGE` | Room (`auctionId`) | `{ id, clientId, auctionId, text, senderName, senderId, role, timestamp }` | Broadcasts new room chat messages (never an email). |
+| `CHAT_ERROR` | Sender only | `{ auctionId, error }` | Chat refused: not logged in, or sending too fast. |
 | `REACTION` | Room (`auctionId`) | `{ id, auctionId, emoji, senderName, timestamp }` | Broadcasts interactive floating emoji reaction to room observers. |
-| `AUCTION_STATUS_CHANGED` | Room (`auctionId`) | `{ auction_id, status: 'ACTIVE' \| 'RESTRICTED' }` | Broadcast when an administrator freezes or unfreezes a listing. |
+| `AUCTION_STATUS_CHANGED` | Room (`auctionId`) | `{ auction_id, status: 'ACTIVE' \| 'RESTRICTED', reason, timestamp }` | Broadcast when an administrator freezes or unfreezes a listing. |
 
 ---
 
 ## 14. Financial & Concurrency Invariants
 
-AuctionLoom guarantees four fundamental system invariants:
+AuctionLoom relies on four system invariants (each one is exercised by `npm test` and `npm run stress`):
 
 ### 1. Serialized Bidding Invariant
 ```sql
 SELECT * FROM auctions WHERE id = $1 FOR UPDATE;
 ```
-* Bids for the same lot are serialized at the database engine level.
-* No phantom reads or lost updates occur regardless of client submission concurrency.
+* Bids for the same lot are serialized at the database engine level: each bid reads the current price under the lock, so no bid is lost.
+* Amounts are whole cents, so an accepted bid is always strictly higher than the one before it.
 
 ### 2. Zero-Overdraft Invariant
 ```sql
@@ -675,48 +688,50 @@ CONSTRAINT wallet_transactions_idempotency_key_key UNIQUE (idempotency_key)
 ```
 * Network retries transmitting the same `idempotency_key` return the original transaction record without altering balances.
 
-### 4. Distributed Worker Job Deduplication
+### 4. Worker Job Deduplication
 ```sql
-SELECT * FROM jobs WHERE status = 'PENDING' FOR UPDATE SKIP LOCKED LIMIT 1;
+SELECT * FROM jobs WHERE status = 'PENDING' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED;
 ```
-* Workers acquire and lock pending jobs without blocking other workers.
-* The unique constraint `CONSTRAINT unique_pending_job UNIQUE (type, payload)` prevents duplicate job insertions.
+* Workers claim pending jobs without blocking or duplicating each other.
+* The partial unique index `unique_open_job ON jobs (type, payload) WHERE status IN ('PENDING', 'IN_PROGRESS')` allows only one open job per auction, while finished jobs don't block a new one.
 
 ---
 
 ## 15. Automated Verification & Testing Suite
 
-AuctionLoom includes an exhaustive 10-phase verification test suite that executes 103 automated assertions across every architectural layer.
+Two suites run in GitHub Actions on every push, against a real PostgreSQL service and a running server:
+
+* `npm test` (`verify_phases.mjs`): 11 phases, 104 checks of real behaviour: auth and RBAC, bidding and locking, sockets and chat identity, the real scheduler and worker processes, uploads, wallet and settlement, CORS, input validation, rate limits and the audit regression checks.
+* `npm run stress` (`stress_test.js`): 6 concurrency scenarios fired at the same moment, each checked in the database afterwards.
 
 ### Running the Test Suite
-Ensure the backend server is running on port 5000, then execute:
+Ensure the backend server is running on port 5000 (CI starts it with `SWEEP_INTERVAL_MS=0`), then execute:
 
 ```bash
 cd backend
 npm test
+npm run stress
 ```
 
 ### Verification Output
 
 ```text
-===========================================================
-   AUCTIONLOOM: DETAILED 1 TO 10 PHASE VERIFICATION SUITE   
-===========================================================
-[Phase 1]  ✅ PASS - Environment & MVC Structure verified
-[Phase 2]  ✅ PASS - PostgreSQL Schema & Concurrency Constraints verified
-[Phase 3]  ✅ PASS - Core API, JWT Authentication, Rate Limiting & RBAC verified
-[Phase 4]  ✅ PASS - Auction CRUD & Pessimistic Row Locking (SELECT FOR UPDATE) verified
-[Phase 5]  ✅ PASS - Socket.IO Real-Time Synchronization & Events verified
-[Phase 6]  ✅ PASS - Scheduler & Distributed Job Worker (FOR UPDATE SKIP LOCKED) verified
-[Phase 7]  ✅ PASS - React 19 Frontend & Real-Time Contexts verified
-[Phase 8]  ✅ PASS - Google Gemini AI Auction Assistant verified
-[Phase 9]  ✅ PASS - Multer Image Upload & Socket.IO Live Room Chat verified
-[Phase 10] ✅ PASS - Production-Grade Wallet & Double-Entry Ledger System verified
+Phase 1   Server up, API catalogue, JSON 404
+Phase 2   Database: all 8 tables, unique index on open jobs
+Phase 3   Auth, JWT, RBAC, rate-limit headers
+Phase 4   Auction CRUD, admin freeze, row locking (2 identical bids at once: 1 accepted)
+Phase 5   Socket.IO PRICE_UPDATE after commit, no emails in payloads
+Phase 6   Real scheduler + worker processes close an ended auction; re-queue after republish
+Phase 7   CORS and Socket.IO origin allow-list
+Phase 8   AI assistant (RBAC, validation, generation)
+Phase 9   Uploads (stored in PostgreSQL, byte check, nosniff) and chat identity
+Phase 10  Wallet: top-up, overdraft refusal, settlement 95/5, idempotent re-settlement
+Phase 11  Regression checks from the pre-interview audit (precision, errors, validation,
+          chat, benchmark, fan-out, rate limits, paid-lot delete, status changes, ...)
 
-===========================================================
-   🎉 ALL PHASES (1 TO 10) ARE 100% VERIFIED AND PASSING!  
-===========================================================
-Total assertions passed: 103/103
+Total assertions passed: 104/104
+
+Stress tests passed: 6/6
 ```
 
 ### Complete End-to-End Ledger Verification
@@ -740,16 +755,18 @@ npm run clean-verify
 └──────────────────────────┬─────────────────────────────┘
                            │ HTTPS / WSS
 ┌──────────────────────────▼─────────────────────────────┐
-│                 Render Cloud Infrastructure             │
-│  auctionloom-backend Web Service (Express + Socket.IO) │
-│  auctionloom-worker Background Service (SKIP LOCKED)   │
-│  auctionloom-scheduler Cron Service (Poll 30s)         │
+│          Render (free web service, one process)        │
+│  Express + Socket.IO + 15s closing sweep               │
+│  (sleeps after 15 min idle; first request ~1 min)      │
 └──────────────────────────┬─────────────────────────────┘
                            │ SSL Connection Pool
 ┌──────────────────────────▼─────────────────────────────┐
-│                 Supabase PostgreSQL 15                 │
-│  ACID Relational Storage • Row Locking • JSONB Indexes │
+│                  Supabase PostgreSQL                   │
+│  ACID Relational Storage • Row Locking • JSONB         │
 └────────────────────────────────────────────────────────┘
+
+The separate worker and scheduler processes run in Docker Compose (and could run
+on Render as background workers on a paid plan; the free plan has none).
 ```
 
 ### 1. Frontend on Vercel
@@ -764,28 +781,34 @@ npm run clean-verify
   ```
 * **Environment Variables**: Set `VITE_API_URL` and `VITE_SOCKET_URL`.
 
-### 2. Backend & Workers on Render
-Deploy using the Blueprint specification in [render.yaml](render.yaml):
-* Spawns the web API service with health checks at `/health`.
-* Deploys standalone `auctionloom-worker` (`npm run worker`) and `auctionloom-scheduler` (`npm run scheduler`).
-* Connects securely over SSL using `DATABASE_URL`.
+### 2. Backend on Render
+Deploy using the Blueprint in [render.yaml](render.yaml):
+* One free web service (Docker) with health checks at `/health`; it closes auctions with its in-process sweep.
+* Set `DATABASE_URL` (Supabase), `JWT_SECRET`, `FRONTEND_URL` and optionally `GEMINI_API_KEY` in the Render dashboard.
+* After the first deploy, open `/health` and check that `clientIp` is your IP (otherwise adjust `TRUST_PROXY`).
+* The blueprint shows, commented out, how to add the worker and scheduler as background workers on a paid plan.
+* A GitHub Actions workflow (`keep-alive.yml`) pings the API twice a day so Supabase doesn't pause the database.
 
 ---
 
 ## 17. Security Architecture
 
-* **Rate Limiting**: `express-rate-limit` enforces a threshold of 5,000 requests per 15-minute window per IP (configured in `rateLimiter.js` to support high-frequency real-time bidding without dropping telemetry), mitigating brute-force and DDoS attempts.
-* **Password Hashing**: Passwords are salted and hashed using `bcrypt` (10 rounds). Plaintext passwords are never logged or stored.
-* **JWT Authentication**: Stateless Bearer tokens signed with HMAC-SHA256 carry user claims (`id`, `email`, `role`) with verified expiration periods.
-* **Role-Based Access Control**: Route-level middleware ensures only users with `admin` or `auctioneer` privileges can create listings, appraise items, or execute moderation commands.
-* **File Upload Protections**: Multer middleware inspects MIME types, restricts file sizes to ≤ 5MB, and assigns randomized timestamped file names to prevent directory traversal.
-* **CORS Origin Filtering**: Dynamic origin parsing restricts incoming HTTP requests and WebSocket handshakes to verified frontend domains.
+* **Rate Limiting**: Per IP (behind Render's proxy via `trust proxy`): 5,000 API requests per 15 minutes, 10 failed logins per 15 minutes per account, 50 sign-ups per hour. The store is in memory, so each process counts separately.
+* **Password Hashing**: bcrypt (10 rounds); passwords must be 8-72 characters. Plaintext passwords are never logged or stored.
+* **JWT Authentication**: HS256 Bearer tokens valid 7 days. On every request the account and role are read from the database, and tokens issued before the last password change are refused (changing the password logs out other sessions).
+* **Role-Based Access Control**: Route-level middleware ensures only `admin` or `auctioneer` users can create listings, use the AI assistant or moderate; admins can't bid.
+* **Input Validation**: Every id, amount (whole cents, max $10M), text length, date and email is checked before it reaches PostgreSQL; bad input is a 400 with a plain message.
+* **Error Handling**: Unexpected errors are logged with a request id; the client gets a generic message plus `requestId` (also in the `X-Request-Id` header), never database or code details.
+* **Chat Identity**: Chat messages carry the name and role the server loaded for the socket's token; guests can't chat.
+* **File Upload Protections**: Image types only, ≤ 5MB, file bytes must match the type, extension taken from the type, served with `nosniff`.
+* **CORS Origin Filtering**: Only the configured frontend origins may call the API from a browser or open a WebSocket.
+* **Known gaps**: the database connection skips certificate verification (`rejectUnauthorized: false`), the login token lives in `localStorage` (readable by any script injected into the page), and top-ups are simulated.
 
 ---
 
 ## 18. Known Operational Characteristics
 
-* **Single-Instance Fallback Mode**: When deployed without independent background worker containers (e.g., in development or minimal cloud tiers), an in-process fallback sweep running every 15 seconds in `app.js` automatically closes expired lots.
+* **Single-Instance Mode (the live demo)**: Without worker containers (development, Render's free plan), the 15-second sweep in `app.js` closes expired lots; opening an ended auction also closes it on the spot.
 * **Database Connection Limits**: Cloud databases (such as Supabase free tier or Neon) impose concurrent connection caps. Configure `DB_POOL_MAX=10` or use an external connection pooler (e.g., PgBouncer / Supabase Supavisor) when scaling API instances.
 * **Stateless Socket Clustering**: To scale the WebSocket gateway across multiple Node.js cluster processes or multiple server instances, configure the official `@socket.io/redis-adapter` backed by a Redis instance.
 
