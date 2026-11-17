@@ -1,6 +1,6 @@
 const pool = require('../db');
 const { AppError } = require('../utils/AppError');
-const { toCents } = require('../utils/validators');
+const { toCents, splitSale } = require('../utils/validators');
 
 /**
  * Production-Grade Wallet Service
@@ -365,8 +365,7 @@ async function settleLotEscrowOnce({ auctionId, winnerId, sellerId, hammerPrice,
     throw new AppError(400, 'Valid hammer price required for settlement');
   }
 
-  const commission = Math.round(numericPrice * 0.05 * 100) / 100;
-  const sellerPayout = Math.round((numericPrice - commission) * 100) / 100;
+  const { commission, sellerPayout } = splitSale(numericPrice); // 5% fee, in whole cents
 
   const client = await pool.connect();
   try {

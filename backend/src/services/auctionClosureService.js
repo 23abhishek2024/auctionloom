@@ -4,6 +4,7 @@ const bidModel = require('../models/bidModel');
 const emailService = require('./emailService');
 const walletService = require('./walletService');
 const { AppError } = require('../utils/AppError');
+const { splitSale } = require('../utils/validators');
 
 /**
  * Auction Closure Service
@@ -40,7 +41,8 @@ async function closeAuction(auctionId) {
 
     // 2. If auction concluded with a winner, calculate 5% platform fee
     if (winnerId && highestBid) {
-      const commission = parseFloat((highestBid.amount * 0.05).toFixed(2));
+      // Same whole-cent formula as the settlement, so the recorded fee is the fee that is taken
+      const { commission } = splitSale(highestBid.amount);
       await client.query(
         `UPDATE auctions 
          SET commission_amount = $1, commission_calculated = TRUE 

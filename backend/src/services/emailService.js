@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { splitSale } = require('../utils/validators');
 
 /**
  * Email Service — Dual Delivery Engine (Ethereal Preview + Real SMTP)
@@ -249,7 +250,7 @@ const buildAuctionSoldEmail = ({ sellerName, auction, winner, hammerPrice }) => 
     currency: 'USD',
   });
 
-  const commission = (Number(hammerPrice || auction.current_price) * 0.05).toLocaleString('en-US', {
+  const commission = splitSale(hammerPrice || auction.current_price).commission.toLocaleString('en-US', {
     style: 'currency',
     currency: 'USD',
   });

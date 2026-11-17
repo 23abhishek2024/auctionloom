@@ -851,6 +851,22 @@ async function runVerification() {
   const otherLogin = await request('POST', '/api/auth/login', { email: sellerEmail, password: 'Password@123' });
   assert('Phase 11', 'Other accounts can still log in from the same IP', otherLogin.status === 200);
 
+  // 17. The 5% fee is worked out in whole cents: $20.70 * 5% = $1.035, rounded half up to $1.04.
+  //     (Floating point gave $1.03 at settlement, and closing used a different formula.)
+  //     The bidder's wallet covers the price, so closing the lot also settles it.
+  const feeLot = await request('POST', '/api/auctions', { title: `Fee "Rounding", Lot ${uniqueId}`, starting_price: 20, duration_minutes: 60 }, sellerToken);
+  const feeLotId = feeLot.data.auction.id;
+  await request('POST', `/api/auctions/${feeLotId}/bids`, { amount: 20.70 }, bidderToken);
+  await endAuctionNow(feeLotId);
+  const feeLotRow = (await pool.query('SELECT is_settled, commission_amount FROM auctions WHERE id = $1', [feeLotId])).rows[0];
+  const feeLedger = Object.fromEntries((await pool.query(
+    'SELECT type, amount FROM wallet_transactions WHERE reference_id = $1', [feeLotId]
+  )).rows.map((r) => [r.type, r.amount]));
+  assert('Phase 11', 'Platform fee in whole cents: a $20.70 sale records and takes $1.04, seller gets $19.66',
+    feeLotRow.is_settled === true && feeLotRow.commission_amount === '1.04' &&
+    feeLedger.SETTLEMENT_DEBIT === '20.70' && feeLedger.COMMISSION === '1.04' && feeLedger.SETTLEMENT_CREDIT === '19.66',
+    `settled ${feeLotRow.is_settled}, recorded fee ${feeLotRow.commission_amount}, ledger ${JSON.stringify(feeLedger)}`);
+
   assert('Phase 11', 'Admin users table shows real totals (2 listings, 2 bids, 2 wins, $230 bid volume)',
     fanRow && fanRow.listings_count === 2 && fanRow.total_bids === 2 && fanRow.auctions_won === 2 && fanRow.total_spent === 230,
     fanRow ? `listings ${fanRow.listings_count}, bids ${fanRow.total_bids}, wins ${fanRow.auctions_won}, volume ${fanRow.total_spent}` : 'user not listed');

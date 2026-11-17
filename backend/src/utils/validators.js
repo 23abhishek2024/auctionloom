@@ -58,6 +58,18 @@ const parseMoney = (val) => {
 // The same amount in whole cents, for exact comparisons (101.10 -> 10110)
 const toCents = (amount) => Math.round(parseFloat(amount) * 100);
 
+// ── Platform fee ────────────────────────────────────────────────
+// 5% of the hammer price goes to the platform, the rest to the seller. Worked out in whole cents and
+// rounded half up, which is also what the reports' SQL fallback ROUND(price * 0.05, 2) gives.
+// (In floating point 20.70 * 0.05 * 100 is 103.49999999999999, so the fee came out a cent short,
+//  and closing and settling a lot used two different formulas that disagreed on about 1% of prices.)
+const PLATFORM_FEE_PERCENT = 5;
+const splitSale = (hammerPrice) => {
+  const priceCents = toCents(hammerPrice);
+  const feeCents = Math.round((priceCents * PLATFORM_FEE_PERCENT) / 100);
+  return { commission: feeCents / 100, sellerPayout: (priceCents - feeCents) / 100 };
+};
+
 const MONEY_RULE = `a positive amount with at most 2 decimal places, up to $${MAX_AMOUNT.toLocaleString('en-US')}`;
 
 // ── Throwing helpers (for controllers that use next(err)) ───────
@@ -153,6 +165,8 @@ module.exports = {
   isPositiveNumber,
   parseMoney,
   toCents,
+  PLATFORM_FEE_PERCENT,
+  splitSale,
   MAX_AMOUNT,
   MONEY_RULE,
   requireUuid,
