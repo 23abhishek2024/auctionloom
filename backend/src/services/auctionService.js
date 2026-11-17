@@ -40,13 +40,14 @@ const toPublicAuction = (auction, viewer, viewerIsAdmin) => {
 };
 
 /**
- * All auctions matching the filters (status, search, seller_id, sort, limit, offset),
- * with emails shown only to the people allowed to see them.
+ * One page of auctions matching the filters (status, search, seller_id, sort, limit, offset; at most
+ * 100 per page), with emails shown only to the people allowed to see them.
+ * Returns { auctions, total, limit, offset }; total counts every match, not just this page.
  */
 async function listAuctions(filters, viewer) {
-  const rows = await auctionModel.findAll(filters);
+  const { rows, total, limit, offset } = await auctionModel.findAll(filters);
   const viewerIsAdmin = await isCurrentAdmin(viewer);
-  return rows.map((a) => toPublicAuction(a, viewer, viewerIsAdmin));
+  return { auctions: rows.map((a) => toPublicAuction(a, viewer, viewerIsAdmin)), total, limit, offset };
 }
 
 /**

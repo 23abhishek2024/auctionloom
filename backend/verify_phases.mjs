@@ -819,7 +819,15 @@ async function runVerification() {
   assert('Phase 11', 'Email HTML escapes user-typed names/titles and shows the saved IFSC code',
     emailCheck.rawLink === false && emailCheck.rawImg === false && emailCheck.ifsc === true, JSON.stringify(emailCheck));
 
-  // 14. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
+  // 14. The auctions list is paged: at most 100 per page, with the total across all pages
+  const totalInDb = (await pool.query('SELECT COUNT(*)::int AS c FROM auctions')).rows[0].c;
+  const bigPage = await request('GET', '/api/auctions?limit=1000');
+  const onePage = await request('GET', '/api/auctions?limit=1');
+  assert('Phase 11', 'Auctions list capped at 100 per page and reports the full total',
+    bigPage.data.count === Math.min(100, totalInDb) && bigPage.data.total === totalInDb && onePage.data.count === 1 && onePage.data.total === totalInDb,
+    `db ${totalInDb}, limit=1000 -> ${bigPage.data.count} (total ${bigPage.data.total}), limit=1 -> ${onePage.data.count}`);
+
+  // 15. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
   const bruteEmail = `brute_${uniqueId}@test.com`;
   let lastBrute;
   for (let i = 0; i < 11; i++) {

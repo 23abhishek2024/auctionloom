@@ -28,7 +28,7 @@ const readImageUrl = (value) => {
  *   ?search=keyword
  *   ?seller_id=uuid
  *   ?sort=price_asc | price_desc | ending_soon
- *   ?limit=number&offset=number
+ *   ?limit=number&offset=number   (at most 100 per page, the default too)
  * Each filter must be given once, as text; seller_id must be a UUID.
  */
 const getAllAuctions = async (req, res, next) => {
@@ -43,10 +43,13 @@ const getAllAuctions = async (req, res, next) => {
       offset: optionalQueryString(query.offset, 'offset', 10),
     };
 
-    const auctions = await auctionService.listAuctions(filters, req.user);
+    const { auctions, total, limit, offset } = await auctionService.listAuctions(filters, req.user);
     res.json({
       auctions,
-      count: auctions.length,
+      count: auctions.length, // on this page
+      total, // matching the filters, across all pages
+      limit,
+      offset,
     });
   } catch (err) {
     next(err);

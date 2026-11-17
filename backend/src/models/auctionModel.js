@@ -1,5 +1,7 @@
 const pool = require('../db');
 
+const MAX_PAGE_SIZE = 100;
+
 const auctionModel = {
   /**
    * Get all auctions with optional filters, search, and sorting
@@ -31,24 +33,24 @@ const auctionModel = {
     else if (sort === 'price_desc') orderBy = 'ORDER BY a.current_price DESC';
     else if (sort === 'ending_soon') orderBy = 'ORDER BY a.end_time ASC';
 
-    let paginationClause = '';
+    // A page is at most MAX_PAGE_SIZE auctions (the default too): the list never returns the whole table
     const parsedLimit = parseInt(limit, 10);
     const parsedOffset = parseInt(offset, 10);
-    if (!isNaN(parsedLimit) && parsedLimit > 0) {
-      params.push(parsedLimit);
-      paginationClause += ` LIMIT $${params.length}`;
-    }
-    if (!isNaN(parsedOffset) && parsedOffset >= 0) {
-      params.push(parsedOffset);
-      paginationClause += ` OFFSET $${params.length}`;
-    }
+    const pageSize = !isNaN(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, MAX_PAGE_SIZE) : MAX_PAGE_SIZE;
+    const pageOffset = !isNaN(parsedOffset) && parsedOffset > 0 ? parsedOffset : 0;
+    params.push(pageSize);
+    let paginationClause = ` LIMIT $${params.length}`;
+    params.push(pageOffset);
+    paginationClause += ` OFFSET $${params.length}`;
 
+    // COUNT(*) OVER () = how many auctions match the filters in total, counted before LIMIT/OFFSET
     const query = `
       SELECT a.*, 
              COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS seller_name,
              u.email AS seller_email,
              COALESCE(NULLIF(w.name, ''), split_part(w.email, '@', 1)) AS winner_name,
-             w.email AS winner_email
+             w.email AS winner_email,
+             COUNT(*) OVER ()::int AS total_count
       FROM auctions a
       JOIN users u ON a.seller_id = u.id
       LEFT JOIN users w ON a.winner_id = w.id
@@ -58,7 +60,9 @@ const auctionModel = {
     `;
 
     const result = await pool.query(query, params);
-    return result.rows;
+    const total = result.rows.length ? result.rows[0].total_count : 0;
+    const rows = result.rows.map(({ total_count, ...auction }) => auction);
+    return { rows, total, limit: pageSize, offset: pageOffset };
   },
 
   /**

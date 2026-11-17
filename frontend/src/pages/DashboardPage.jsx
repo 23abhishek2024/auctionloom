@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 
 export const DashboardPage = () => {
   const [auctions, setAuctions] = useState([]);
+  const [totalAuctions, setTotalAuctions] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -19,6 +20,8 @@ export const DashboardPage = () => {
       setError(null);
       const res = await auctionApi.getAll();
       setAuctions(res.data.auctions || []);
+      // The API returns at most 100 per page; total counts all of them
+      setTotalAuctions(res.data.total ?? (res.data.auctions || []).length);
     } catch (err) {
       console.error('Failed to fetch auctions:', err);
       setError(err.response?.data?.error || 'Failed to connect to the backend auction service.');
@@ -112,7 +115,7 @@ export const DashboardPage = () => {
         {/* Quick Stats Badges */}
         <div className="mt-8 pt-6 border-t border-slate-200/80 grid grid-cols-2 sm:grid-cols-3 gap-4 max-w-lg">
           <div>
-            <div className="text-2xl font-extrabold text-slate-900 font-mono">{auctions.length}</div>
+            <div className="text-2xl font-extrabold text-slate-900 font-mono">{totalAuctions}</div>
             <div className="text-xs text-slate-500">Total Auctions</div>
           </div>
           <div>
