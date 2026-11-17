@@ -17,13 +17,14 @@ const { isUuidFormat } = require('../utils/validators');
 const PAYMENT_WINDOW_HOURS = 24;
 
 /**
- * Is the viewer an admin right now? optionalAuth only checks the token's signature; the role and
- * the token's validity (account exists, password not changed since) are re-checked in the database.
+ * The viewer as the database knows them now, or null for a guest. optionalAuth only checks the
+ * token's signature; here the account must still exist and the token must be newer than the last
+ * password change, the same check as authMiddleware. (Before, only the admin check did this, so a
+ * token from before a password change still showed the seller and winner their email preview link.)
  */
-const isCurrentAdmin = async (viewer) => {
-  if (!viewer || viewer.role !== 'admin' || !isUuidFormat(viewer.id)) return false;
-  const current = await loadTokenUser(viewer);
-  return current?.role === 'admin';
+const currentViewer = async (viewer) => {
+  if (!viewer || !isUuidFormat(viewer.id)) return null;
+  return loadTokenUser(viewer); // { id, name, email, role } or null
 };
 
 /**
@@ -47,8 +48,9 @@ const toPublicAuction = (auction, viewer, viewerIsAdmin) => {
  */
 async function listAuctions(filters, viewer) {
   const { rows, total, limit, offset } = await auctionModel.findAll(filters);
-  const viewerIsAdmin = await isCurrentAdmin(viewer);
-  return { auctions: rows.map((a) => toPublicAuction(a, viewer, viewerIsAdmin)), total, limit, offset };
+  const current = await currentViewer(viewer);
+  const viewerIsAdmin = current?.role === 'admin';
+  return { auctions: rows.map((a) => toPublicAuction(a, current, viewerIsAdmin)), total, limit, offset };
 }
 
 /**
@@ -64,8 +66,9 @@ async function getAuction(id, viewer) {
     auction = await auctionModel.findById(id);
   }
 
-  const viewerIsAdmin = await isCurrentAdmin(viewer);
-  return toPublicAuction(auction, viewer, viewerIsAdmin);
+  const current = await currentViewer(viewer);
+  const viewerIsAdmin = current?.role === 'admin';
+  return toPublicAuction(auction, current, viewerIsAdmin);
 }
 
 /**

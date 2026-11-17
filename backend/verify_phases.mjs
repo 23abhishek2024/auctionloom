@@ -959,6 +959,20 @@ async function runVerification() {
     fanRow && fanRow.listings_count === 2 && fanRow.total_bids === 2 && fanRow.auctions_won === 2 && fanRow.total_spent === 230,
     fanRow ? `listings ${fanRow.listings_count}, bids ${fanRow.total_bids}, wins ${fanRow.auctions_won}, volume ${fanRow.total_spent}` : 'user not listed');
 
+  // 22. Public auction pages check a token like protected routes do: after the seller changes the
+  //     password, the old token no longer shows the seller's private field (the winner email preview link).
+  //     Runs last: it retires sellerToken.
+  const asGuest = await request('GET', `/api/auctions/${feeLotId}`);
+  const asSeller = await request('GET', `/api/auctions/${feeLotId}`, null, sellerToken);
+  await new Promise((r) => setTimeout(r, 1100)); // tokens carry whole seconds: make the change a later second
+  const sellerPwChange = await request('PUT', '/api/auth/password', { currentPassword: 'Password@123', newPassword: 'Password@456' }, sellerToken);
+  const asStaleSeller = await request('GET', `/api/auctions/${feeLotId}`, null, sellerToken);
+  const asNewSeller = await request('GET', `/api/auctions/${feeLotId}`, null, sellerPwChange.data.token);
+  const hasPreview = (r) => r.status === 200 && Object.prototype.hasOwnProperty.call(r.data.auction, 'winner_email_preview_url');
+  assert('Phase 11', 'A token from before a password change gets the public view of an auction (no private fields)',
+    !hasPreview(asGuest) && hasPreview(asSeller) && sellerPwChange.status === 200 && asStaleSeller.status === 200 && !hasPreview(asStaleSeller) && hasPreview(asNewSeller),
+    `guest ${hasPreview(asGuest)}, seller ${hasPreview(asSeller)}, stale token ${hasPreview(asStaleSeller)}, new token ${hasPreview(asNewSeller)}`);
+
   console.log('\n===========================================================');
   console.log('   🎉 ALL PHASES (1 TO 11) PASSED  ');
   console.log('===========================================================');

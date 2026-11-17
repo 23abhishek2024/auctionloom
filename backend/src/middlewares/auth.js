@@ -66,8 +66,8 @@ const authMiddleware = async (req, res, next) => {
  * Optional auth for public routes
  * - With a valid token, req.user is set so the handler can show extra fields to the people involved
  * - Without one (or with an expired one), the request simply continues as anonymous
- * (Only the signature is checked here; anything that grants more, such as admin-only fields,
- *  is re-checked against the database with loadTokenUser.)
+ * (Only the signature is checked here; before showing anything extra, auctionService checks the
+ *  token against the database with loadTokenUser, as authMiddleware does.)
  */
 const optionalAuth = (req, res, next) => {
   const authHeader = req.headers['authorization'];
