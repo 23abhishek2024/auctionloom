@@ -45,8 +45,9 @@ async function register({ email, password, role, name }) {
 }
 
 /**
- * Check an email and password. Both "no such email" and "wrong password" give the same
- * message, so the login form can't be used to find out which emails have accounts.
+ * Check an email and password. Both "no such email" and "wrong password" give the same message.
+ * (That alone doesn't hide which emails have accounts: sign-up answers "Email already registered",
+ *  as most sites do, and an unknown email skips the bcrypt check, so it answers a little faster.)
  */
 async function login(email, password) {
   const cleanEmail = email.trim().toLowerCase();
