@@ -454,7 +454,7 @@ export const AdminDashboardPage = () => {
           }`}
         >
           <TrendingUp className="w-4 h-4" />
-          Admin Commission &amp; Money Transitions
+          Admin Commission &amp; Money Transactions
         </button>
 
         <button
@@ -935,7 +935,7 @@ export const AdminDashboardPage = () => {
               </p>
             </div>
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-              <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Commission Transitions</p>
+              <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Commission Transactions</p>
               <p className="text-2xl font-extrabold text-amber-600 font-mono">
                 {commTab === 'transactions' 
                   ? (commTxSummary?.totalTransactions || commTransactions.length) 
@@ -1041,7 +1041,7 @@ export const AdminDashboardPage = () => {
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
                         <th className="py-3 px-4">Date &amp; Time</th>
-                        <th className="py-3 px-4">Money Transition</th>
+                        <th className="py-3 px-4">Money Transaction</th>
                         <th className="py-3 px-4">Auction / Reference</th>
                         <th className="py-3 px-4">From Whom (Seller)</th>
                         <th className="py-3 px-4">Winning Buyer</th>
