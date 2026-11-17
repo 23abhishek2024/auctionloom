@@ -38,16 +38,22 @@ const poolConfig = process.env.DATABASE_URL
 const pool = new Pool(poolConfig);
 
 /**
- * Test the connection on startup.
- * This will throw an error immediately if your DB credentials are wrong.
+ * Bring an older database up to the current schema (columns and tables added since it was created).
+ * Every statement is idempotent. The API server calls this once at start-up, BEFORE it accepts
+ * requests (see app.js): the ALTER TABLEs take exclusive table locks, and a query running at the
+ * same moment can deadlock with them. (It used to run as a side effect of require('./db') in every
+ * process: the scheduler's first pass deadlocked with it, and so could a bid or a seed script.)
+ * Exits the process if the database can't be reached at all; a failed upgrade is only logged.
  */
-pool.connect(async (err, client, release) => {
-  if (err) {
+async function upgradeSchema() {
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
     console.error('[DB] ❌ Failed to connect to PostgreSQL:', err.message);
     process.exit(1); // Kill the process — no point running without a DB
   }
   try {
-    // Auto-migration: ensure latest schema columns and tables exist in production DB
     await client.query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);
       ALTER TABLE users ADD COLUMN IF NOT EXISTS unpaid_commission NUMERIC(12,2) DEFAULT 0.00;
@@ -194,9 +200,9 @@ pool.connect(async (err, client, release) => {
   } catch (migErr) {
     console.warn('[DB] ⚠️ Schema auto-migration notice:', migErr.message);
   } finally {
-    release(); // Release the client back to the pool
+    client.release(); // Release the client back to the pool
   }
-});
+}
 
 // Listen for unexpected pool errors
 pool.on('error', (err) => {
@@ -205,3 +211,4 @@ pool.on('error', (err) => {
 });
 
 module.exports = pool;
+module.exports.upgradeSchema = upgradeSchema;

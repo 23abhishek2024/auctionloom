@@ -30,6 +30,7 @@ const adminRoutes = require('./routes/adminRoutes');
 const commissionRoutes = require('./routes/commissionRoutes');
 const walletRoutes = require('./routes/walletRoutes');
 const { getLeaderboard } = require('./controllers/userController');
+const pool = require('./db');
 const auctionClosureService = require('./services/auctionClosureService');
 const uploadService = require('./services/uploadService');
 const path = require('path');
@@ -235,14 +236,17 @@ const PORT = process.env.PORT || 5000;
 // instance, which can't run separate worker processes) still closes them on time.
 // SWEEP_INTERVAL_MS=0 turns it off; the test suite does this to prove the job queue works on its own.
 const SWEEP_INTERVAL_MS = process.env.SWEEP_INTERVAL_MS !== undefined ? parseInt(process.env.SWEEP_INTERVAL_MS, 10) || 0 : 15000;
-server.listen(PORT, () => {
-  console.log(`[App] Worker ${process.pid} listening on port ${PORT}`);
-  if (SWEEP_INTERVAL_MS > 0) {
-    auctionClosureService.closeExpiredAuctions();
-    setInterval(() => auctionClosureService.closeExpiredAuctions(), SWEEP_INTERVAL_MS);
-  } else {
-    console.log('[App] In-process closing sweep is off (SWEEP_INTERVAL_MS=0).');
-  }
+// Upgrade an older database first, then take requests (see upgradeSchema in db.js for why)
+pool.upgradeSchema().then(() => {
+  server.listen(PORT, () => {
+    console.log(`[App] Worker ${process.pid} listening on port ${PORT}`);
+    if (SWEEP_INTERVAL_MS > 0) {
+      auctionClosureService.closeExpiredAuctions();
+      setInterval(() => auctionClosureService.closeExpiredAuctions(), SWEEP_INTERVAL_MS);
+    } else {
+      console.log('[App] In-process closing sweep is off (SWEEP_INTERVAL_MS=0).');
+    }
+  });
 });
 
 module.exports = app;

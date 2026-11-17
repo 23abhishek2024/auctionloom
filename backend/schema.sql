@@ -94,11 +94,16 @@ CREATE TABLE IF NOT EXISTS commission_proofs (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     amount          DECIMAL(12, 2) NOT NULL,
+    payment_method  VARCHAR(50) DEFAULT 'MANUAL_WIRE',  -- MANUAL_WIRE (receipt upload) or WALLET
+    transaction_id  VARCHAR(255),
     comment         TEXT,
-    proof_url       TEXT NOT NULL,
+    notes           TEXT,
+    proof_url       TEXT,
+    screenshot_url  TEXT,
     status          VARCHAR(50) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
     admin_notes     TEXT,
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    reviewed_at     TIMESTAMP,
     updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
