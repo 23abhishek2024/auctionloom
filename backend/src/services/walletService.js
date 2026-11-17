@@ -1,4 +1,5 @@
 const pool = require('../db');
+const { AppError } = require('../utils/AppError');
 
 /**
  * Production-Grade Wallet Service
@@ -48,9 +49,7 @@ async function getOrCreateWallet(userId, externalClient = null) {
     } else {
       const userCheck = await client.query('SELECT id FROM users WHERE id = $1', [userId]);
       if (userCheck.rows.length === 0) {
-        const err = new Error('User account not found or session expired.');
-        err.statusCode = 401;
-        throw err;
+        throw new AppError(401, 'User account not found or session expired.');
       }
     }
     res = await client.query(
@@ -112,7 +111,7 @@ async function creditWallet({
 }) {
   const numericAmount = parseFloat(amount);
   if (isNaN(numericAmount) || numericAmount <= 0) {
-    throw new Error('Credit amount must be a positive number');
+    throw new AppError(400, 'Credit amount must be a positive number');
   }
 
   const client = passedClient || (await pool.connect());
@@ -233,7 +232,7 @@ async function debitWallet({
 }) {
   const numericAmount = parseFloat(amount);
   if (isNaN(numericAmount) || numericAmount <= 0) {
-    throw new Error('Debit amount must be a positive number');
+    throw new AppError(400, 'Debit amount must be a positive number');
   }
 
   const client = passedClient || (await pool.connect());
@@ -362,7 +361,7 @@ async function settleLotEscrow(args) {
 async function settleLotEscrowOnce({ auctionId, winnerId, sellerId, hammerPrice, idempotencyPrefix = '' }) {
   const numericPrice = parseFloat(hammerPrice);
   if (isNaN(numericPrice) || numericPrice <= 0) {
-    throw new Error('Valid hammer price required for settlement');
+    throw new AppError(400, 'Valid hammer price required for settlement');
   }
 
   const commission = Math.round(numericPrice * 0.05 * 100) / 100;
@@ -378,7 +377,7 @@ async function settleLotEscrowOnce({ auctionId, winnerId, sellerId, hammerPrice,
       [auctionId]
     );
     if (auctionRes.rows.length === 0) {
-      throw new Error('Auction not found');
+      throw new AppError(404, 'Auction not found');
     }
     const auction = auctionRes.rows[0];
 

@@ -8,8 +8,12 @@ const { AppError, sendAppError } = require('../utils/AppError');
  * Wallet Controller
  * Exposes endpoints for balance inquiry, simulated top-ups, lot settlements,
  * and commission clearance. The money moves in the services (walletService, topupService,
- * commissionService, auctionClosureService) using atomic double-entry operations;
+ * commissionService, auctionClosureService) using locked transactions and an append-only ledger;
  * this file checks the input and shapes the responses.
+ *
+ * Errors: an AppError or "insufficient funds" is answered here with its own status;
+ * anything else goes to the global error handler (app.js), which logs it and answers a
+ * generic 500 with a request id, so database or code details never reach the client.
  */
 
 // The 400 answer when the wallet doesn't hold enough money
@@ -21,8 +25,15 @@ const sendInsufficientFunds = (res, err) => res.status(400).json({
 });
 const isInsufficientFunds = (err) => err instanceof walletService.InsufficientFundsError || err.name === 'InsufficientFundsError';
 
+// Expected failures are answered here; everything else is passed on to the global error handler
+const handleWalletError = (err, res, next) => {
+  if (err instanceof AppError) return sendAppError(res, err);
+  if (isInsufficientFunds(err)) return sendInsufficientFunds(res, err);
+  return next(err);
+};
+
 // GET /api/wallet/transactions?page=1&limit=20&type=
-const getTransactions = async (req, res) => {
+const getTransactions = async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page || '1'));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20')));
@@ -46,16 +57,12 @@ const getTransactions = async (req, res) => {
       },
     });
   } catch (err) {
-    if (err.statusCode === 401) {
-      return res.status(401).json({ error: err.message });
-    }
-    console.error('[WalletController.getTransactions] Error:', err);
-    return res.status(500).json({ error: 'Failed to retrieve transactions' });
+    return handleWalletError(err, res, next);
   }
 };
 
 // GET /api/wallet
-const getWallet = async (req, res) => {
+const getWallet = async (req, res, next) => {
   try {
     const summary = await walletService.getWalletOverview(req.user);
     return res.status(200).json({
@@ -63,11 +70,7 @@ const getWallet = async (req, res) => {
       data: summary,
     });
   } catch (err) {
-    if (err.statusCode === 401) {
-      return res.status(401).json({ error: err.message });
-    }
-    console.error('[WalletController.getWallet] Error:', err);
-    return res.status(500).json({ error: 'Failed to retrieve wallet information' });
+    return handleWalletError(err, res, next);
   }
 };
 
@@ -78,7 +81,7 @@ const readIdempotencyKey = (req) => {
 };
 
 // POST /api/wallet/topup
-const topup = async (req, res) => {
+const topup = async (req, res, next) => {
   try {
     const { amount, note } = req.body;
     const numAmount = parseFloat(amount);
@@ -100,13 +103,12 @@ const topup = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('[WalletController.topup] Error:', err);
-    return res.status(500).json({ error: err.message || 'Failed to process top-up' });
+    return handleWalletError(err, res, next);
   }
 };
 
 // POST /api/wallet/settle-lot
-const settleLotPayment = async (req, res) => {
+const settleLotPayment = async (req, res, next) => {
   try {
     const { auctionId } = req.body;
 
@@ -136,26 +138,12 @@ const settleLotPayment = async (req, res) => {
       data: result.settlement,
     });
   } catch (err) {
-    if (err instanceof AppError) {
-      return sendAppError(res, err);
-    }
-    console.error('[WalletController.settleLotPayment] Error:', err);
-    if (err.message && err.message.toLowerCase().includes('already')) {
-      return res.status(400).json({
-        error: err.message,
-        code: 'ALREADY_SETTLED',
-        isSettled: true,
-      });
-    }
-    if (isInsufficientFunds(err)) {
-      return sendInsufficientFunds(res, err);
-    }
-    return res.status(500).json({ error: err.message || 'Failed to settle lot from wallet' });
+    return handleWalletError(err, res, next);
   }
 };
 
 // POST /api/wallet/settle-commission
-const settleCommission = async (req, res) => {
+const settleCommission = async (req, res, next) => {
   try {
     const { amount } = req.body;
     const numAmount = parseFloat(amount);
@@ -172,19 +160,12 @@ const settleCommission = async (req, res) => {
       data: result,
     });
   } catch (err) {
-    if (err instanceof AppError) {
-      return sendAppError(res, err);
-    }
-    console.error('[WalletController.settleCommission] Error:', err);
-    if (isInsufficientFunds(err)) {
-      return sendInsufficientFunds(res, err);
-    }
-    return res.status(500).json({ error: err.message || 'Failed to settle commission' });
+    return handleWalletError(err, res, next);
   }
 };
 
 // POST /api/wallet/withdraw
-const withdraw = async (req, res) => {
+const withdraw = async (req, res, next) => {
   try {
     const { amount, note } = req.body;
     const numAmount = parseFloat(amount);
@@ -202,11 +183,7 @@ const withdraw = async (req, res) => {
       data: result,
     });
   } catch (err) {
-    console.error('[WalletController.withdraw] Error:', err);
-    if (isInsufficientFunds(err)) {
-      return sendInsufficientFunds(res, err);
-    }
-    return res.status(500).json({ error: err.message || 'Failed to process withdrawal' });
+    return handleWalletError(err, res, next);
   }
 };
 

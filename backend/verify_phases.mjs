@@ -745,6 +745,19 @@ async function runVerification() {
   assert('Phase 11', 'Outbid bidder sees is_winner = false for that lot',
     loserBids.data.participations.find(p => p.id === centsAuctionId)?.is_winner === false);
 
+  // 3. Errors: every response carries a request id, and a broken JSON body is a 400 with a plain message
+  const badJsonRes = await new Promise((resolve, reject) => {
+    const req = http.request({ hostname: 'localhost', port: API_PORT, path: '/api/auth/login', method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => {
+      let body = '';
+      res.on('data', (c) => body += c);
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, data: JSON.parse(body) }));
+    });
+    req.on('error', reject);
+    req.end('{not json');
+  });
+  assert('Phase 11', 'Malformed JSON body answered 400 with a plain message (no parser internals)', badJsonRes.status === 400 && badJsonRes.data.error === 'Request body is not valid JSON.');
+  assert('Phase 11', 'Responses carry an X-Request-Id header for log lookup', typeof badJsonRes.headers['x-request-id'] === 'string' && badJsonRes.headers['x-request-id'].length > 10);
+
   console.log('\n===========================================================');
   console.log('   🎉 ALL PHASES (1 TO 10) ARE 100% VERIFIED AND PASSING!  ');
   console.log('===========================================================');

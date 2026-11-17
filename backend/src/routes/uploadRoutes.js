@@ -10,7 +10,11 @@ const { authMiddleware } = require('../middlewares/auth');
 router.post('/', authMiddleware, (req, res, next) => {
   upload.single('image')(req, res, (err) => {
     if (err) {
-      return res.status(400).json({ error: err.message || 'File upload failed.' });
+      // The client's fault (wrong file type, too large, ...): say what to fix. Anything else is ours.
+      if (err.name === 'MulterError' || err.status === 400) {
+        return res.status(400).json({ error: err.message || 'File upload failed.' });
+      }
+      return next(err);
     }
 
     if (!req.file) {

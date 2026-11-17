@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const pool = require('../db');
 const walletService = require('./walletService');
+const { AppError } = require('../utils/AppError');
 
 /**
  * Top-Up & Payout Service
@@ -11,7 +12,7 @@ const walletService = require('./walletService');
 async function requestTopup(userId, amount, provider = 'INTERNAL', metadata = {}) {
   const numericAmount = parseFloat(amount);
   if (isNaN(numericAmount) || numericAmount <= 0) {
-    throw new Error('Top-up amount must be a positive number');
+    throw new AppError(400, 'Top-up amount must be a positive number');
   }
 
   // Future external gateway workflow: record the request; the gateway's callback credits the wallet later
@@ -104,7 +105,7 @@ async function requestTopup(userId, amount, provider = 'INTERNAL', metadata = {}
 async function requestWithdrawal(userId, amount, metadata = {}) {
   const numericAmount = parseFloat(amount);
   if (isNaN(numericAmount) || numericAmount <= 0) {
-    throw new Error('Withdrawal amount must be a positive number');
+    throw new AppError(400, 'Withdrawal amount must be a positive number');
   }
 
   // One key per withdrawal. If the browser sends an Idempotency-Key header, a retry of the same
@@ -198,7 +199,7 @@ async function markPaymentVerified(requestId, { providerPaymentId = null, provid
 async function initiateTopup(userId, amount, provider = 'INTERNAL', metadata = {}) {
   const numericAmount = parseFloat(amount);
   if (isNaN(numericAmount) || numericAmount <= 0) {
-    throw new Error('Top-up amount must be a positive number');
+    throw new AppError(400, 'Top-up amount must be a positive number');
   }
 
   // CURRENT: fake direct top-up with INTERNAL provider

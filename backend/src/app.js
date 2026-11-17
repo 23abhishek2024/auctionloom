@@ -43,6 +43,10 @@ const server = http.createServer(app);
 initSocket(server);
 
 // ── Global Middlewares ────────────────────────────────────────
+// Request id + access log first, so even a request that fails in a later middleware
+// (for example a malformed JSON body) gets an id and a log line.
+app.use(loggerMiddleware);
+
 // CORS: only our own frontends may call the API from a browser. Requests without an Origin header
 // (curl, server-to-server, the keep-alive ping) are not cross-site browser calls, so CORS doesn't apply.
 const allowedOrigins = getAllowedOrigins();
@@ -55,7 +59,6 @@ app.use(
   })
 );
 app.use(express.json());
-app.use(loggerMiddleware);
 app.use(rateLimiterMiddleware);
 
 // Serve static uploaded files (Node.js Video 28 - Multer)
@@ -158,15 +161,33 @@ app.use((req, res) => {
 });
 
 // ── Global Error Handler ──────────────────────────────────────
-app.use((err, req, res, next) => {
+// Express knows this is the error handler because it takes 4 arguments (the unused 4th is _next).
+app.use((err, req, res, _next) => {
   // An expected failure reported by a service (not found, not allowed, ...): answer with its status
   if (err instanceof AppError) {
     return sendAppError(res, err);
   }
-  const reqId = req.id || 'unknown';
-  console.error(`[${reqId}] ❌ Unhandled Error:`, err.message);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal Server Error',
+
+  // A file upload the client can fix (too large, unexpected field, ...)
+  if (err.name === 'MulterError') {
+    return res.status(400).json({ error: err.message });
+  }
+
+  // A malformed request the client can fix: invalid JSON, a body that is too large, ...
+  // (body-parser marks these with a 4xx status and expose = true)
+  const status = err.status || err.statusCode;
+  if (status >= 400 && status < 500 && err.expose !== false) {
+    const message = err.type === 'entity.parse.failed' ? 'Request body is not valid JSON.' : err.message;
+    return res.status(status).json({ error: message });
+  }
+
+  // Anything else is a bug or an outage. Log the details with the request id, and tell the client
+  // only that something went wrong plus the id, so database and code details never leave the server.
+  const requestId = req.id || 'unknown';
+  console.error(`[${requestId}] ❌ Unhandled Error:`, err.stack || err.message);
+  res.status(500).json({
+    error: 'Something went wrong on our side. Please try again.',
+    requestId,
   });
 });
 
