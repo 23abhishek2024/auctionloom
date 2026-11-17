@@ -11,7 +11,7 @@ jobs:
   # Backend Verification & Automated Tests
   # ==========================================
   test-backend:
-    name: Backend Test Suite (Phases 1-8)
+    name: Backend Test Suite (11 phases + stress tests)
     runs-on: ubuntu-latest
 
     services:
