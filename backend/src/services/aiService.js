@@ -114,7 +114,9 @@ const callOpenAI = async (apiKey, keywords, category) => {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
-    signal: AbortSignal.timeout(18000), // same 18s limit as Gemini, then the built-in generator
+    // 12s: after Gemini's 18s the worst case is 30s, so the built-in generator still answers
+    // inside the browser's 35s wait (frontend/src/api/client.js, aiApi)
+    signal: AbortSignal.timeout(12000),
     body: JSON.stringify({
       model: 'gpt-4o-mini',
       messages: [
