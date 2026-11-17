@@ -74,35 +74,61 @@ async function createAuction(sellerId, { title, description, startingPrice, endT
 }
 
 /**
- * Delete an auction. Its seller can delete it until the first bid; an admin can delete it anytime.
+ * Run `fn(client, auction)` in one transaction with the auction row locked (SELECT ... FOR UPDATE).
+ * That is the same lock a bid takes, so no bid can arrive between our checks and the delete.
+ * Throws 404 if there is no such auction.
+ */
+async function withLockedAuction(id, fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const auction = await auctionModel.findByIdForUpdate(client, id);
+    if (!auction) throw new AppError(404, 'Auction not found.');
+    const result = await fn(client, auction);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// A lot that was paid for is part of the money records (ledger rows point at it), so it is never deleted
+const refuseIfPaid = (auction) => {
+  if (auction.is_settled) {
+    throw new AppError(409, 'This lot has been paid for, so it is part of the financial records and cannot be deleted.');
+  }
+};
+
+/**
+ * Delete an auction. Its seller can delete it until the first bid; an admin can delete it anytime,
+ * except a lot that has been paid for.
+ * Check and delete happen under one row lock: before, a bid placed between the "no bids yet"
+ * check and the delete was deleted along with the auction.
  */
 async function deleteAuction(id, user) {
-  const auction = await auctionModel.findById(id);
-  if (!auction) {
-    throw new AppError(404, 'Auction not found.');
-  }
-
-  if (auction.seller_id !== user.id && user.role !== 'admin') {
-    throw new AppError(403, 'You are not authorized to delete this auction.');
-  }
-
-  const hasBids = await auctionModel.hasBids(id);
-  if (hasBids && user.role !== 'admin') {
-    throw new AppError(400, 'Cannot delete auction after bids have already been placed.');
-  }
-
-  await auctionModel.deleteWithBidsAndJobs(id);
+  await withLockedAuction(id, async (client, auction) => {
+    if (auction.seller_id !== user.id && user.role !== 'admin') {
+      throw new AppError(403, 'You are not authorized to delete this auction.');
+    }
+    refuseIfPaid(auction);
+    if (user.role !== 'admin' && (await auctionModel.hasBids(id, client))) {
+      throw new AppError(400, 'Cannot delete auction after bids have already been placed.');
+    }
+    await auctionModel.deleteWithBidsAndJobs(client, id);
+  });
 }
 
 /**
- * Admin override: delete any auction, with its bids and queued jobs. Returns the deleted row.
+ * Admin override: delete any unpaid auction, with its bids and queued jobs. Returns the deleted row.
  */
 async function forceDeleteAuction(id) {
-  const deleted = await auctionModel.deleteWithBidsAndJobs(id);
-  if (!deleted) {
-    throw new AppError(404, 'Auction not found.');
-  }
-  return deleted;
+  return withLockedAuction(id, async (client, auction) => {
+    refuseIfPaid(auction);
+    return auctionModel.deleteWithBidsAndJobs(client, id);
+  });
 }
 
 /**

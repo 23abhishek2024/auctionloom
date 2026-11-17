@@ -153,21 +153,23 @@ const auctionModel = {
   },
 
   /**
-   * Check if an auction has received any bids
+   * Check if an auction has received any bids (pass the transaction's client to see its view)
    */
-  hasBids: async (auctionId) => {
-    const result = await pool.query('SELECT COUNT(*)::int AS count FROM bids WHERE auction_id = $1', [auctionId]);
-    return (result.rows[0]?.count || 0) > 0;
+  hasBids: async (auctionId, db = pool) => {
+    const result = await db.query('SELECT EXISTS (SELECT 1 FROM bids WHERE auction_id = $1) AS has_bids', [auctionId]);
+    return result.rows[0].has_bids;
   },
 
   /**
    * Delete an auction together with its bids and any queued jobs for it.
+   * Call it inside a transaction (with that transaction's client) so the three deletes
+   * happen together or not at all.
    * Returns the deleted auction row, or undefined if there was no such auction.
    */
-  deleteWithBidsAndJobs: async (id) => {
-    await pool.query(`DELETE FROM jobs WHERE payload->>'auction_id' = $1`, [id]);
-    await pool.query('DELETE FROM bids WHERE auction_id = $1', [id]);
-    const result = await pool.query('DELETE FROM auctions WHERE id = $1 RETURNING *', [id]);
+  deleteWithBidsAndJobs: async (client, id) => {
+    await client.query(`DELETE FROM jobs WHERE payload->>'auction_id' = $1`, [id]);
+    await client.query('DELETE FROM bids WHERE auction_id = $1', [id]);
+    const result = await client.query('DELETE FROM auctions WHERE id = $1 RETURNING *', [id]);
     return result.rows[0];
   },
 

@@ -14,6 +14,7 @@
  *   3. Double settlement: 20 settle requests for one lot      -> winner charged exactly once
  *   4. Republish a sold-and-paid lot                          -> refused
  *   5. Cross settlement: users buying from each other at once -> no deadlock, no money lost
+ *   6. Bid vs delete: a bid and the seller's delete at the same moment -> never both succeed
  */
 const pool = require('./src/db');
 
@@ -167,6 +168,32 @@ async function main() {
     report('Cross settlement: 30 simultaneous settlements locking the same wallets',
       failed === 0 && settled === pairs * 2 && total === expected,
       `${settled}/${pairs * 2} settled, ${failed} failed; U+V balance $${total} (expected $${expected})`);
+  }
+
+  // ── 6. Bid vs delete ─────────────────────────────────────────
+  {
+    // The seller may delete a lot only while it has no bids. Fire a bid and the delete together:
+    // either the bid wins (delete refused, the bid stays) or the delete wins (the bid finds no lot).
+    // Both succeeding would mean a bid was accepted and then silently deleted.
+    const rounds = 20;
+    let bothSucceeded = 0;
+    let bidWon = 0;
+    let deleteWon = 0;
+    let other = 0;
+    for (let i = 0; i < rounds; i++) {
+      const id = await createAuction(seller, 10, `Bid vs delete ${i}`);
+      const [bid, del] = await Promise.all([
+        call('POST', `/auctions/${id}/bids`, b3.token, { amount: 11 }),
+        call('DELETE', `/auctions/${id}`, seller.token),
+      ]);
+      if (bid.status === 201 && del.status === 200) bothSucceeded++;
+      else if (bid.status === 201 && del.status === 400) bidWon++;
+      else if (del.status === 200 && bid.status === 404) deleteWon++;
+      else other++;
+    }
+    report('Bid vs delete: a bid and the seller\'s delete at the same moment never both succeed',
+      bothSucceeded === 0 && other === 0,
+      `${rounds} rounds -> bid first ${bidWon}, delete first ${deleteWon}, both succeeded ${bothSucceeded}, other ${other}`);
   }
 
   const passed = results.filter((r) => r.ok).length;

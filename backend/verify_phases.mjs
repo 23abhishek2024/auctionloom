@@ -772,7 +772,12 @@ async function runVerification() {
   for (const id of fanLots) await endAuctionNow(id);
   const adminUsers = await request('GET', `/api/admin/users?search=fanout_${uniqueId}`, null, adminToken);
   const fanRow = adminUsers.data.users.find(u => u.id === multiId);
-  // 9. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
+  // 9. A lot that was paid for can't be deleted, not even by an admin (it is part of the money records)
+  const deletePaidLot = await request('DELETE', `/api/admin/auctions/${testAucId}`, null, adminToken);
+  const paidLotStill = await pool.query('SELECT 1 FROM auctions WHERE id = $1', [testAucId]);
+  assert('Phase 11', 'Admin delete of a paid lot refused (409) and the lot stays', deletePaidLot.status === 409 && paidLotStill.rowCount === 1);
+
+  // 10. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
   const bruteEmail = `brute_${uniqueId}@test.com`;
   let lastBrute;
   for (let i = 0; i < 11; i++) {
