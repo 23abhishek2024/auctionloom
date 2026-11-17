@@ -5,9 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   PlusCircle,
   ArrowLeft,
-  Calendar,
   DollarSign,
-  FileText,
   Tag,
   AlertCircle,
   Sparkles,
@@ -16,7 +14,6 @@ import {
   UploadCloud,
   Image as ImageIcon,
   Check,
-  X,
 } from 'lucide-react';
 
 const PRESET_GALLERY = [

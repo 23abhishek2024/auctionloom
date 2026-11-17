@@ -1,5 +1,5 @@
 import React from 'react';
-import { UserCheck, Gavel, Timer, CreditCard, ShieldCheck, ArrowRight, Sparkles, Trophy } from 'lucide-react';
+import { UserCheck, Gavel, Timer, ShieldCheck, ArrowRight, Sparkles, Trophy } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export const HowItWorksPage = () => {

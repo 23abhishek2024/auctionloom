@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { userApi } from '../api/client';
 import { Trophy, Medal, Award, Crown, Search, RefreshCw, Flame, Sparkles, TrendingUp } from 'lucide-react';
-import { Link } from 'react-router-dom';
 
 export const LeaderboardPage = () => {
   const [leaderboard, setLeaderboard] = useState([]);

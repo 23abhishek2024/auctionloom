@@ -5,8 +5,6 @@ import { TopupModal } from '../components/TopupModal';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import {
-  Clock,
-  DollarSign,
   TrendingUp,
   History,
   ShieldCheck,
@@ -20,9 +18,6 @@ import {
   MessageSquare,
   Send,
   Flame,
-  Sparkles,
-  Layers,
-  Image as ImageIcon,
   X,
   CreditCard,
   Copy,
@@ -77,7 +72,6 @@ export const AuctionDetailPage = () => {
   const [sellerPayout, setSellerPayout] = useState(null);
   const [copiedKey, setCopiedKey] = useState(null);
   const [lotPaid, setLotPaid] = useState(false);
-  const [lotPaymentData, setLotPaymentData] = useState(null);
   const chatBottomRef = useRef(null);
 
   // Wallet & Settlement States
@@ -116,7 +110,6 @@ export const AuctionDetailPage = () => {
       const res = await walletApi.settleLot({ auctionId: id });
       setSettleSuccess(res.data?.data || res.data?.message || 'Lot successfully settled from wallet!');
       setLotPaid(true);
-      setLotPaymentData(res.data?.data);
       // Immediately mark auction as settled in local state so UI locks into settled mode
       setAuction((prev) => (prev ? { ...prev, is_settled: true, settled_at: new Date().toISOString() } : prev));
       if (res.data?.data?.winnerWallet?.balance !== undefined) {

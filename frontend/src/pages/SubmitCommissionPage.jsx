@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { commissionApi, walletApi, resolveImageUrl } from '../api/client';
 import { TopupModal } from '../components/TopupModal';
-import { useAuth } from '../context/AuthContext';
 import {
   DollarSign,
   Upload,
@@ -21,10 +20,8 @@ import {
 } from 'lucide-react';
 
 export const SubmitCommissionPage = () => {
-  const { user } = useAuth();
   const [unpaidCommission, setUnpaidCommission] = useState(0);
   const [proofs, setProofs] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -44,7 +41,6 @@ export const SubmitCommissionPage = () => {
 
   const fetchCommissionData = async () => {
     try {
-      setLoading(true);
       const [proofsRes, walletRes] = await Promise.all([
         commissionApi.getMyProofs(),
         walletApi.getWallet().catch(() => ({ data: { data: { wallet: { balance: 0 } } } })),
@@ -60,8 +56,6 @@ export const SubmitCommissionPage = () => {
       }
     } catch (err) {
       console.error('Failed to load commission data:', err);
-    } finally {
-      setLoading(false);
     }
   };
 

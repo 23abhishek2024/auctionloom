@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auctionApi } from '../api/client';
 import { AuctionCard } from '../components/AuctionCard';
-import { Search, SlidersHorizontal, RefreshCw, Zap, ShieldCheck, Flame, Plus } from 'lucide-react';
+import { Search, RefreshCw, Zap, Flame, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -12,7 +12,7 @@ export const DashboardPage = () => {
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL'); // ALL, ACTIVE, ENDING_SOON, CLOSED
-  const { user, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
 
   const fetchAuctions = async () => {
     try {

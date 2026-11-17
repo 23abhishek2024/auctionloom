@@ -7,7 +7,6 @@ import {
   DollarSign,
   Gavel,
   CheckCircle2,
-  XCircle,
   Clock,
   TrendingUp,
   RefreshCw,
@@ -16,15 +15,12 @@ import {
   Eye,
   Check,
   X,
-  ExternalLink,
-  Lock,
   Pause,
   Play,
   Download,
   ChevronLeft,
   ChevronRight,
   Zap,
-  Activity,
   ShieldCheck,
   AlertCircle,
 } from 'lucide-react';
@@ -44,7 +40,6 @@ export const AdminDashboardPage = () => {
   const [activeTab, setActiveTab] = useState('commission'); // 'commission', 'proofs', 'users', 'auctions'
   const [proofStatusFilter, setProofStatusFilter] = useState('PENDING'); // 'PENDING', 'APPROVED', 'REJECTED', 'ALL'
   const [userSearch, setUserSearch] = useState('');
-  const [auctionSearch, setAuctionSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [selectedProofModal, setSelectedProofModal] = useState(null);
@@ -994,7 +989,11 @@ export const AdminDashboardPage = () => {
                   className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-indigo-400" id="comm-to-date" />
               </div>
               <button 
-                onClick={() => { setCommPage(1); commTab === 'transactions' ? fetchCommissionTransactions({ page: 1 }) : fetchCommissionLedger({ page: 1 }); }}
+                onClick={() => {
+                  setCommPage(1);
+                  if (commTab === 'transactions') fetchCommissionTransactions({ page: 1 });
+                  else fetchCommissionLedger({ page: 1 });
+                }}
                 className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold shadow hover:bg-indigo-700 transition-all cursor-pointer" id="comm-apply-filter"
               >
                 Apply

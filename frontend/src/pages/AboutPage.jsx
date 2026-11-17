@@ -1,6 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Cpu, Database, Award, CheckCircle2, Lock, Zap, Sparkles } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { ShieldCheck, Lock, Zap, Sparkles } from 'lucide-react';
 
 export const AboutPage = () => {
   return (

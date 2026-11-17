@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, DollarSign, ArrowUpRight, User, CheckCircle2, Image as ImageIcon } from 'lucide-react';
+import { Clock, ArrowUpRight } from 'lucide-react';
 import { resolveImageUrl } from '../api/client';
 
 export const AuctionCard = ({ auction }) => {

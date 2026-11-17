@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext';
 
 const formatSocketUrl = (raw) => {
   if (!raw || typeof raw !== 'string') return 'http://localhost:5000';
-  const match = raw.match(/https?:\/\/[^\s\r\n\/]+/);
+  const match = raw.match(/https?:\/\/[^\s\r\n/]+/);
   if (match) return match[0];
   return 'http://localhost:5000';
 };

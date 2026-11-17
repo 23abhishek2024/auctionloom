@@ -8,22 +8,14 @@ import {
   Trophy,
   TrendingUp,
   Tag,
-  Clock,
   ArrowUpRight,
   PlusCircle,
   Pencil,
   CheckCircle2,
-  AlertCircle,
-  Layers,
   Sparkles,
-  Zap,
-  Radio,
   RefreshCw,
   RotateCcw,
   CreditCard,
-  Building2,
-  QrCode,
-  DollarSign,
   X,
 } from 'lucide-react';
 import { auctionApi } from '../api/client';
@@ -497,6 +489,12 @@ export const UserHubPage = () => {
           </button>
         </div>
 
+        {/* Loading the hub failed (it used to fail silently) */}
+        {error && (
+          <div className="mb-6 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+            {error}
+          </div>
+        )}
 
         {/* ── TAB 1: BIDS & PARTICIPATIONS ───────────────────── */}
         {activeTab === 'bids' && (

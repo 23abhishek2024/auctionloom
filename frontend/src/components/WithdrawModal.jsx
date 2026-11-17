@@ -2,7 +2,6 @@ import React, { useRef, useState } from 'react';
 import { walletApi } from '../api/client';
 import { newIdempotencyKey } from '../utils/idempotency';
 import {
-  Wallet,
   X,
   ArrowUpRight,
   CheckCircle2,

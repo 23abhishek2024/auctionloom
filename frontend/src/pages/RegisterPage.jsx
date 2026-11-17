@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { UserPlus, Mail, Lock, AlertCircle, Gavel, User, Store, Eye, EyeOff } from 'lucide-react';
+import { UserPlus, Mail, Lock, AlertCircle, Gavel, User, Eye, EyeOff } from 'lucide-react';
 
 export const RegisterPage = () => {
   const [name, setName] = useState('');
@@ -10,7 +10,7 @@ export const RegisterPage = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [role, setRole] = useState('auctioneer');
+  const [role] = useState('auctioneer'); // every account can buy and sell
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
