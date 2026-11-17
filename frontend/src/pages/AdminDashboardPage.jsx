@@ -36,6 +36,7 @@ export const AdminDashboardPage = () => {
 
   const [metrics, setMetrics] = useState(null);
   const [revenueChart, setRevenueChart] = useState([]);
+  const [revenueChartIsSample, setRevenueChartIsSample] = useState(false);
   const [users, setUsers] = useState([]);
   const [proofs, setProofs] = useState([]);
   const [auctions, setAuctions] = useState([]);
@@ -90,6 +91,7 @@ export const AdminDashboardPage = () => {
 
       setMetrics(mRes.data.metrics);
       setRevenueChart(rRes.data.chartData || []);
+      setRevenueChartIsSample(Boolean(rRes.data.isSample));
       setUsers(uRes.data.users || []);
       setProofs(pRes.data.proofs || []);
       setAuctions(aRes.data.auctions || []);
@@ -1214,8 +1216,19 @@ export const AdminDashboardPage = () => {
           <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 mt-10">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Monthly Revenue &amp; Commission Ledger</h2>
-                <p className="text-xs text-slate-500">Gross settled marketplace volume vs. platform 5% fee collection</p>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  Monthly Revenue &amp; Commission Ledger
+                  {revenueChartIsSample && (
+                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300" title="No auction has sold yet, so the chart shows made-up example numbers">
+                      SAMPLE DATA
+                    </span>
+                  )}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  {revenueChartIsSample
+                    ? 'No sales yet: these bars are example numbers, replaced by real ones after the first sale.'
+                    : 'Volume of sold lots (by sale month, last 12 months with sales) vs. the platform 5% fee'}
+                </p>
               </div>
               <div className="flex items-center gap-4 text-xs font-mono">
                 <span className="flex items-center gap-1.5">

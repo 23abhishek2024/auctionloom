@@ -798,7 +798,14 @@ async function runVerification() {
   assert('Phase 11', 'Admin cannot freeze/reopen a closed lot (409) or force-close a running one (400)',
     freezeClosed.status === 409 && forceClose.status === 400 && closedLotState === 'CLOSED');
 
-  // 12. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
+  // 12. Revenue chart: real sales are grouped by the month they sold, and isSample is false
+  const chartRes = await request('GET', '/api/admin/revenue-chart', null, adminToken);
+  const saleMonth = new Date().toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }).replace(',', '');
+  assert('Phase 11', 'Revenue chart uses real sales (isSample false) and includes this month',
+    chartRes.status === 200 && chartRes.data.isSample === false && chartRes.data.chartData.some((m) => m.month === saleMonth),
+    `months: ${(chartRes.data.chartData || []).map((m) => m.month).join(', ')}`);
+
+  // 13. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
   const bruteEmail = `brute_${uniqueId}@test.com`;
   let lastBrute;
   for (let i = 0; i < 11; i++) {

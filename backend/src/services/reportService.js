@@ -97,41 +97,49 @@ async function getPlatformMetrics() {
 }
 
 /**
- * Monthly gross volume and platform commission (last 12 months with sales), for the chart.
- * With no sales yet it returns sample months, so the chart has something to preview.
+ * Monthly gross volume and platform commission for the chart: the latest 12 months that had sales,
+ * oldest first. A lot counts in the month it SOLD (its end time), not the month it was listed.
+ * With no sales yet it returns made-up sample months and isSample = true, so the page can label them.
+ * Returns { months: [{ month, grossVolume, commission, auctionsCount }], isSample }.
  */
 async function getRevenueChart() {
   const result = await pool.query(`
-    SELECT
-      TO_CHAR(created_at, 'Mon YYYY') AS month_label,
-      DATE_TRUNC('month', created_at) AS month_date,
-      COUNT(id)::int AS auction_count,
-      COALESCE(SUM(current_price), 0)::numeric AS gross_volume,
-      COALESCE(SUM(CASE WHEN commission_amount > 0 THEN commission_amount ELSE ROUND(current_price * 0.05, 2) END), 0)::numeric AS platform_commission
-    FROM auctions
-    WHERE status = 'CLOSED' AND winner_id IS NOT NULL
-    GROUP BY DATE_TRUNC('month', created_at), TO_CHAR(created_at, 'Mon YYYY')
+    SELECT month_label, month_date, auction_count, gross_volume, platform_commission
+    FROM (
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', end_time), 'Mon YYYY') AS month_label,
+        DATE_TRUNC('month', end_time) AS month_date,
+        COUNT(id)::int AS auction_count,
+        COALESCE(SUM(current_price), 0)::numeric AS gross_volume,
+        COALESCE(SUM(CASE WHEN commission_amount > 0 THEN commission_amount ELSE ROUND(current_price * 0.05, 2) END), 0)::numeric AS platform_commission
+      FROM auctions
+      WHERE status = 'CLOSED' AND winner_id IS NOT NULL
+      GROUP BY DATE_TRUNC('month', end_time)
+      ORDER BY month_date DESC
+      LIMIT 12
+    ) latest
     ORDER BY month_date ASC
-    LIMIT 12
   `);
 
-  let chartData = result.rows;
-  if (chartData.length === 0) {
-    const months = ['Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026', 'Sep 2026'];
-    chartData = months.map((m, idx) => ({
-      month_label: m,
-      auction_count: (idx + 1) * 3,
-      gross_volume: (idx + 1) * 2400,
-      platform_commission: (idx + 1) * 120,
-    }));
-  }
+  const isSample = result.rows.length === 0;
+  const rows = isSample
+    ? ['Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026', 'Sep 2026'].map((m, idx) => ({
+        month_label: m,
+        auction_count: (idx + 1) * 3,
+        gross_volume: (idx + 1) * 2400,
+        platform_commission: (idx + 1) * 120,
+      }))
+    : result.rows;
 
-  return chartData.map((d) => ({
-    month: d.month_label,
-    grossVolume: parseFloat(d.gross_volume),
-    commission: parseFloat(d.platform_commission),
-    auctionsCount: d.auction_count,
-  }));
+  return {
+    isSample,
+    months: rows.map((d) => ({
+      month: d.month_label,
+      grossVolume: parseFloat(d.gross_volume),
+      commission: parseFloat(d.platform_commission),
+      auctionsCount: d.auction_count,
+    })),
+  };
 }
 
 /**

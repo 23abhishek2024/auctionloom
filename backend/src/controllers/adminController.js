@@ -79,12 +79,13 @@ const getAdminMetrics = async (req, res, next) => {
 
 /**
  * GET /api/admin/revenue-chart
- * Returns monthly gross volume and platform commission breakdown for charts
+ * Monthly gross volume and platform commission for the chart; isSample = true means
+ * there are no sales yet and the months are example numbers
  */
 const getRevenueChart = async (req, res, next) => {
   try {
-    const chartData = await reportService.getRevenueChart();
-    res.json({ chartData });
+    const { months, isSample } = await reportService.getRevenueChart();
+    res.json({ chartData: months, isSample });
   } catch (err) {
     next(err);
   }
