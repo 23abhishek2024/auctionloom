@@ -44,20 +44,21 @@ async function register({ email, password, role, name }) {
   return { user, token };
 }
 
+// A real bcrypt hash of a throwaway value (cost 10, like real passwords). Comparing against it when the
+// email is unknown makes that answer take as long as a wrong password, so timing doesn't reveal accounts.
+const TIMING_PLACEHOLDER_HASH = '$2b$10$uMiL7x.inkViH18Gc07h6es0iG.fmWfVfiP240gP3UlgKVo4KNGvm';
+
 /**
- * Check an email and password. Both "no such email" and "wrong password" give the same message.
- * (That alone doesn't hide which emails have accounts: sign-up answers "Email already registered",
- *  as most sites do, and an unknown email skips the bcrypt check, so it answers a little faster.)
+ * Check an email and password. "No such email" and "wrong password" give the same message and take
+ * about the same time (an unknown email used to skip bcrypt and answer ~70 ms faster).
+ * (Sign-up still answers "Email already registered", as most sites do.)
  */
 async function login(email, password) {
   const cleanEmail = email.trim().toLowerCase();
   const user = await userModel.findByEmail(cleanEmail);
-  if (!user) {
-    throw new AppError(401, 'Invalid email or password.');
-  }
 
-  const isMatch = await bcrypt.compare(password, user.password_hash);
-  if (!isMatch) {
+  const isMatch = await bcrypt.compare(password, user ? user.password_hash : TIMING_PLACEHOLDER_HASH);
+  if (!user || !isMatch) {
     throw new AppError(401, 'Invalid email or password.');
   }
 
