@@ -94,7 +94,7 @@ AuctionLoom resolves these challenges through a strict, zero-trust engineering a
 | **Client Routing** | React Router | `7.18.3` | Declarative client-side routing with protected route authorization guards. |
 | **Styling & Icons** | Tailwind CSS / Lucide | `3.4.19` / `1.44.0` | Utility-first responsive design system and modern iconography. |
 | **API Gateway** | Express.js | `5.2.1` | RESTful API server with route modularization and centralized error handling. |
-| **Process Clustering** | Node.js Cluster | `v20+` / `v22+` | Optional multi-process mode (`WEB_CONCURRENCY`); production runs one process by default. |
+| **Process Clustering** | Node.js Cluster | `v20+` / `v22+` | Optional multi-process mode (`WEB_CONCURRENCY`, default 1 process). More than one process needs a shared Socket.IO adapter (not included), otherwise live updates reach only the browsers on the same process. |
 | **Relational Database**| PostgreSQL | `15-alpine` | Primary ACID relational database with row-level pessimistic locking. |
 | **Database Driver** | `pg` (node-postgres) | `8.23.0` | High-performance client pool with cloud SSL connection support. |
 | **Real-Time Layer** | Socket.IO | `4.8.3` | Low-latency bi-directional event distribution across auction rooms. |
@@ -377,7 +377,7 @@ cp .env.example .env
 | `TRUST_PROXY` | No | `1` in production, `0` otherwise | Proxy hops to trust for the client IP (rate limits). `/health` shows the `clientIp` the server sees. |
 | `ALLOW_DEMO_RESET` | No | `false` | Set to `true` to allow the admin "Purge & Reset" when `NODE_ENV=production`. |
 | `SWEEP_INTERVAL_MS` | No | `15000` | How often the API process closes ended auctions; `0` turns it off (CI does this to test the worker). |
-| `WEB_CONCURRENCY` | No | `1` in production | Number of cluster processes started by `npm start`. |
+| `WEB_CONCURRENCY` | No | `1` | Number of cluster processes started by `npm start`. Keep `1` unless you add a shared Socket.IO adapter (see §18). |
 
 ---
 
@@ -453,9 +453,9 @@ The frontend will be available at [http://localhost:5173](http://localhost:5173)
 
 | Command | Script Invocation | Purpose |
 |---|---|---|
-| `npm start` | `node src/index.js` | Launches backend in production cluster mode. |
+| `npm start` | `node src/index.js` | Starts the backend: one process, or `WEB_CONCURRENCY` cluster workers. |
 | `npm run dev` | `nodemon src/app.js` | Launches development server with hot-reload via nodemon. |
-| `npm run cluster` | `node src/index.js` | Forks one worker per CPU core using Node.js Cluster module. |
+| `npm run cluster` | `node src/index.js` | Same as `npm start`; set `WEB_CONCURRENCY=4` to fork 4 workers (needs a shared Socket.IO adapter for live updates). |
 | `npm run worker` | `node src/workers/jobWorker.js` | Starts standalone distributed job worker (`SKIP LOCKED`). |
 | `npm run scheduler` | `node src/workers/scheduler.js` | Starts background poller queuing expired lots every 30s. |
 | `npm run migrate` | `node scripts/migrate.js` | Executes DDL schema migrations against configured database. |
@@ -810,7 +810,7 @@ Deploy using the Blueprint in [render.yaml](render.yaml):
 
 * **Single-Instance Mode (the live demo)**: Without worker containers (development, Render's free plan), the 15-second sweep in `app.js` closes expired lots; opening an ended auction also closes it on the spot.
 * **Database Connection Limits**: Cloud databases (such as Supabase free tier or Neon) impose concurrent connection caps. Configure `DB_POOL_MAX=10` or use an external connection pooler (e.g., PgBouncer / Supabase Supavisor) when scaling API instances.
-* **Stateless Socket Clustering**: To scale the WebSocket gateway across multiple Node.js cluster processes or multiple server instances, configure the official `@socket.io/redis-adapter` backed by a Redis instance.
+* **Socket Clustering**: Socket.IO rooms live in one process's memory, so the server runs one process by default. To run several cluster processes or server instances, add the official `@socket.io/redis-adapter` (backed by Redis) and sticky sessions; without them a bid is broadcast only to the browsers connected to the process that handled it.
 
 ---
 

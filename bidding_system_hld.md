@@ -12,7 +12,7 @@
 2. **Append-Only Wallet Ledger**: Zero-overdraft invariant (`CHECK (balance >= 0)`), a ledger row with `balance_after` for every change, and settlements whose entries sum to zero (buyer -P, seller +0.95P, platform +0.05P). Top-ups and withdrawals are simulated, so they have no counter-entry in an external account.
 3. **PostgreSQL Job Queue (`SKIP LOCKED`)**: A scheduler polls for ended auctions and queues close jobs; competing workers claim them with `FOR UPDATE SKIP LOCKED`. (This is a polling job queue, not a transactional outbox: the job is not written in the same transaction as the business change. Closing is idempotent, and the in-process sweep also closes ended auctions, so a missed job only delays closing.)
 4. **Resilient AI Luxury Appraisal**: Integrates **Google Gemini 3.6 Flash** via structured JSON schema contracts with an autonomous, deterministic heuristic fallback engine (guaranteeing 0% runtime failure).
-5. **Multi-Core Cluster Supervision**: Native Node.js cluster management utilizing OS-level socket distribution (`SCM_RIGHTS`) with automatic zero-downtime worker resurrection.
+5. **Optional Cluster Mode**: `WEB_CONCURRENCY` > 1 forks Node.js cluster workers and restarts any that crash. Socket.IO rooms are per process, so this needs a shared adapter (e.g. Redis, not included); the live demo runs one process.
 
 ---
 
@@ -45,13 +45,13 @@
 ```mermaid
 graph TD
     %% Clients
-    Clients[React 19 SPA Clients\nBrowser / Mobile Web] -->|HTTPS REST| LB(Node.js Primary Process / Load Balancer)
+    Clients[React 19 SPA Clients\nBrowser / Mobile Web] -->|HTTPS REST| LB(Node.js entry: one process by default\noptional cluster primary with WEB_CONCURRENCY)
     Clients <-->|WebSocket / Socket.IO| LB
 
     %% Node.js Application Layer (Clusterized)
     subgraph AppLayer["Express Application Layer (MVC Pattern)"]
         LB --> Worker1(Worker Process 1 - PID A)
-        LB --> Worker2(Worker Process 2 - PID B)
+        LB -.->|cluster mode only: needs a shared Socket.IO adapter| Worker2(Worker Process 2 - PID B)
         
         subgraph Middlewares
             Logger[Logger Middleware\nInjects crypto.randomUUID req.id]
@@ -516,7 +516,7 @@ sequenceDiagram
 | :--- | :--- | :--- | :--- |
 | **Frontend Framework** | **React 19 (Vite SPA)** | Next.js, Vue, Angular | React 19 provides fine-grained Virtual DOM reconciliation, fiber time-slicing, and zero SSR complexity for a pure real-time trading dashboard. |
 | **Backend Runtime** | **Node.js (Express 5)** | Java Spring Boot, Go, Python Django | Non-blocking event-driven I/O (`libuv` / `epoll`) handles 50,000+ idle WebSocket connections with minimal RAM (~2KB per socket). |
-| **Process Clustering**| **Node.js Cluster Module** | PM2, Single Process | Native multi-core utilization via OS socket handoff (`SCM_RIGHTS`) with automated worker resurrection on unhandled crashes. |
+| **Process Clustering**| **Single process; Node.js Cluster optional** | PM2, always-on cluster | One process by default. `WEB_CONCURRENCY` > 1 uses more cores and restarts crashed workers, but Socket.IO rooms are per process, so it needs a shared adapter (Redis) and sticky sessions, which this project doesn't include. |
 | **Database Engine** | **PostgreSQL 15** | MongoDB, MySQL, DynamoDB | True ACID transactions, engine-level row locking (`SELECT FOR UPDATE`), partial indexing, and `SKIP LOCKED` distributed queue support. |
 | **Concurrency Control**| **Pessimistic Locking** | Optimistic Locking (OCC), Redis Redlock | Eliminates Thundering Herd retry storms during the final seconds of hot auctions; immune to Redis split-brain and GC pause bugs. |
 | **Financial Ledger** | **Append-only ledger + locked balance** | Balance column only | Every change is auditable (`balance_after`); a settlement's entries sum to zero (buyer -P = seller +0.95P + platform +0.05P). Simulated top-ups/withdrawals have no external counter-account, so this is not full double-entry bookkeeping. |
