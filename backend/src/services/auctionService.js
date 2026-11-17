@@ -1,6 +1,6 @@
 const pool = require('../db');
 const auctionModel = require('../models/auctionModel');
-const userModel = require('../models/userModel');
+const { loadTokenUser } = require('../middlewares/auth');
 const auctionClosureService = require('./auctionClosureService');
 const { getIO } = require('./socketService');
 const { AppError } = require('../utils/AppError');
@@ -17,11 +17,12 @@ const { isUuidFormat } = require('../utils/validators');
 const PAYMENT_WINDOW_HOURS = 24;
 
 /**
- * Is the viewer an admin right now? (optionalAuth only decodes the token, and a token's role can be stale)
+ * Is the viewer an admin right now? optionalAuth only checks the token's signature; the role and
+ * the token's validity (account exists, password not changed since) are re-checked in the database.
  */
 const isCurrentAdmin = async (viewer) => {
   if (!viewer || viewer.role !== 'admin' || !isUuidFormat(viewer.id)) return false;
-  const current = await userModel.findRoleById(viewer.id);
+  const current = await loadTokenUser(viewer);
   return current?.role === 'admin';
 };
 

@@ -306,6 +306,14 @@ const getCommissionTransactions = async (req, res, next) => {
  */
 const purgeAndResetDatabase = async (req, res, next) => {
   try {
+    // On the live site one click would wipe every account and auction and bring back the well-known
+    // demo password; it only runs there if the server owner turned it on (ALLOW_DEMO_RESET=true)
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_RESET !== 'true') {
+      return res.status(403).json({
+        error: 'Database reset is turned off on the live site. Set ALLOW_DEMO_RESET=true on the server to allow it.',
+      });
+    }
+
     const { users, balances } = await systemService.purgeAndReset({
       runTestAuctions: req.body.runTestAuctions !== false,
     });

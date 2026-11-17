@@ -529,11 +529,11 @@ The database schema is defined in [backend/schema.sql](backend/schema.sql) and a
 
 ---
 
-## 11. Pre-Configured Test Accounts
+## 11. Local Test Accounts
 
-Executing `npm run seed` or `npm run clean-verify` populates the database with 5 standardized user accounts and 1 platform administrator.
+Running `npm run seed` or `npm run clean-verify` against **your local database** creates 5 user accounts and 1 administrator for development. Their password is set in `backend/scripts/reset_and_seed.js`.
 
-* **Universal Seed Password**: `test@123`
+> **These are local development accounts only.** On any deployed copy, log in as the admin once and change the password under *My Hub → Payout & Password* (this also logs out every other session). The admin "Purge & Reset" button, which recreates these accounts, is switched off when `NODE_ENV=production` unless `ALLOW_DEMO_RESET=true` is set on the server.
 
 | Name | Email Address | Role | Initial Permissions & Testing Scope |
 |---|---|---|---|

@@ -22,11 +22,38 @@ const userModel = {
   },
 
   /**
-   * A user's current role, read fresh (a token's role can be out of date).
-   * Returns { role }, or undefined if the account no longer exists.
+   * What a login token is checked against on every request, read fresh from the database:
+   * the current role (a token's role can be out of date) and when the password last changed.
+   * Returns { id, name, email, role, password_changed_at }, or undefined if the account no longer exists.
    */
-  findRoleById: async (id) => {
-    const result = await pool.query('SELECT role FROM users WHERE id = $1', [id]);
+  findAuthStateById: async (id) => {
+    const result = await pool.query(
+      'SELECT id, name, email, role, password_changed_at FROM users WHERE id = $1',
+      [id]
+    );
+    return result.rows[0];
+  },
+
+  /**
+   * The stored password hash (only for checking a password)
+   */
+  findPasswordHashById: async (id) => {
+    const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [id]);
+    return result.rows[0]?.password_hash;
+  },
+
+  /**
+   * Store a new password hash and when it changed. `changedAt` comes from the same (Node) clock that
+   * stamps tokens, cut to whole seconds like a token's iat, so the fresh token issued right after the
+   * change is accepted even if the database clock is a little ahead.
+   */
+  updatePasswordHash: async (id, passwordHash, changedAt) => {
+    const result = await pool.query(
+      `UPDATE users SET password_hash = $1, password_changed_at = $3
+       WHERE id = $2
+       RETURNING id, name, email, role`,
+      [passwordHash, id, changedAt]
+    );
     return result.rows[0];
   },
 

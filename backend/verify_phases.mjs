@@ -827,7 +827,21 @@ async function runVerification() {
     bigPage.data.count === Math.min(100, totalInDb) && bigPage.data.total === totalInDb && onePage.data.count === 1 && onePage.data.total === totalInDb,
     `db ${totalInDb}, limit=1000 -> ${bigPage.data.count} (total ${bigPage.data.total}), limit=1 -> ${onePage.data.count}`);
 
-  // 15. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
+  // 15. Change password: wrong current password is a 400 (not 401, which would log the browser out);
+  //     after a change the old token stops working everywhere and the returned token works
+  const pwUser = await request('POST', '/api/auth/register', { email: `pwchange_${uniqueId}@test.com`, password: 'Password@123', role: 'bidder' });
+  const oldPwToken = pwUser.data.token;
+  await new Promise((r) => setTimeout(r, 1100)); // tokens carry whole seconds: make the change a later second
+  const wrongCurrent = await request('PUT', '/api/auth/password', { currentPassword: 'nope-nope', newPassword: 'NewPassword@456' }, oldPwToken);
+  const changed = await request('PUT', '/api/auth/password', { currentPassword: 'Password@123', newPassword: 'NewPassword@456' }, oldPwToken);
+  const oldTokenAfter = await request('GET', '/api/auth/me', null, oldPwToken);
+  const newTokenAfter = await request('GET', '/api/auth/me', null, changed.data.token);
+  const loginNew = await request('POST', '/api/auth/login', { email: `pwchange_${uniqueId}@test.com`, password: 'NewPassword@456' });
+  assert('Phase 11', 'Change password: wrong current = 400, old token then refused (401), new token and new password work',
+    wrongCurrent.status === 400 && changed.status === 200 && oldTokenAfter.status === 401 && newTokenAfter.status === 200 && loginNew.status === 200,
+    `${wrongCurrent.status}/${changed.status}/${oldTokenAfter.status}/${newTokenAfter.status}/${loginNew.status}`);
+
+  // 16. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
   const bruteEmail = `brute_${uniqueId}@test.com`;
   let lastBrute;
   for (let i = 0; i < 11; i++) {

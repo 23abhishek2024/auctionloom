@@ -91,4 +91,24 @@ async function updateName(userId, name) {
   return { user: updatedUser, token };
 }
 
-module.exports = { issueToken, register, login, getProfile, updateName };
+/**
+ * Change the password after checking the current one. Every token issued before the change stops
+ * working (see loadTokenUser), so other sessions are logged out; the caller gets a fresh token.
+ */
+async function changePassword(userId, currentPassword, newPassword) {
+  const currentHash = await userModel.findPasswordHashById(userId);
+  if (!currentHash) throw new AppError(404, 'User not found.');
+
+  // 400, not 401: the session itself is fine (a 401 would make the browser log the user out)
+  const isMatch = await bcrypt.compare(currentPassword, currentHash);
+  if (!isMatch) throw new AppError(400, 'Your current password is not correct.');
+  if (currentPassword === newPassword) throw new AppError(400, 'The new password must be different from the current one.');
+
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  const changedAt = new Date(Math.floor(Date.now() / 1000) * 1000); // whole seconds, like a token's iat
+  const user = await userModel.updatePasswordHash(userId, passwordHash, changedAt);
+  const token = issueToken({ id: user.id, name: user.name || user.email.split('@')[0], email: user.email, role: user.role });
+  return { user, token };
+}
+
+module.exports = { issueToken, register, login, getProfile, updateName, changePassword };

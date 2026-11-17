@@ -68,4 +68,23 @@ const updateProfile = async (req, res, next) => {
   }
 };
 
-module.exports = { register, login, getMe, updateProfile };
+/**
+ * PUT /api/auth/password - Change password: { currentPassword, newPassword }
+ * Logs out every other session and returns a fresh token for this one.
+ */
+const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (typeof currentPassword !== 'string' || !currentPassword) {
+      return res.status(400).json({ error: 'Current password is required.' });
+    }
+    requireNewPassword(newPassword, 'New password');
+
+    const { user, token } = await authService.changePassword(req.user.id, currentPassword, newPassword);
+    res.json({ message: 'Password changed. Other sessions have been logged out.', user, token });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { register, login, getMe, updateProfile, changePassword };

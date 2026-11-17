@@ -52,6 +52,8 @@ pool.connect(async (err, client, release) => {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);
       ALTER TABLE users ADD COLUMN IF NOT EXISTS unpaid_commission NUMERIC(12,2) DEFAULT 0.00;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS payout_methods JSONB DEFAULT '{}'::jsonb;
+      -- Changing the password logs out every other session: tokens issued before this time are refused
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP WITH TIME ZONE;
 
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS start_time TIMESTAMP;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'General';

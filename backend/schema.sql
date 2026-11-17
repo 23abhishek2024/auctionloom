@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     name                VARCHAR(255),
     unpaid_commission   DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
     payout_methods      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    password_changed_at TIMESTAMP WITH TIME ZONE,          -- login tokens issued before this are refused
     created_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

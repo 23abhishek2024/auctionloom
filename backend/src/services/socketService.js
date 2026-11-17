@@ -2,8 +2,8 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { Server } = require('socket.io');
 const { getAllowedOrigins } = require('../utils/allowedOrigins');
-const { isUUID, isUuidFormat } = require('../utils/validators');
-const userModel = require('../models/userModel');
+const { isUUID } = require('../utils/validators');
+const { loadTokenUser } = require('../middlewares/auth');
 
 let io;
 
@@ -37,8 +37,8 @@ const identify = async (socket) => {
   if (!token || typeof token !== 'string') return null;
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (!isUuidFormat(decoded.id)) return null;
-    const user = await userModel.findById(decoded.id);
+    // Same check as the REST API: the account exists and the password hasn't changed since the token
+    const user = await loadTokenUser(decoded);
     if (!user) return null;
     return {
       id: user.id,
