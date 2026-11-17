@@ -30,6 +30,13 @@ export const AuthProvider = ({ children }) => {
     verifyToken();
   }, []);
 
+  // A request was refused with 401 (see api/client.js): the session is over, so log out here too
+  useEffect(() => {
+    const handleExpired = () => logout();
+    window.addEventListener('auth_expired', handleExpired);
+    return () => window.removeEventListener('auth_expired', handleExpired);
+  }, []);
+
   const login = async (email, password) => {
     const res = await authApi.login({ email, password });
     const { user: userData, token: tokenData } = res.data;
