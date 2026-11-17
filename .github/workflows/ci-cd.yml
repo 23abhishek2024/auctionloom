@@ -66,6 +66,8 @@ jobs:
           DB_PASSWORD: password123
           JWT_SECRET: ci_jwt_secret_test_key_12345
           DISABLE_DB_SSL: 'true'
+          # Turn off the in-process closing sweep, so the Phase 6 test proves the scheduler + worker close auctions
+          SWEEP_INTERVAL_MS: '0'
         run: |
           node src/app.js &
           for i in {1..30}; do

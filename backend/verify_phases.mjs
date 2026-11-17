@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import http from 'http';
+import { execFile } from 'child_process';
 import { io } from 'socket.io-client';
 import pg from 'pg';
 import jwt from 'jsonwebtoken';
@@ -134,11 +135,11 @@ async function runVerification() {
   const missingTables = expectedTables.filter(t => !tableNames.includes(t));
   assert('Phase 2', 'All 8 tables exist after migration', missingTables.length === 0, missingTables.length ? `missing: ${missingTables.join(', ')}` : '');
 
-  const constraintsQuery = await pool.query(`
-    SELECT conname FROM pg_constraint WHERE conrelid = 'jobs'::regclass
-  `);
-  const constraintNames = constraintsQuery.rows.map(r => r.conname);
-  assert('Phase 2', 'Jobs table has unique_pending_job constraint', constraintNames.includes('unique_pending_job'));
+  const openJobIndex = await pool.query(
+    `SELECT indexdef FROM pg_indexes WHERE tablename = 'jobs' AND indexname = 'unique_open_job'`
+  );
+  assert('Phase 2', 'Jobs table has a unique index on OPEN jobs only (pending or running)',
+    openJobIndex.rowCount === 1 && /WHERE/i.test(openJobIndex.rows[0].indexdef));
 
   // ============================================================
   // PHASE 3: Core API, Middlewares, Authentication & RBAC
@@ -347,101 +348,59 @@ async function runVerification() {
   socketClient.disconnect();
 
   // ============================================================
-  // PHASE 6: Distributed Background Workers & Job Queue
+  // PHASE 6: Scheduler & job worker (the real processes, run once each)
+  // The test server runs with SWEEP_INTERVAL_MS=0, so only the queue closes auctions here.
   // ============================================================
   console.log('\n--- Checking Phase 6: Scheduler & Distributed Job Worker ---');
 
-  // Create an auction with valid future end_time, then simulate expiration in DB
-  const initialEndTime = new Date(Date.now() + 60000).toISOString();
+  const runOnce = (script) => new Promise((resolve, reject) => {
+    execFile(process.execPath, [script, '--once'], { env: process.env, timeout: 60000 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`${script} --once failed: ${stderr || err.message}`));
+      else resolve(stdout);
+    });
+  });
+  const closeJobsFor = async (id) => (await pool.query(
+    `SELECT status FROM jobs WHERE type = 'CLOSE_AUCTION' AND payload->>'auction_id' = $1 ORDER BY created_at`, [id]
+  )).rows.map(r => r.status);
+
+  // An auction with one real bid, whose end time has passed
   const expiredAuctionRes = await request('POST', '/api/auctions', {
     title: `Auto-Closing Auction #${uniqueId}`,
     description: 'Testing background scheduler and worker queue.',
     starting_price: 200.00,
-    end_time: initialEndTime,
+    end_time: new Date(Date.now() + 60000).toISOString(),
   }, sellerToken);
   assert('Phase 6', 'Auction created via API for expiration test', expiredAuctionRes.status === 201);
   const expiredAuctionId = expiredAuctionRes.data.auction.id;
+  const expiringBid = await request('POST', '/api/bids', { auction_id: expiredAuctionId, amount: 250 }, bidderToken);
+  await pool.query(`UPDATE auctions SET end_time = NOW() - INTERVAL '10 seconds' WHERE id = $1`, [expiredAuctionId]);
 
-  // Simulate auction ending in PostgreSQL
-  await pool.query(
-    `UPDATE auctions SET end_time = NOW() - INTERVAL '10 seconds' WHERE id = $1`,
-    [expiredAuctionId]
-  );
+  // 1. Scheduler pass: node src/workers/scheduler.js --once
+  await runOnce('src/workers/scheduler.js');
+  assert('Phase 6', 'Scheduler queued one PENDING CLOSE_AUCTION job for the ended auction',
+    expiringBid.status === 201 && JSON.stringify(await closeJobsFor(expiredAuctionId)) === '["PENDING"]');
+  await runOnce('src/workers/scheduler.js');
+  assert('Phase 6', 'A second scheduler pass adds no duplicate job (unique index on open jobs)', (await closeJobsFor(expiredAuctionId)).length === 1);
 
-  // Place a winning bid directly in DB to simulate active bid
-  await pool.query(
-    `INSERT INTO bids (auction_id, bidder_id, amount) VALUES ($1, $2, $3)`,
-    [expiredAuctionId, bidderId, 250.00]
-  );
-  await pool.query(
-    `UPDATE auctions SET current_price = 250.00 WHERE id = $1`,
-    [expiredAuctionId]
-  );
-
-  // 1. Simulate Scheduler
-  const endedActive = await pool.query(
-    `SELECT * FROM auctions WHERE status = 'ACTIVE' AND end_time <= NOW() AND id = $1`,
-    [expiredAuctionId]
-  );
-  assert('Phase 6', 'Scheduler correctly identifies ended ACTIVE auction', endedActive.rows.length === 1);
-
-  const insertJobRes = await pool.query(
-    `INSERT INTO jobs (type, payload) VALUES ('CLOSE_AUCTION', $1) ON CONFLICT DO NOTHING RETURNING *`,
-    [JSON.stringify({ auction_id: expiredAuctionId })]
-  );
-  assert('Phase 6', 'Scheduler queues CLOSE_AUCTION job into jobs table', insertJobRes.rowCount === 1);
-
-  // 2. Simulate Worker: SELECT ... FOR UPDATE SKIP LOCKED
-  const client = await pool.connect();
-  let jobToProcess = null;
-  try {
-    await client.query('BEGIN');
-    const jobRes = await client.query(
-      `SELECT * FROM jobs WHERE status = 'PENDING' AND type = 'CLOSE_AUCTION' FOR UPDATE SKIP LOCKED LIMIT 1`
-    );
-    jobToProcess = jobRes.rows[0];
-    if (jobToProcess) {
-      await client.query(
-        `UPDATE jobs SET status = 'IN_PROGRESS', locked_at = NOW(), locked_by = 'test_runner' WHERE id = $1`,
-        [jobToProcess.id]
-      );
-    }
-    await client.query('COMMIT');
-  } finally {
-    client.release();
-  }
-
-  assert('Phase 6', 'Worker locks pending job using FOR UPDATE SKIP LOCKED', !!jobToProcess);
-
-  // Process job: close auction with highest bidder
-  const workerClient = await pool.connect();
-  try {
-    await workerClient.query('BEGIN');
-    const highestBidRes = await workerClient.query(
-      `SELECT * FROM bids WHERE auction_id = $1 ORDER BY amount DESC, created_at ASC LIMIT 1`,
-      [expiredAuctionId]
-    );
-    const winnerId = highestBidRes.rows[0]?.bidder_id || null;
-    await workerClient.query(
-      `UPDATE auctions SET status = 'CLOSED', winner_id = $1 WHERE id = $2`,
-      [winnerId, expiredAuctionId]
-    );
-    await workerClient.query(
-      `UPDATE jobs SET status = 'COMPLETED', updated_at = NOW() WHERE id = $1`,
-      [jobToProcess.id]
-    );
-    await workerClient.query('COMMIT');
-  } finally {
-    workerClient.release();
-  }
-
-  // Verify auction is closed with winner
-  const finalAuctionCheck = await pool.query(
-    `SELECT status, winner_id FROM auctions WHERE id = $1`,
-    [expiredAuctionId]
-  );
+  // 2. Worker pass: node src/workers/jobWorker.js --once (claims with FOR UPDATE SKIP LOCKED, runs closeAuction)
+  await runOnce('src/workers/jobWorker.js');
+  const finalAuctionCheck = await pool.query(`SELECT status, winner_id FROM auctions WHERE id = $1`, [expiredAuctionId]);
+  assert('Phase 6', 'Worker marked the job COMPLETED', JSON.stringify(await closeJobsFor(expiredAuctionId)) === '["COMPLETED"]');
   assert('Phase 6', 'Auction status transitioned to CLOSED by worker', finalAuctionCheck.rows[0].status === 'CLOSED');
   assert('Phase 6', 'Auction winner_id correctly assigned to highest bidder', finalAuctionCheck.rows[0].winner_id === bidderId);
+
+  // 3. A finished job doesn't block a new one: a republished auction gets a fresh close job
+  const requeueLot = await request('POST', '/api/auctions', { title: `Requeue test #${uniqueId}`, starting_price: 10, duration_minutes: 60 }, sellerToken);
+  const requeueId = requeueLot.data.auction.id;
+  await pool.query(`UPDATE auctions SET end_time = NOW() - INTERVAL '1 second' WHERE id = $1`, [requeueId]);
+  await runOnce('src/workers/scheduler.js');
+  await runOnce('src/workers/jobWorker.js'); // closes it with no winner, so the seller may republish at once
+  const requeueRepublish = await request('POST', `/api/auctions/${requeueId}/republish`, { end_time: new Date(Date.now() + 3600000).toISOString() }, sellerToken);
+  await pool.query(`UPDATE auctions SET end_time = NOW() - INTERVAL '1 second' WHERE id = $1`, [requeueId]);
+  await runOnce('src/workers/scheduler.js');
+  assert('Phase 6', 'Republished auction gets a new close job after the first one COMPLETED',
+    requeueRepublish.status === 200 && JSON.stringify(await closeJobsFor(requeueId)) === '["COMPLETED","PENDING"]');
+  await runOnce('src/workers/jobWorker.js');
 
   // ============================================================
   // PHASE 7: Browser origins (CORS and the Socket.IO handshake)

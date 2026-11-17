@@ -1,5 +1,4 @@
 const pool = require('../db');
-const auctionModel = require('../models/auctionModel');
 
 // A worker commits its claim before doing the work, so if it crashes mid-job the job would stay
 // IN_PROGRESS forever. The reaper hands such jobs back to the queue (closing is idempotent, so
@@ -7,6 +6,8 @@ const auctionModel = require('../models/auctionModel');
 // so one job that keeps crashing workers can't loop forever.
 const STUCK_AFTER_MINUTES = 5;
 const MAX_ATTEMPTS = 3;
+// An auction whose close job has FAILED this many times is not queued again (it needs a human)
+const MAX_FAILED_JOBS_PER_AUCTION = 3;
 
 const reapStuckJobs = async () => {
   const result = await pool.query(
@@ -26,40 +27,63 @@ const reapStuckJobs = async () => {
 };
 
 /**
+ * Queue one CLOSE_AUCTION job for every auction that has ended but is still ACTIVE, in one statement.
+ * The unique index unique_open_job (type, payload) WHERE status IN ('PENDING', 'IN_PROGRESS') makes
+ * ON CONFLICT DO NOTHING skip auctions that already have an open job. Finished (COMPLETED or FAILED)
+ * jobs don't block a new one, so a republished auction gets a fresh close job when its new end time
+ * passes, and a failed close is retried, up to MAX_FAILED_JOBS_PER_AUCTION times.
+ * Returns the ids of the auctions that got a job.
+ */
+const queueEndedAuctions = async () => {
+  const result = await pool.query(
+    `INSERT INTO jobs (type, payload)
+     SELECT 'CLOSE_AUCTION', jsonb_build_object('auction_id', a.id)
+     FROM auctions a
+     WHERE a.status = 'ACTIVE'
+       AND a.end_time <= NOW()
+       AND (SELECT COUNT(*) FROM jobs j
+            WHERE j.type = 'CLOSE_AUCTION' AND j.payload->>'auction_id' = a.id::text AND j.status = 'FAILED') < $1
+     ON CONFLICT DO NOTHING
+     RETURNING payload->>'auction_id' AS auction_id`,
+    [MAX_FAILED_JOBS_PER_AUCTION]
+  );
+  return result.rows.map((r) => r.auction_id);
+};
+
+/**
  * Auction Scheduler — Phase 6 (Distributed Background Workers)
  *
- * Runs every 30 seconds. First hands stuck jobs back to the queue (see above).
- * Then finds auctions that have expired but are still marked ACTIVE, and for
- * each one inserts a CLOSE_AUCTION job into the jobs table for a worker to pick up.
+ * Runs every 30 seconds. First hands stuck jobs back to the queue (see above),
+ * then queues a CLOSE_AUCTION job for each auction that has expired but is still ACTIVE.
  */
 const runScheduler = async () => {
   try {
     await reapStuckJobs();
-
-    const endedAuctions = await auctionModel.findEndedActive();
-
-    if (endedAuctions.length === 0) return;
-
-    console.log(`[Scheduler] Found ${endedAuctions.length} auction(s) to close.`);
-
-    for (const auction of endedAuctions) {
-      // Insert a job into the queue. Use ON CONFLICT DO NOTHING to prevent
-      // duplicate jobs if the scheduler runs again before the worker picks it up.
-      await pool.query(
-        `INSERT INTO jobs (type, payload)
-         VALUES ('CLOSE_AUCTION', $1)
-         ON CONFLICT DO NOTHING`,
-        [JSON.stringify({ auction_id: auction.id })]
-      );
-      console.log(`[Scheduler] Queued CLOSE_AUCTION job for auction: ${auction.id}`);
+    const queued = await queueEndedAuctions();
+    for (const auctionId of queued) {
+      console.log(`[Scheduler] Queued CLOSE_AUCTION job for auction: ${auctionId}`);
     }
+    return queued.length;
   } catch (err) {
     console.error('[Scheduler] Error:', err.message);
+    return 0;
   }
 };
 
-// Start polling every 30 seconds
 const POLL_INTERVAL_MS = 30 * 1000;
-console.log(`[Scheduler] Started. Polling every ${POLL_INTERVAL_MS / 1000}s.`);
-setInterval(runScheduler, POLL_INTERVAL_MS);
-runScheduler(); // Run immediately on startup too
+
+// Started as its own process (npm run scheduler). With --once it runs a single pass and exits
+// (used by the test suite); required from another file it only exports the functions.
+if (require.main === module) {
+  if (process.argv.includes('--once')) {
+    runScheduler()
+      .then((n) => console.log(`[Scheduler] One pass done: ${n} job(s) queued.`))
+      .finally(() => pool.end().then(() => process.exit(0)));
+  } else {
+    console.log(`[Scheduler] Started. Polling every ${POLL_INTERVAL_MS / 1000}s.`);
+    setInterval(runScheduler, POLL_INTERVAL_MS);
+    runScheduler(); // Run immediately on startup too
+  }
+}
+
+module.exports = { runScheduler, queueEndedAuctions, reapStuckJobs };

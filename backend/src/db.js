@@ -78,6 +78,16 @@ pool.connect(async (err, client, release) => {
       -- Job queue: count how many times a job was claimed, so a job that keeps crashing workers ends FAILED
       ALTER TABLE IF EXISTS jobs ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0;
 
+      -- Job queue: only OPEN jobs must be unique. The old UNIQUE (type, payload) also counted finished
+      -- jobs, so a republished auction (or one whose close failed) could never be queued again.
+      DO $$
+      BEGIN
+        IF to_regclass('public.jobs') IS NOT NULL THEN
+          ALTER TABLE jobs DROP CONSTRAINT IF EXISTS unique_pending_job;
+          CREATE UNIQUE INDEX IF NOT EXISTS unique_open_job ON jobs (type, payload) WHERE status IN ('PENDING', 'IN_PROGRESS');
+        END IF;
+      END $$;
+
       ALTER TABLE auctions DROP CONSTRAINT IF EXISTS auctions_status_check;
       ALTER TABLE auctions ADD CONSTRAINT auctions_status_check CHECK (status IN ('ACTIVE', 'CLOSED', 'RESTRICTED'));
 

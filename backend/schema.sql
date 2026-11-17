@@ -76,11 +76,12 @@ CREATE TABLE IF NOT EXISTS jobs (
     locked_by       VARCHAR(100),                 -- worker PID
     attempts        INT NOT NULL DEFAULT 0,       -- times claimed; the reaper fails a job after 3
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    -- Unique constraint: prevents scheduler from inserting duplicate jobs
-    -- for the same auction. ON CONFLICT DO NOTHING relies on this.
-    CONSTRAINT unique_pending_job UNIQUE (type, payload)
+    updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- At most one OPEN (pending or running) job per auction: the scheduler's ON CONFLICT DO NOTHING
+-- relies on this. Finished jobs don't count, so a republished auction can get a new close job.
+CREATE UNIQUE INDEX IF NOT EXISTS unique_open_job ON jobs (type, payload) WHERE status IN ('PENDING', 'IN_PROGRESS');
 
 -- Index for workers to efficiently find PENDING jobs
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status) WHERE status = 'PENDING';
