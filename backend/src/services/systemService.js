@@ -14,7 +14,7 @@ const { AppError } = require('../utils/AppError');
 /**
  * Wipe all tables, then create admin@gmail.com + test1..test5@gmail.com (password: test@123)
  * with $0.00 wallets. With runTestAuctions, also run 3 sold-and-paid test auctions through the
- * real double-entry settlement and add 2 live auctions to browse.
+ * real lot settlement (settleLotEscrow) and add 2 live auctions to browse.
  * Returns the created users and their final wallet balances.
  */
 async function purgeAndReset({ runTestAuctions }) {

@@ -315,7 +315,7 @@ const getCommissionTransactions = async (req, res, next) => {
 /**
  * POST /api/admin/system/purge-and-reset
  * Wipes all tables, strictly sets up admin@gmail.com + test1..test5@gmail.com (password: test@123),
- * sets all wallets to $0.00, and optionally runs 3 test auctions with full double-entry flow.
+ * sets all wallets to $0.00, and optionally runs 3 test auctions through the real settlement.
  */
 const purgeAndResetDatabase = async (req, res, next) => {
   try {

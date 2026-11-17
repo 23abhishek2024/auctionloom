@@ -111,7 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_commission_proofs_status ON commission_proofs(sta
 CREATE INDEX IF NOT EXISTS idx_commission_proofs_user_id ON commission_proofs(user_id);
 
 -- ============================================================
--- 6. WALLETS (Production-Grade Double-Entry Balance Store)
+-- 6. WALLETS (one balance per user, never below zero)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS wallets (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS wallets (
 CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets(user_id);
 
 -- ============================================================
--- 7. WALLET_TRANSACTIONS (Immutable Double-Entry Ledger)
+-- 7. WALLET_TRANSACTIONS (append-only ledger: one row per balance change, with balance_after)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS wallet_transactions (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

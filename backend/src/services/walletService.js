@@ -3,9 +3,12 @@ const { AppError } = require('../utils/AppError');
 const { toCents, splitSale } = require('../utils/validators');
 
 /**
- * Production-Grade Wallet Service
- * Enforces Double-Entry Accounting, ACID Row-Locking (SELECT FOR UPDATE),
- * Idempotency Key Deduping, and Zero-Overdraft Invariants.
+ * Wallet Service
+ * Every balance change runs under a row lock (SELECT ... FOR UPDATE) and writes one row to the
+ * append-only ledger (wallet_transactions, with balance_after), deduplicated by idempotency key;
+ * balances can't go below zero. A lot settlement moves money between wallets so that its entries
+ * sum to zero. (Top-ups and withdrawals are simulated: there is no outside account on the other
+ * side, so this is not full double-entry bookkeeping.)
  */
 
 class InsufficientFundsError extends Error {
@@ -98,7 +101,7 @@ async function withDeadlockRetry(fn, attempts = 3) {
 }
 
 /**
- * Credit user wallet with strict row-locking & double-entry ledger entry.
+ * Credit user wallet with strict row-locking & one ledger entry.
  */
 async function creditWallet({
   userId,
@@ -163,7 +166,7 @@ async function creditWallet({
     );
     const updatedWallet = updatedWalletRes.rows[0];
 
-    // 5. Insert immutable double-entry transaction record
+    // 5. Append the ledger entry (never updated afterwards)
     const txRes = await client.query(
       `INSERT INTO wallet_transactions 
        (wallet_id, type, amount, balance_after, reference_type, reference_id, idempotency_key, status, metadata)
@@ -219,7 +222,7 @@ async function creditWallet({
 }
 
 /**
- * Debit user wallet with strict row-locking, overdraft checks & double-entry ledger entry.
+ * Debit user wallet with strict row-locking, overdraft checks & one ledger entry.
  */
 async function debitWallet({
   userId,
@@ -294,7 +297,7 @@ async function debitWallet({
     );
     const updatedWallet = updatedWalletRes.rows[0];
 
-    // 6. Insert immutable double-entry transaction record
+    // 6. Append the ledger entry (never updated afterwards)
     const txRes = await client.query(
       `INSERT INTO wallet_transactions 
        (wallet_id, type, amount, balance_after, reference_type, reference_id, idempotency_key, status, metadata)
