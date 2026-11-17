@@ -1,5 +1,5 @@
 const bidService = require('../services/bidService');
-const { isUUID, isPositiveNumber } = require('../utils/validators');
+const { isUUID, parseMoney, MONEY_RULE } = require('../utils/validators');
 
 /**
  * POST /api/bids OR POST /api/auctions/:id/bids
@@ -27,12 +27,14 @@ const placeBid = async (req, res, next) => {
     return res.status(400).json({ error: 'Invalid auction ID format. Must be a valid UUID.' });
   }
 
-  if (!isPositiveNumber(amount)) {
-    return res.status(400).json({ error: 'amount must be a positive number greater than 0.' });
+  // Whole cents only: 101.004 would be stored as 101.00 and tie with an existing bid of 101.00
+  const bidAmount = parseMoney(amount);
+  if (bidAmount === null) {
+    return res.status(400).json({ error: `amount must be ${MONEY_RULE}.` });
   }
 
   try {
-    const bid = await bidService.placeBid({ auctionId, bidder: req.user, amount: parseFloat(amount) });
+    const bid = await bidService.placeBid({ auctionId, bidder: req.user, amount: bidAmount });
     res.status(201).json({ bid });
   } catch (err) {
     next(err);

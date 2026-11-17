@@ -349,6 +349,11 @@ export const AuctionDetailPage = () => {
       return;
     }
 
+    // Whole cents only (the server refuses 101.004, which would otherwise be saved as 101.00)
+    if (!/^\d+(\.\d{1,2})?$/.test(String(bidAmount).trim())) {
+      setError('Enter an amount with at most 2 decimal places, for example 1250.50');
+      return;
+    }
     const numAmount = parseFloat(bidAmount);
     if (isNaN(numAmount) || numAmount <= parseFloat(auction.current_price)) {
       setError(`Bid must be strictly higher than $${auction.current_price}`);

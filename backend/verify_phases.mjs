@@ -710,6 +710,41 @@ async function runVerification() {
   assert('Phase 10', 'Double-entry ledger contains immutable audit records', Array.isArray(txs) && txs.length >= 2);
   assert('Phase 10', 'Ledger tracks balance_after snapshot on every transaction', txs.every(t => typeof t.balanceAfter === 'number'));
 
+  // ============================================================
+  // PHASE 11: Regression checks from the pre-interview audit
+  // ============================================================
+  console.log('\n--- Checking Phase 11: Audit regression checks ---');
+
+  const endAuctionNow = async (id) => {
+    await pool.query(`UPDATE auctions SET end_time = NOW() - INTERVAL '1 second' WHERE id = $1`, [id]);
+    return request('GET', `/api/auctions/${id}`); // closes it just in time
+  };
+
+  // 1. Money precision: whole cents only, so two bids can never tie after rounding
+  const centsAuctionRes = await request('POST', '/api/auctions', {
+    title: `Cents Precision Lot #${uniqueId}`,
+    starting_price: 100,
+    end_time: new Date(Date.now() + 3600000).toISOString(),
+  }, sellerToken);
+  const centsAuctionId = centsAuctionRes.data.auction.id;
+  const firstCentsBid = await request('POST', '/api/bids', { auction_id: centsAuctionId, amount: 101 }, bidderToken);
+  const threeDecimalBid = await request('POST', '/api/bids', { auction_id: centsAuctionId, amount: 101.004 }, bidder2Token);
+  assert('Phase 11', 'Bid with 3 decimal places (101.004) rejected with 400 instead of being rounded into a tie', firstCentsBid.status === 201 && threeDecimalBid.status === 400);
+  const centsBid = await request('POST', '/api/bids', { auction_id: centsAuctionId, amount: '101.01' }, bidder2Token);
+  assert('Phase 11', 'Bid one cent higher (101.01) accepted', centsBid.status === 201);
+  const storedCentsBids = await pool.query('SELECT amount FROM bids WHERE auction_id = $1 ORDER BY created_at', [centsAuctionId]);
+  assert('Phase 11', 'Stored bid amounts are strictly increasing (no ties)', storedCentsBids.rows.map(r => r.amount).join(',') === '101.00,101.01');
+
+  // 2. "Won" is decided by winner_id only: the outbid bidder does not see the lot as won
+  await endAuctionNow(centsAuctionId);
+  const winnerWon = await request('GET', '/api/users/me/won', null, bidder2Token);
+  const loserWon = await request('GET', '/api/users/me/won', null, bidderToken);
+  const loserBids = await request('GET', '/api/users/me/bids', null, bidderToken);
+  assert('Phase 11', 'Only the real winner lists the closed lot under won auctions',
+    winnerWon.data.won.some(a => a.id === centsAuctionId) && !loserWon.data.won.some(a => a.id === centsAuctionId));
+  assert('Phase 11', 'Outbid bidder sees is_winner = false for that lot',
+    loserBids.data.participations.find(p => p.id === centsAuctionId)?.is_winner === false);
+
   console.log('\n===========================================================');
   console.log('   🎉 ALL PHASES (1 TO 10) ARE 100% VERIFIED AND PASSING!  ');
   console.log('===========================================================');

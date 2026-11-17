@@ -32,18 +32,12 @@ async function getStats(userId) {
     [userId]
   );
 
-  // 3. Auctions won by user
+  // 3. Auctions won by user (winner_id is set when an auction closes, so it is the only source of truth;
+  //    guessing from "had the highest bid" counted both bidders when two bids tied)
   const wonRes = await pool.query(
     `SELECT COUNT(*)::int AS count
      FROM auctions
-     WHERE winner_id = $1 OR (
-       status = 'CLOSED' AND id IN (
-         SELECT b1.auction_id FROM bids b1
-         WHERE b1.bidder_id = $1 AND b1.amount = (
-           SELECT MAX(b2.amount) FROM bids b2 WHERE b2.auction_id = b1.auction_id
-         )
-       )
-     )`,
+     WHERE winner_id = $1 AND status = 'CLOSED'`,
     [userId]
   );
 
@@ -91,7 +85,7 @@ async function getListedAuctions(userId) {
  * - my_highest_bid
  * - current_price
  * - is_highest_bidder (true if user holds current highest bid)
- * - is_winner (true if auction closed and user is winner)
+ * - is_winner (true if auction closed and user is winner: decided by winner_id only)
  */
 async function getBidParticipations(userId) {
   const result = await pool.query(
@@ -102,7 +96,7 @@ async function getBidParticipations(userId) {
             COALESCE(NULLIF(s.name, ''), split_part(s.email, '@', 1)) AS seller_name,
             s.email AS seller_email,
             COALESCE(NULLIF(w.name, ''), split_part(w.email, '@', 1)) AS winner_name,
-            (a.winner_id = $1 OR (a.status = 'CLOSED' AND a.current_price <= my_bids.my_highest_bid)) AS is_winner
+            (a.status = 'CLOSED' AND a.winner_id IS NOT DISTINCT FROM $1::uuid) AS is_winner
      FROM (
        SELECT auction_id,
               MAX(amount)::numeric AS my_highest_bid,
@@ -121,24 +115,18 @@ async function getBidParticipations(userId) {
 }
 
 /**
- * All auctions won by the user, latest ending first
+ * All auctions won by the user (winner_id only), latest ending first.
+ * The winner sees the seller's email, because they have to arrange payment and delivery.
  */
 async function getWonAuctions(userId) {
   const result = await pool.query(
     `SELECT a.*,
             COALESCE(NULLIF(s.name, ''), split_part(s.email, '@', 1)) AS seller_name,
             s.email AS seller_email,
-            MAX(b.amount)::numeric AS winning_bid
+            a.current_price::numeric AS winning_bid
      FROM auctions a
      JOIN users s ON a.seller_id = s.id
-     LEFT JOIN bids b ON a.id = b.auction_id AND b.bidder_id = $1
-     WHERE a.winner_id = $1 OR (
-       a.status = 'CLOSED' AND a.id IN (
-         SELECT b1.auction_id FROM bids b1
-         WHERE b1.bidder_id = $1 AND b1.amount = a.current_price
-       )
-     )
-     GROUP BY a.id, s.name, s.email
+     WHERE a.winner_id = $1 AND a.status = 'CLOSED'
      ORDER BY a.end_time DESC`,
     [userId]
   );
