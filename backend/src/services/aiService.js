@@ -20,6 +20,23 @@ Return a valid JSON object with the following fields:
 };
 
 /**
+ * The model's JSON is not trusted: turn it into fields the listing form and the API accept.
+ * Title: text, at most 255 characters (the auction title limit). Description: text, at most 5000.
+ * Starting price: a positive amount rounded to whole cents (249.999 or -5 would otherwise land in
+ * the form, and the API refuses more than 2 decimals).
+ */
+const cleanModelCopy = (parsed, keywords, source) => {
+  const text = (value, max) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
+  const price = parseFloat(parsed?.suggested_starting_price);
+  return {
+    title: text(parsed?.title, 255) || `${keywords} — Exclusive Lot`.slice(0, 255),
+    description: text(parsed?.description, 5000) || generateFallbackCopy(keywords).description,
+    suggested_starting_price: Number.isFinite(price) && price > 0 && price <= 10000000 ? Math.round(price * 100) / 100 : 150.0,
+    source,
+  };
+};
+
+/**
  * Intelligent Fallback Copywriting Generator
  * Used when an external LLM API is not configured or fails.
  */
@@ -83,13 +100,7 @@ const callGemini = async (apiKey, keywords, category) => {
   const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!rawText) throw new Error('No candidate content returned from Gemini.');
 
-  const parsed = JSON.parse(rawText);
-  return {
-    title: parsed.title || `${keywords} — Exclusive Lot`,
-    description: parsed.description,
-    suggested_starting_price: parseFloat(parsed.suggested_starting_price) || 150.00,
-    source: 'google_gemini_api',
-  };
+  return cleanModelCopy(JSON.parse(rawText), keywords, 'google_gemini_api');
 };
 
 /**
@@ -103,6 +114,7 @@ const callOpenAI = async (apiKey, keywords, category) => {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
+    signal: AbortSignal.timeout(18000), // same 18s limit as Gemini, then the built-in generator
     body: JSON.stringify({
       model: 'gpt-4o-mini',
       messages: [
@@ -126,14 +138,7 @@ const callOpenAI = async (apiKey, keywords, category) => {
   const data = await response.json();
   const rawContent = data.choices?.[0]?.message?.content?.trim();
   const cleanJson = rawContent.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
-  const parsed = JSON.parse(cleanJson);
-
-  return {
-    title: parsed.title || `${keywords} — Exclusive Lot`,
-    description: parsed.description,
-    suggested_starting_price: parseFloat(parsed.suggested_starting_price) || 150.00,
-    source: 'openai_api',
-  };
+  return cleanModelCopy(JSON.parse(cleanJson), keywords, 'openai_api');
 };
 
 /**
