@@ -21,6 +21,7 @@ function issueToken({ id, name, email, role }) {
 /**
  * Create an account and log it in. Public sign-up can only choose 'auctioneer' or 'bidder':
  * any other role asked for (such as 'admin') becomes 'bidder'.
+ * The controller has already checked the email (trimmed, lower-cased) and the password length.
  */
 async function register({ email, password, role, name }) {
   const existing = await userModel.findByEmail(email);
@@ -30,7 +31,14 @@ async function register({ email, password, role, name }) {
 
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
   const assignedRole = (role === 'auctioneer' || role === 'bidder') ? role : 'bidder';
-  const user = await userModel.create(email, passwordHash, assignedRole, name);
+  let user;
+  try {
+    user = await userModel.create(email, passwordHash, assignedRole, name);
+  } catch (err) {
+    // Two sign-ups with the same email at the same moment: the UNIQUE constraint stops the second one
+    if (err.code === '23505') throw new AppError(409, 'Email already registered.');
+    throw err;
+  }
 
   const token = issueToken({ id: user.id, name: user.name, email: user.email, role: user.role });
   return { user, token };

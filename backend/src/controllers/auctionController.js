@@ -1,17 +1,49 @@
 const auctionService = require('../services/auctionService');
-const { isUUID, isPositiveNumber } = require('../utils/validators');
+const {
+  isUUID,
+  requireUuid,
+  requireMoney,
+  requireString,
+  optionalString,
+  optionalQueryString,
+  requireFutureEndTime,
+} = require('../utils/validators');
+const { AppError } = require('../utils/AppError');
+
+/**
+ * An image for a listing: a full http(s) URL or a file we stored (/uploads/...), at most 2048 characters
+ */
+const readImageUrl = (value) => {
+  const url = optionalString(value, 'image_url', 2048);
+  if (url === null) return null;
+  if (!/^https?:\/\//i.test(url) && !url.startsWith('/uploads/')) {
+    throw new AppError(400, 'image_url must be an http(s) link or an uploaded image (/uploads/...).');
+  }
+  return url;
+};
 
 /**
  * GET /api/auctions - Get all auctions with optional query filtering:
- *   ?status=ACTIVE | CLOSED
+ *   ?status=ACTIVE | CLOSED | RESTRICTED
  *   ?search=keyword
  *   ?seller_id=uuid
  *   ?sort=price_asc | price_desc | ending_soon
  *   ?limit=number&offset=number
+ * Each filter must be given once, as text; seller_id must be a UUID.
  */
 const getAllAuctions = async (req, res, next) => {
   try {
-    const auctions = await auctionService.listAuctions(req.query, req.user);
+    const { query } = req;
+    const filters = {
+      status: optionalQueryString(query.status, 'status', 20),
+      search: optionalQueryString(query.search, 'search', 100),
+      seller_id: query.seller_id === undefined || query.seller_id === '' ? null : requireUuid(query.seller_id, 'seller_id'),
+      sort: optionalQueryString(query.sort, 'sort', 20),
+      limit: optionalQueryString(query.limit, 'limit', 10),
+      offset: optionalQueryString(query.offset, 'offset', 10),
+    };
+
+    const auctions = await auctionService.listAuctions(filters, req.user);
     res.json({
       auctions,
       count: auctions.length,
@@ -40,14 +72,19 @@ const getAuctionById = async (req, res, next) => {
 
 /**
  * POST /api/auctions - Create a new auction (auctioneer/admin only)
+ * title 1-255 characters, description up to 5000, starting_price in whole cents,
+ * end_time in the future and within a year (or duration_minutes / duration_hours instead).
  */
 const createAuction = async (req, res, next) => {
   try {
-    let { title, description, starting_price, end_time, duration_minutes, duration_hours } = req.body;
-    const imageUrl = req.body.image_url || req.body.imageUrl || null;
+    const { title, description, starting_price, duration_minutes, duration_hours } = req.body;
+    let { end_time } = req.body;
 
     if (!end_time && (duration_minutes || duration_hours)) {
       const mins = parseInt(duration_minutes, 10) || ((parseInt(duration_hours, 10) || 0) * 60) || 60;
+      if (mins < 1) {
+        return res.status(400).json({ error: 'duration_minutes must be at least 1.' });
+      }
       end_time = new Date(Date.now() + mins * 60 * 1000).toISOString();
     }
 
@@ -55,22 +92,12 @@ const createAuction = async (req, res, next) => {
       return res.status(400).json({ error: 'Title, starting_price, and end_time (or duration_minutes) are required.' });
     }
 
-    const price = parseFloat(starting_price);
-    if (!isPositiveNumber(price)) {
-      return res.status(400).json({ error: 'starting_price must be a positive number greater than 0.' });
-    }
-
-    const endDate = new Date(end_time);
-    if (isNaN(endDate.getTime()) || endDate <= new Date()) {
-      return res.status(400).json({ error: 'end_time must be in the future.' });
-    }
-
     const auction = await auctionService.createAuction(req.user.id, {
-      title: title.trim(),
-      description: description ? description.trim() : null,
-      startingPrice: price,
-      endTime: endDate.toISOString(),
-      imageUrl,
+      title: requireString(title, 'Title', 255),
+      description: optionalString(description, 'Description', 5000),
+      startingPrice: requireMoney(starting_price, 'starting_price'),
+      endTime: requireFutureEndTime(end_time),
+      imageUrl: readImageUrl(req.body.image_url ?? req.body.imageUrl),
     });
 
     res.status(201).json({ auction });
@@ -113,23 +140,12 @@ const republishAuction = async (req, res, next) => {
       return res.status(400).json({ error: 'New end_time is required to republish an auction.' });
     }
 
-    const newEndDate = new Date(end_time);
-    if (isNaN(newEndDate.getTime()) || newEndDate <= new Date()) {
-      return res.status(400).json({ error: 'New end_time must be in the future.' });
-    }
+    const endTime = requireFutureEndTime(end_time, 'New end_time');
+    const startingPrice = starting_price !== undefined && starting_price !== null && starting_price !== ''
+      ? requireMoney(starting_price, 'starting_price')
+      : null;
 
-    let parsedStartingPrice = null;
-    if (starting_price !== undefined && starting_price !== null && starting_price !== '') {
-      parsedStartingPrice = parseFloat(starting_price);
-      if (!isPositiveNumber(parsedStartingPrice)) {
-        return res.status(400).json({ error: 'starting_price must be a positive number greater than 0.' });
-      }
-    }
-
-    const auction = await auctionService.republishAuction(id, req.user, {
-      endTime: newEndDate.toISOString(),
-      startingPrice: parsedStartingPrice,
-    });
+    const auction = await auctionService.republishAuction(id, req.user, { endTime, startingPrice });
 
     res.json({
       message: 'Auction republished successfully for a fresh bidding cycle!',

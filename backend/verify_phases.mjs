@@ -758,6 +758,32 @@ async function runVerification() {
   assert('Phase 11', 'Malformed JSON body answered 400 with a plain message (no parser internals)', badJsonRes.status === 400 && badJsonRes.data.error === 'Request body is not valid JSON.');
   assert('Phase 11', 'Responses carry an X-Request-Id header for log lookup', typeof badJsonRes.headers['x-request-id'] === 'string' && badJsonRes.headers['x-request-id'].length > 10);
 
+  // 4. Input validation: bad input is a 400 with a plain message, never a database error
+  const badInputCases = [
+    ['GET', '/api/auctions?seller_id=abc', null, null],
+    ['GET', '/api/auctions?status=ACTIVE&status=CLOSED', null, null],
+    ['POST', '/api/wallet/topup', { amount: 99999999999 }, bidderToken],
+    ['POST', '/api/wallet/topup', { amount: 10.555 }, bidderToken],
+    ['POST', '/api/wallet/settle-lot', { auctionId: 'not-a-uuid' }, bidderToken],
+    ['POST', '/api/auctions', { title: 'x'.repeat(300), starting_price: 10, duration_minutes: 5 }, sellerToken],
+    ['POST', '/api/auctions', { title: 'Too far', starting_price: 10, end_time: new Date(Date.now() + 400 * 86400000).toISOString() }, sellerToken],
+    ['POST', '/api/auth/register', { email: 'not-an-email', password: 'Password@123' }, null],
+    ['POST', '/api/auth/register', { email: `short_${uniqueId}@test.com`, password: '1' }, null],
+    ['POST', '/api/auth/login', { email: 123, password: 'x' }, null],
+    ['GET', '/api/users/auction-payout/not-a-uuid', null, bidderToken],
+    ['GET', '/api/admin/commission-ledger?from=abc', null, adminToken],
+    ['PUT', '/api/admin/users/not-a-uuid/role', { role: 'bidder' }, adminToken],
+  ];
+  const badInputResults = [];
+  for (const [method, path, body, token] of badInputCases) {
+    const r = await request(method, path, body, token);
+    badInputResults.push({ path, status: r.status, error: r.data?.error || '' });
+  }
+  const notRejected = badInputResults.filter(r => r.status !== 400);
+  assert('Phase 11', `All ${badInputCases.length} malformed inputs rejected with 400`, notRejected.length === 0, notRejected.map(r => `${r.path} -> ${r.status}`).join('; '));
+  const leaky = badInputResults.filter(r => /syntax|violates|overflow|character varying|is not a function|pg_|relation/i.test(r.error));
+  assert('Phase 11', 'No error message exposes database or code internals', leaky.length === 0, leaky.map(r => r.error).join('; '));
+
   console.log('\n===========================================================');
   console.log('   🎉 ALL PHASES (1 TO 10) ARE 100% VERIFIED AND PASSING!  ');
   console.log('===========================================================');

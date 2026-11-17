@@ -3,6 +3,10 @@ const topupService = require('../services/topupService');
 const commissionService = require('../services/commissionService');
 const auctionClosureService = require('../services/auctionClosureService');
 const { AppError, sendAppError } = require('../utils/AppError');
+const { requireMoney, requireUuid, optionalString, optionalQueryString } = require('../utils/validators');
+
+// Ledger entry types a history filter may ask for
+const LEDGER_TYPES = ['TOPUP', 'SETTLEMENT_DEBIT', 'SETTLEMENT_CREDIT', 'COMMISSION', 'WITHDRAWAL'];
 
 /**
  * Wallet Controller
@@ -38,7 +42,11 @@ const getTransactions = async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page || '1'));
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20')));
     const offset = (page - 1) * limit;
-    const type = req.query.type ? req.query.type.toUpperCase() : null;
+    const typeParam = optionalQueryString(req.query.type, 'type', 30);
+    const type = typeParam ? typeParam.toUpperCase() : null;
+    if (type && !LEDGER_TYPES.includes(type)) {
+      throw new AppError(400, `type must be one of ${LEDGER_TYPES.join(', ')}.`);
+    }
 
     const history = await walletService.getTransactionHistory(req.user, { limit, offset, type });
 
@@ -83,12 +91,8 @@ const readIdempotencyKey = (req) => {
 // POST /api/wallet/topup
 const topup = async (req, res, next) => {
   try {
-    const { amount, note } = req.body;
-    const numAmount = parseFloat(amount);
-
-    if (isNaN(numAmount) || numAmount <= 0) {
-      return res.status(400).json({ error: 'Top-up amount must be greater than 0' });
-    }
+    const numAmount = requireMoney(req.body.amount, 'Top-up amount');
+    const note = optionalString(req.body.note, 'Note', 200);
 
     const idempotencyKey = readIdempotencyKey(req);
     const result = await topupService.requestTopup(req.user.id, numAmount, 'INTERNAL', { note, idempotencyKey });
@@ -110,11 +114,10 @@ const topup = async (req, res, next) => {
 // POST /api/wallet/settle-lot
 const settleLotPayment = async (req, res, next) => {
   try {
-    const { auctionId } = req.body;
-
-    if (!auctionId) {
+    if (!req.body.auctionId) {
       return res.status(400).json({ error: 'Auction ID is required' });
     }
+    const auctionId = requireUuid(req.body.auctionId, 'auction ID');
 
     const result = await auctionClosureService.settleWonLot(req.user.id, auctionId);
 
@@ -145,12 +148,7 @@ const settleLotPayment = async (req, res, next) => {
 // POST /api/wallet/settle-commission
 const settleCommission = async (req, res, next) => {
   try {
-    const { amount } = req.body;
-    const numAmount = parseFloat(amount);
-
-    if (isNaN(numAmount) || numAmount <= 0) {
-      return res.status(400).json({ error: 'Commission settlement amount must be greater than 0' });
-    }
+    const numAmount = requireMoney(req.body.amount, 'Commission settlement amount');
 
     const result = await commissionService.payFromWallet(req.user.id, numAmount);
 
@@ -167,12 +165,8 @@ const settleCommission = async (req, res, next) => {
 // POST /api/wallet/withdraw
 const withdraw = async (req, res, next) => {
   try {
-    const { amount, note } = req.body;
-    const numAmount = parseFloat(amount);
-
-    if (isNaN(numAmount) || numAmount <= 0) {
-      return res.status(400).json({ error: 'Withdrawal amount must be greater than 0' });
-    }
+    const numAmount = requireMoney(req.body.amount, 'Withdrawal amount');
+    const note = optionalString(req.body.note, 'Note', 200);
 
     const idempotencyKey = readIdempotencyKey(req);
     const result = await topupService.requestWithdrawal(req.user.id, numAmount, { note, idempotencyKey });

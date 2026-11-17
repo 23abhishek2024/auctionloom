@@ -1,6 +1,13 @@
 /**
- * Utility functions for API input validation and sanitization
+ * Utility functions for API input validation and sanitization.
+ *
+ * Two kinds of helpers:
+ * - isUUID, parseMoney, ... return a boolean or the cleaned value (null when invalid), for callers that answer themselves;
+ * - requireUuid, optionalString, ... return the cleaned value or throw AppError(400) with a message naming the field,
+ *   for controllers that pass errors on with next(err).
+ * Checking here means bad input gets a clear 400 instead of reaching PostgreSQL and failing as a 500.
  */
+const { AppError } = require('./AppError');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -53,6 +60,93 @@ const toCents = (amount) => Math.round(parseFloat(amount) * 100);
 
 const MONEY_RULE = `a positive amount with at most 2 decimal places, up to $${MAX_AMOUNT.toLocaleString('en-US')}`;
 
+// ── Throwing helpers (for controllers that use next(err)) ───────
+const fail = (message) => {
+  throw new AppError(400, message);
+};
+
+/** A UUID (route param or body field), or a 400 naming the field */
+const requireUuid = (value, field) => {
+  if (!isUUID(value)) fail(`Invalid ${field} format. Must be a valid UUID.`);
+  return value.trim();
+};
+
+/** An amount in whole cents (see parseMoney), or a 400 naming the field */
+const requireMoney = (value, field) => {
+  const amount = parseMoney(value);
+  if (amount === null) fail(`${field} must be ${MONEY_RULE}.`);
+  return amount;
+};
+
+/** A non-empty string after trimming, at most `max` characters */
+const requireString = (value, field, max = 255) => {
+  if (typeof value !== 'string' || !value.trim()) fail(`${field} is required.`);
+  const text = value.trim();
+  if (text.length > max) fail(`${field} must be at most ${max} characters.`);
+  return text;
+};
+
+/** undefined, null or '' → null; otherwise a string of at most `max` characters (trimmed) */
+const optionalString = (value, field, max = 255) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') fail(`${field} must be text.`);
+  const text = value.trim();
+  if (text.length > max) fail(`${field} must be at most ${max} characters.`);
+  return text || null;
+};
+
+/** A query-string value: absent → null; one string (not repeated, not an object) of at most `max` characters */
+const optionalQueryString = (value, field, max = 100) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') fail(`Query parameter "${field}" must be given once, as text.`);
+  if (value.length > max) fail(`Query parameter "${field}" must be at most ${max} characters.`);
+  return value;
+};
+
+/** A calendar date "YYYY-MM-DD" for report filters, or null when absent */
+const optionalDateParam = (value, field) => {
+  const text = optionalQueryString(value, field, 10);
+  if (text === null) return null;
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(text) && !isNaN(new Date(`${text}T00:00:00Z`).getTime());
+  if (!valid) fail(`Query parameter "${field}" must be a date like 2026-11-30.`);
+  return text;
+};
+
+const MAX_AUCTION_DAYS = 365;
+
+/** An end time that parses as a date, is in the future and at most a year away; returned as an ISO string */
+const requireFutureEndTime = (value, field = 'end_time') => {
+  if (typeof value !== 'string' && typeof value !== 'number') fail(`${field} is required.`);
+  const date = new Date(value);
+  if (isNaN(date.getTime()) || date <= new Date()) fail(`${field} must be in the future.`);
+  if (date.getTime() - Date.now() > MAX_AUCTION_DAYS * 24 * 60 * 60 * 1000) {
+    fail(`${field} must be within ${MAX_AUCTION_DAYS} days.`);
+  }
+  return date.toISOString();
+};
+
+// ── Accounts ────────────────────────────────────────────────────
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PASSWORD_MIN = 8;
+const PASSWORD_MAX = 72; // bcrypt only uses the first 72 bytes
+
+/** A plausible email address (trimmed, lower-cased), or a 400 */
+const requireEmail = (value) => {
+  if (typeof value !== 'string' || !EMAIL_REGEX.test(value.trim()) || value.trim().length > 254) {
+    fail('Please enter a valid email address.');
+  }
+  return value.trim().toLowerCase();
+};
+
+/** A new password of 8 to 72 characters, or a 400 */
+const requireNewPassword = (value, field = 'Password') => {
+  if (typeof value !== 'string' || value.length < PASSWORD_MIN) {
+    fail(`${field} must be at least ${PASSWORD_MIN} characters.`);
+  }
+  if (Buffer.byteLength(value, 'utf8') > PASSWORD_MAX) fail(`${field} must be at most ${PASSWORD_MAX} characters.`);
+  return value;
+};
+
 module.exports = {
   isUUID,
   isUuidFormat,
@@ -61,4 +155,14 @@ module.exports = {
   toCents,
   MAX_AMOUNT,
   MONEY_RULE,
+  requireUuid,
+  requireMoney,
+  requireString,
+  optionalString,
+  optionalQueryString,
+  optionalDateParam,
+  requireFutureEndTime,
+  requireEmail,
+  requireNewPassword,
+  EMAIL_REGEX,
 };

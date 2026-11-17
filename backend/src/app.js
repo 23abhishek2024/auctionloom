@@ -59,6 +59,12 @@ app.use(
   })
 );
 app.use(express.json());
+// Express 5 leaves req.body undefined when a request has no JSON body; controllers read
+// fields from it, so default to {} and let their own checks answer "x is required" (400).
+app.use((req, res, next) => {
+  if (req.body === undefined) req.body = {};
+  next();
+});
 app.use(rateLimiterMiddleware);
 
 // Serve static uploaded files (Node.js Video 28 - Multer)

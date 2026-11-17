@@ -37,8 +37,8 @@ export const RegisterPage = () => {
       return;
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters long.');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long.');
       return;
     }
 
@@ -129,7 +129,7 @@ export const RegisterPage = () => {
           {/* Password */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-700 mb-1.5">
-              Password (min 6 chars) *
+              Password (min 8 chars) *
             </label>
             <div className="relative">
               <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />

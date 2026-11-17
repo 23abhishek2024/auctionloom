@@ -3,7 +3,31 @@ const userService = require('../services/userService');
 const commissionService = require('../services/commissionService');
 const reportService = require('../services/reportService');
 const systemService = require('../services/systemService');
-const { isUUID } = require('../utils/validators');
+const {
+  isUUID,
+  requireUuid,
+  optionalString,
+  optionalQueryString,
+  optionalDateParam,
+} = require('../utils/validators');
+const { AppError } = require('../utils/AppError');
+
+// Shared query checks for the commission reports: page, limit, search text, date range and format
+const readReportQuery = (query, maxLimit) => {
+  const page = Math.max(1, parseInt(optionalQueryString(query.page, 'page', 6) || '1', 10) || 1);
+  const limit = Math.min(maxLimit, Math.max(1, parseInt(optionalQueryString(query.limit, 'limit', 6) || '20', 10) || 20));
+  const format = (optionalQueryString(query.format, 'format', 10) || 'json').toLowerCase();
+  if (format !== 'json' && format !== 'csv') throw new AppError(400, 'format must be json or csv.');
+  return {
+    page,
+    limit,
+    offset: (page - 1) * limit,
+    search: (optionalQueryString(query.search, 'search', 100) || '').trim(),
+    from: optionalDateParam(query.from, 'from'),
+    to: optionalDateParam(query.to, 'to'),
+    format,
+  };
+};
 
 /**
  * Admin Controller
@@ -72,7 +96,7 @@ const getRevenueChart = async (req, res, next) => {
  */
 const getAllUsers = async (req, res, next) => {
   try {
-    const users = await userService.listUsers(req.query.search);
+    const users = await userService.listUsers(optionalQueryString(req.query.search, 'search', 100));
     res.json({
       users,
       count: users.length,
@@ -88,7 +112,7 @@ const getAllUsers = async (req, res, next) => {
  */
 const updateUserRole = async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = requireUuid(req.params.id, 'user ID');
     const { role } = req.body;
 
     if (!['admin', 'auctioneer', 'bidder'].includes(role)) {
@@ -136,14 +160,14 @@ const updateAuctionStatus = async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid auction ID format.' });
     }
 
-    if (!status || !['ACTIVE', 'CLOSED', 'RESTRICTED'].includes(status.toUpperCase())) {
+    if (typeof status !== 'string' || !['ACTIVE', 'CLOSED', 'RESTRICTED'].includes(status.toUpperCase())) {
       return res.status(400).json({
         error: "Status must be one of 'ACTIVE', 'CLOSED', or 'RESTRICTED'.",
       });
     }
 
     const normalizedStatus = status.toUpperCase();
-    const auction = await auctionService.setAuctionStatus(id, normalizedStatus, reason);
+    const auction = await auctionService.setAuctionStatus(id, normalizedStatus, optionalString(reason, 'Reason', 300));
 
     res.json({
       message: `Auction status successfully updated to ${normalizedStatus}.`,
@@ -160,7 +184,7 @@ const updateAuctionStatus = async (req, res, next) => {
  */
 const getAllPaymentProofs = async (req, res, next) => {
   try {
-    const { status } = req.query;
+    const status = optionalQueryString(req.query.status, 'status', 20);
     const statusFilter = status && ['PENDING', 'APPROVED', 'REJECTED'].includes(status.toUpperCase())
       ? status.toUpperCase()
       : null;
@@ -181,14 +205,14 @@ const getAllPaymentProofs = async (req, res, next) => {
  */
 const updatePaymentProofStatus = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const { status, admin_notes } = req.body;
+    const id = requireUuid(req.params.id, 'proof ID');
+    const { status } = req.body;
 
     if (!['APPROVED', 'REJECTED'].includes(status)) {
       return res.status(400).json({ error: "Status must be 'APPROVED' or 'REJECTED'." });
     }
 
-    const proof = await commissionService.reviewProof(id, status, admin_notes);
+    const proof = await commissionService.reviewProof(id, status, optionalString(req.body.admin_notes, 'Admin notes', 500));
     res.json({
       message: `Payment proof status successfully updated to ${status}.`,
       proof,
@@ -205,13 +229,7 @@ const updatePaymentProofStatus = async (req, res, next) => {
  */
 const getCommissionLedger = async (req, res, next) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page || '1'));
-    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '20')));
-    const offset = (page - 1) * limit;
-    const search = (req.query.search || '').trim();
-    const from = req.query.from || null;
-    const to = req.query.to || null;
-    const format = (req.query.format || 'json').toLowerCase();
+    const { page, limit, offset, search, from, to, format } = readReportQuery(req.query, 200);
     const groupBySeller = req.query.groupBySeller === 'true';
 
     const ledger = await reportService.getCommissionLedger({ search, from, to, groupBySeller, limit, offset });
@@ -252,14 +270,8 @@ const getCommissionLedger = async (req, res, next) => {
  */
 const getCommissionTransactions = async (req, res, next) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page || '1'));
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20')));
-    const offset = (page - 1) * limit;
-    const search = (req.query.search || '').trim();
-    const type = (req.query.type || 'ALL').toUpperCase();
-    const from = req.query.from || null;
-    const to = req.query.to || null;
-    const format = (req.query.format || 'json').toLowerCase();
+    const { page, limit, offset, search, from, to, format } = readReportQuery(req.query, 100);
+    const type = (optionalQueryString(req.query.type, 'type', 20) || 'ALL').toUpperCase();
 
     const report = await reportService.getCommissionTransactions({ type, search, from, to, limit, offset });
 

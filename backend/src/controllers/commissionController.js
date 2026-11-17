@@ -1,5 +1,5 @@
 const commissionService = require('../services/commissionService');
-const { isPositiveNumber } = require('../utils/validators');
+const { requireMoney, optionalString } = require('../utils/validators');
 
 /**
  * POST /api/commissions/proof
@@ -7,19 +7,19 @@ const { isPositiveNumber } = require('../utils/validators');
  */
 const submitProof = async (req, res, next) => {
   try {
-    const { amount, comment } = req.body;
-
     if (!req.file) {
       return res.status(400).json({ error: 'Payment receipt screenshot image is required.' });
     }
 
-    if (!amount || !isPositiveNumber(parseFloat(amount))) {
+    if (!req.body.amount) {
       return res.status(400).json({ error: 'Valid payment amount is required.' });
     }
+    const amount = requireMoney(req.body.amount, 'Payment amount');
+    const comment = optionalString(req.body.comment, 'Comment', 500);
 
     const proof = await commissionService.submitProof(req.user.id, {
-      amount: parseFloat(amount),
-      comment: comment ? comment.trim() : null,
+      amount,
+      comment,
       proofUrl: `/uploads/${req.file.filename}`, // Relative URL to the uploaded file
     });
 
