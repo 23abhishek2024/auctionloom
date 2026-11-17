@@ -15,7 +15,7 @@ const DB_CONFIG = {
   port: parseInt(process.env.DB_PORT, 10) || 5432,
   database: process.env.DB_NAME || 'auctionloom',
   user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgresql@82521',
+  password: process.env.DB_PASSWORD || 'postgres',
 };
 
 const pool = new Pool(DB_CONFIG);
@@ -104,24 +104,20 @@ function assert(phase, testName, condition, details = '') {
 
 async function runVerification() {
   console.log('===========================================================');
-  console.log('   AUCTIONLOOM: DETAILED 1 TO 7 PHASE VERIFICATION SUITE   ');
+  console.log('   AUCTIONLOOM: END-TO-END VERIFICATION SUITE (PHASES 1-11)   ');
   console.log('===========================================================\n');
 
   // ============================================================
-  // PHASE 1: Environment & Initial Setup
+  // PHASE 1: Server up, API catalogue and unknown routes
   // ============================================================
-  console.log('--- Checking Phase 1: Environment & MVC Structure ---');
-  const backendSrc = './src';
-  const frontendSrc = '../frontend/src';
+  console.log('--- Checking Phase 1: Server & API catalogue ---');
 
-  assert('Phase 1', 'Backend controllers folder exists', fs.existsSync(`${backendSrc}/controllers`));
-  assert('Phase 1', 'Backend models folder exists', fs.existsSync(`${backendSrc}/models`));
-  assert('Phase 1', 'Backend routes folder exists', fs.existsSync(`${backendSrc}/routes`));
-  assert('Phase 1', 'Backend middlewares folder exists', fs.existsSync(`${backendSrc}/middlewares`));
-  assert('Phase 1', 'Backend services folder exists', fs.existsSync(`${backendSrc}/services`));
-  assert('Phase 1', 'Backend workers folder exists', fs.existsSync(`${backendSrc}/workers`));
-  assert('Phase 1', 'Frontend source files exist', fs.existsSync(`${frontendSrc}/App.jsx`));
-  assert('Phase 1', 'Git repo initialized', fs.existsSync('../.git'));
+  const rootRes = await request('GET', '/');
+  assert('Phase 1', 'GET / answers that the API is online', rootRes.status === 200 && rootRes.data.status === 'online');
+  const catalogueRes = await request('GET', '/api');
+  assert('Phase 1', 'GET /api lists the REST resources', catalogueRes.status === 200 && !!catalogueRes.data.resources?.auctions);
+  const unknownRes = await request('GET', '/api/does-not-exist');
+  assert('Phase 1', 'Unknown route answered with a JSON 404', unknownRes.status === 404 && typeof unknownRes.data.error === 'string');
 
   // ============================================================
   // PHASE 2: Database Setup & Connectivity
@@ -135,10 +131,9 @@ async function runVerification() {
     WHERE table_schema = 'public'
   `);
   const tableNames = tableQuery.rows.map(r => r.table_name);
-  assert('Phase 2', 'Users table exists', tableNames.includes('users'));
-  assert('Phase 2', 'Auctions table exists', tableNames.includes('auctions'));
-  assert('Phase 2', 'Bids table exists', tableNames.includes('bids'));
-  assert('Phase 2', 'Jobs table exists', tableNames.includes('jobs'));
+  const expectedTables = ['users', 'auctions', 'bids', 'jobs', 'commission_proofs', 'wallets', 'wallet_transactions', 'payment_requests'];
+  const missingTables = expectedTables.filter(t => !tableNames.includes(t));
+  assert('Phase 2', 'All 8 tables exist after migration', missingTables.length === 0, missingTables.length ? `missing: ${missingTables.join(', ')}` : '');
 
   const constraintsQuery = await pool.query(`
     SELECT conname FROM pg_constraint WHERE conrelid = 'jobs'::regclass
@@ -395,7 +390,7 @@ async function runVerification() {
     `INSERT INTO jobs (type, payload) VALUES ('CLOSE_AUCTION', $1) ON CONFLICT DO NOTHING RETURNING *`,
     [JSON.stringify({ auction_id: expiredAuctionId })]
   );
-  assert('Phase 6', 'Scheduler queues CLOSE_AUCTION job into jobs table', insertJobRes.rows.length === 1 || insertJobRes.rowCount >= 0);
+  assert('Phase 6', 'Scheduler queues CLOSE_AUCTION job into jobs table', insertJobRes.rowCount === 1);
 
   // 2. Simulate Worker: SELECT ... FOR UPDATE SKIP LOCKED
   const client = await pool.connect();
@@ -450,45 +445,33 @@ async function runVerification() {
   assert('Phase 6', 'Auction winner_id correctly assigned to highest bidder', finalAuctionCheck.rows[0].winner_id === bidderId);
 
   // ============================================================
-  // PHASE 7: Frontend UI & Dev Server
+  // PHASE 7: Browser origins (CORS and the Socket.IO handshake)
+  // (The React app itself is checked by the CI frontend build job.)
   // ============================================================
-  console.log('\n--- Checking Phase 7: React Frontend & Real-Time UI ---');
+  console.log('\n--- Checking Phase 7: CORS & WebSocket origin allow-list ---');
 
-  const isCI = process.env.CI === 'true';
+  const originGet = (origin) => new Promise((resolve, reject) => {
+    http.get({ hostname: 'localhost', port: API_PORT, path: '/api/auctions?limit=1', headers: { Origin: origin } }, (res) => {
+      res.resume();
+      resolve(res.headers['access-control-allow-origin']);
+    }).on('error', reject);
+  });
+  assert('Phase 7', 'CORS allows the real frontend origin', (await originGet('https://auctionloom.vercel.app')) === 'https://auctionloom.vercel.app');
+  assert('Phase 7', 'CORS gives no allow header to another website', (await originGet('https://evil.example')) === undefined);
 
-  assert('Phase 7', 'AuthContext.jsx component present', fs.existsSync(`${frontendSrc}/context/AuthContext.jsx`));
-  assert('Phase 7', 'SocketContext.jsx component present', fs.existsSync(`${frontendSrc}/context/SocketContext.jsx`));
-  assert('Phase 7', 'Navbar.jsx component present', fs.existsSync(`${frontendSrc}/components/Navbar.jsx`));
-  assert('Phase 7', 'AuctionCard.jsx component present', fs.existsSync(`${frontendSrc}/components/AuctionCard.jsx`));
-  assert('Phase 7', 'AuctionDetailPage.jsx with live room present', fs.existsSync(`${frontendSrc}/pages/AuctionDetailPage.jsx`));
-  assert('Phase 7', 'DashboardPage.jsx with search/filters present', fs.existsSync(`${frontendSrc}/pages/DashboardPage.jsx`));
-
-  if (!isCI) {
-    assert('Phase 7', 'Frontend production build dist exists', fs.existsSync('../frontend/dist/index.html'));
-
-    // Test live Vite frontend server response
-    const viteResponse = await new Promise((resolve) => {
-      http.get('http://localhost:5173', (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => resolve({ status: res.statusCode, body: data }));
-      }).on('error', (err) => resolve({ status: 500, error: err.message }));
-    });
-
-    assert('Phase 7', 'Vite frontend dev server responds with 200 OK on port 5173', viteResponse.status === 200);
-    assert('Phase 7', 'Vite serves HTML with root element and React module entry', viteResponse.body?.includes('<div id="root">') && viteResponse.body?.includes('main.jsx'));
-  } else {
-    assert('Phase 7', 'CI Pipeline: Frontend components verified', true);
-  }
+  const evilSocket = io(SOCKET_URL, { transports: ['websocket'], extraHeaders: { Origin: 'https://evil.example' }, reconnection: false });
+  const evilOutcome = await new Promise((resolve) => {
+    evilSocket.on('connect', () => resolve('connected'));
+    evilSocket.on('connect_error', () => resolve('refused'));
+    setTimeout(() => resolve('timeout'), 3000);
+  });
+  evilSocket.disconnect();
+  assert('Phase 7', 'Socket.IO handshake from another website is refused', evilOutcome === 'refused');
 
   // ============================================================
   // PHASE 8: AI Assistant & Copywriter
   // ============================================================
   console.log('\n--- Checking Phase 8: AI Auction Assistant ---');
-
-  assert('Phase 8', 'aiService.js exists', fs.existsSync(`${backendSrc}/services/aiService.js`));
-  assert('Phase 8', 'aiController.js exists', fs.existsSync(`${backendSrc}/controllers/aiController.js`));
-  assert('Phase 8', 'aiRoutes.js exists', fs.existsSync(`${backendSrc}/routes/aiRoutes.js`));
 
   // 1. RBAC Check: Bidder forbidden from accessing /api/ai/generate
   const aiBidderRes = await request('POST', '/api/ai/generate', {
@@ -516,10 +499,6 @@ async function runVerification() {
   // PHASE 9: Multer Uploads (Video 28) & Socket.IO Chat (Video 33)
   // ============================================================
   console.log('\n--- Checking Phase 9: Multer Image Upload & Socket.IO Live Room Chat ---');
-
-  assert('Phase 9', 'Multer upload middleware exists', fs.existsSync(`${backendSrc}/middlewares/upload.js`));
-  assert('Phase 9', 'Upload routes exist', fs.existsSync(`${backendSrc}/routes/uploadRoutes.js`));
-  assert('Phase 9', 'Public uploads directory exists', fs.existsSync('./public/uploads'));
 
   // 1. Upload an image via Multer (1x1 PNG buffer)
   const dummyPngBuffer = Buffer.from(
@@ -599,31 +578,21 @@ async function runVerification() {
   chatSocket.disconnect();
 
   // ============================================================
-  // PHASE 10: Production-Grade Wallet & Double-Entry Ledger System
+  // PHASE 10: Wallet & append-only ledger
   // ============================================================
-  console.log('\n--- Checking Phase 10: Production-Grade Wallet & Double-Entry Ledger System ---');
+  console.log('\n--- Checking Phase 10: Wallet & append-only ledger ---');
 
   // 1. Verify schema tables in PostgreSQL
   const walletTableRes = await pool.query(`
     SELECT column_name FROM information_schema.columns WHERE table_name = 'wallets'
   `);
   const walletColumns = walletTableRes.rows.map(r => r.column_name);
-  assert('Phase 10', 'Wallets table exists in PostgreSQL', walletTableRes.rows.length > 0);
-  assert('Phase 10', 'Wallets table has balance column', walletColumns.includes('balance'));
-  assert('Phase 10', 'Wallets table has version column for concurrency control', walletColumns.includes('version'));
-
   const txTableRes = await pool.query(`
     SELECT column_name FROM information_schema.columns WHERE table_name = 'wallet_transactions'
   `);
   const txColumns = txTableRes.rows.map(r => r.column_name);
-  assert('Phase 10', 'wallet_transactions table exists for double-entry audit', txTableRes.rows.length > 0);
-  assert('Phase 10', 'wallet_transactions has idempotency_key column', txColumns.includes('idempotency_key'));
-  assert('Phase 10', 'wallet_transactions has balance_after column', txColumns.includes('balance_after'));
-
-  const payReqRes = await pool.query(`
-    SELECT column_name FROM information_schema.columns WHERE table_name = 'payment_requests'
-  `);
-  assert('Phase 10', 'payment_requests table exists for gateway abstraction', payReqRes.rows.length > 0);
+  assert('Phase 10', 'Wallet schema: balance + version on wallets, idempotency_key + balance_after on the ledger',
+    ['balance', 'version'].every(c => walletColumns.includes(c)) && ['idempotency_key', 'balance_after'].every(c => txColumns.includes(c)));
 
   // 2. Test GET /api/wallet
   const initialWalletRes = await request('GET', '/api/wallet', null, bidderToken);
@@ -709,7 +678,7 @@ async function runVerification() {
   // 9. Verify Ledger History Audit Integrity
   const finalLedgerRes = await request('GET', '/api/wallet', null, bidderToken);
   const txs = finalLedgerRes.data?.data?.transactions;
-  assert('Phase 10', 'Double-entry ledger contains immutable audit records', Array.isArray(txs) && txs.length >= 2);
+  assert('Phase 10', 'Ledger lists the wallet history (top-up and settlement entries)', Array.isArray(txs) && txs.length >= 2);
   assert('Phase 10', 'Ledger tracks balance_after snapshot on every transaction', txs.every(t => typeof t.balanceAfter === 'number'));
 
   // ============================================================
@@ -810,8 +779,19 @@ async function runVerification() {
   assert('Phase 11', 'Chat flood control: 5 messages delivered, the 6th refused', !!floodErr && heard.length === 5);
   [listener, guest, flooder].forEach((s) => s.disconnect());
 
+  // 7. Admin benchmark: runs the real bid code on a throw-away lot and reports checks it computed
+  const benchRes = await request('POST', '/api/admin/system/run-benchmark', { requests: 40 }, adminToken);
+  const bench = benchRes.data?.data;
+  const benchLotLeft = bench ? await pool.query('SELECT 1 FROM auctions WHERE id = $1', [bench.dbState.auctionId]) : { rowCount: 1 };
+  assert('Phase 11', 'Admin benchmark checks the database (all checks true, 0 race conditions) and deletes its lot',
+    benchRes.status === 200 && bench.dbState.raceConditionsDetected === 0 &&
+    Object.values(bench.dbState.checks).every(Boolean) && bench.successfulBids + bench.rejectedBids === 40 && benchLotLeft.rowCount === 0,
+    benchRes.status === 200 ? `accepted ${bench.successfulBids}, refused ${bench.rejectedBids}` : JSON.stringify(benchRes.data));
+  const benchTooBig = await request('POST', '/api/admin/system/run-benchmark', { requests: 100000 }, adminToken);
+  assert('Phase 11', 'Admin benchmark size is capped (100000 requests -> 400)', benchTooBig.status === 400);
+
   console.log('\n===========================================================');
-  console.log('   🎉 ALL PHASES (1 TO 10) ARE 100% VERIFIED AND PASSING!  ');
+  console.log('   🎉 ALL PHASES (1 TO 11) PASSED  ');
   console.log('===========================================================');
   console.log(`Total assertions passed: ${results.length}/${results.length}`);
 }

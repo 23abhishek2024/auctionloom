@@ -90,6 +90,19 @@ jobs:
           DISABLE_DB_SSL: 'true'
         run: npm test
 
+      - name: Run Concurrency Stress Tests
+        working-directory: ./backend
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: auctionloom
+          DB_USER: postgres
+          DB_PASSWORD: password123
+          JWT_SECRET: ci_jwt_secret_test_key_12345
+          DISABLE_DB_SSL: 'true'
+        # 100-bid race, double spend, double settlement, republish of a paid lot, cross settlement
+        run: npm run stress
+
   # ==========================================
   # Frontend Build & Typecheck Verification
   # ==========================================

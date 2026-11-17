@@ -327,7 +327,10 @@ const purgeAndResetDatabase = async (req, res, next) => {
  */
 const runConcurrencyBenchmark = async (req, res, next) => {
   try {
-    const count = parseInt(req.body.requests, 10) || 100;
+    const count = req.body.requests === undefined ? 100 : Number(req.body.requests);
+    if (!Number.isInteger(count) || count < 2 || count > 500) {
+      return res.status(400).json({ error: 'requests must be a whole number from 2 to 500.' });
+    }
     const data = await systemService.runBidBenchmark(count);
     return res.status(200).json({ success: true, data });
   } catch (err) {

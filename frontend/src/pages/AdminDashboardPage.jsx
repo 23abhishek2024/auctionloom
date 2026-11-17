@@ -1280,7 +1280,7 @@ export const AdminDashboardPage = () => {
                     High-Concurrency Stress Benchmark
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Testing PostgreSQL 15 <code className="text-amber-300 font-mono">SELECT FOR UPDATE</code> with 100 collision writes
+                    100 bids on a temporary lot through the real bid code (<code className="text-amber-300 font-mono">SELECT ... FOR UPDATE</code>), up to 10 at a time, then the database is checked
                   </p>
                 </div>
               </div>
@@ -1301,10 +1301,10 @@ export const AdminDashboardPage = () => {
                     <Zap className="w-7 h-7 text-amber-400 absolute inset-0 m-auto animate-pulse" />
                   </div>
                   <h4 className="text-lg font-bold text-white mb-1">
-                    Simulating 100 Concurrent Collision Bids...
+                    Running 100 bids (in equal pairs)...
                   </h4>
                   <p className="text-xs text-slate-400 max-w-md font-mono">
-                    Dispatched 100 simultaneous transactions across test bidders. Waiting for PostgreSQL lock manager resolution...
+                    Each bid locks the lot row, so they run one after another; the second bid of each pair must be refused.
                   </p>
                 </div>
               ) : benchmarkError ? (
@@ -1343,7 +1343,7 @@ export const AdminDashboardPage = () => {
                       <div className="text-xl font-extrabold text-cyan-400 font-mono mt-0.5">
                         {benchmarkResult.elapsedMs} ms
                       </div>
-                      <div className="text-[10px] text-slate-500">for 100 requests</div>
+                      <div className="text-[10px] text-slate-500">for {benchmarkResult.totalRequests} requests ({benchmarkResult.maxInFlight} in flight)</div>
                     </div>
 
                     <div className="p-3.5 rounded-2xl bg-slate-800/60 border border-slate-700/60">
@@ -1355,11 +1355,11 @@ export const AdminDashboardPage = () => {
                     </div>
 
                     <div className="p-3.5 rounded-2xl bg-slate-800/60 border border-slate-700/60">
-                      <div className="text-[11px] font-mono text-slate-400 uppercase">Crashes / Errors</div>
-                      <div className="text-xl font-extrabold text-emerald-400 font-mono mt-0.5">
-                        0
+                      <div className="text-[11px] font-mono text-slate-400 uppercase">Server Errors</div>
+                      <div className={`text-xl font-extrabold font-mono mt-0.5 ${benchmarkResult.serverErrors === 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {benchmarkResult.serverErrors}
                       </div>
-                      <div className="text-[10px] text-emerald-500 font-medium">100% Zero-Crash SLA</div>
+                      <div className="text-[10px] text-slate-500 font-medium">unexpected failures in this run</div>
                     </div>
                   </div>
 
@@ -1369,8 +1369,8 @@ export const AdminDashboardPage = () => {
                       <span className="text-slate-300 flex items-center gap-1.5 font-semibold">
                         <ShieldCheck className="w-4 h-4 text-emerald-400" /> Concurrency Integrity
                       </span>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
-                        0 RACE CONDITIONS DETECTED
+                      <span className={`px-2 py-0.5 rounded-full font-bold border ${benchmarkResult.dbState.raceConditionsDetected === 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'}`}>
+                        {benchmarkResult.dbState.raceConditionsDetected} RACE CONDITIONS DETECTED
                       </span>
                     </div>
 
@@ -1378,13 +1378,13 @@ export const AdminDashboardPage = () => {
                       <div>
                         <div className="text-slate-400">Accepted Bids (HTTP 201):</div>
                         <div className="text-sm font-bold text-emerald-400 mt-0.5">
-                          {benchmarkResult.successfulBids} bids (Monotonic Price Increments)
+                          {benchmarkResult.successfulBids} bids (each higher than the last)
                         </div>
                       </div>
                       <div>
                         <div className="text-slate-400">Rejected Bids (HTTP 400):</div>
                         <div className="text-sm font-bold text-rose-400 mt-0.5">
-                          {benchmarkResult.rejectedBids} bids (Correctly blocked lower/equal bids)
+                          {benchmarkResult.rejectedBids} bids (lower or equal, refused)
                         </div>
                       </div>
                     </div>
@@ -1393,6 +1393,19 @@ export const AdminDashboardPage = () => {
                       <span>Final Price in DB: <strong className="text-white">${benchmarkResult.dbState.finalPrice.toFixed(2)}</strong></span>
                       <span>Total Bids Recorded: <strong className="text-white">{benchmarkResult.dbState.totalBidsInDb}</strong></span>
                     </div>
+
+                    {/* The checks the server ran on the database after the run */}
+                    <ul className="pt-2 border-t border-slate-700/60 text-[11px] font-mono space-y-1">
+                      {[
+                        ['everyAcceptedBidStored', 'Every accepted bid is stored, nothing else'],
+                        ['noDuplicateAcceptedAmounts', 'No two accepted bids share an amount'],
+                        ['finalPriceEqualsHighestAcceptedBid', 'Final price = highest accepted bid'],
+                      ].map(([key, label]) => (
+                        <li key={key} className={benchmarkResult.dbState.checks?.[key] ? 'text-emerald-400' : 'text-rose-400'}>
+                          {benchmarkResult.dbState.checks?.[key] ? '✓' : '✗'} {label}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
 
                   {/* Latency Percentiles Grid */}
