@@ -11,7 +11,7 @@
 1. **Pessimistic Row-Level Locking (`SELECT FOR UPDATE`)**: Eliminates race conditions and "Thundering Herd" retry storms during the closing seconds of high-value auctions.
 2. **Append-Only Wallet Ledger**: Zero-overdraft invariant (`CHECK (balance >= 0)`), a ledger row with `balance_after` for every change, and settlements whose entries sum to zero (buyer -P, seller +0.95P, platform +0.05P). Top-ups and withdrawals are simulated, so they have no counter-entry in an external account.
 3. **PostgreSQL Job Queue (`SKIP LOCKED`)**: A scheduler polls for ended auctions and queues close jobs; competing workers claim them with `FOR UPDATE SKIP LOCKED`. (This is a polling job queue, not a transactional outbox: the job is not written in the same transaction as the business change. Closing is idempotent, and the in-process sweep also closes ended auctions, so a missed job only delays closing.)
-4. **Resilient AI Luxury Appraisal**: Integrates **Google Gemini 3.6 Flash** via structured JSON schema contracts with an autonomous, deterministic heuristic fallback engine (guaranteeing 0% runtime failure).
+4. **Resilient AI Luxury Appraisal**: Integrates **Google Gemini 3.6 Flash** in JSON mode (the server checks every field before using it), with OpenAI as an optional second choice and a built-in template as the last resort, so the endpoint always returns a draft.
 5. **Optional Cluster Mode**: `WEB_CONCURRENCY` > 1 forks Node.js cluster workers and restarts any that crash. Socket.IO rooms are per process, so this needs a shared adapter (e.g. Redis, not included); the live demo runs one process.
 
 ---
@@ -475,11 +475,11 @@ sequenceDiagram
     
     alt Gemini API Key Configured
         AISvc->>Gemini: POST /v1beta/models/gemini-3.6-flash:generateContent (timeout: 18s)
-        Note over Gemini: Evaluates prompt with strict JSON schema contract
+        Note over Gemini: JSON mode, low thinking, up to 4096 output tokens
         alt Gemini Responds Successfully
             Gemini-->>AISvc: JSON { title, description, suggested_starting_price }
             AISvc-->>API: Returns Gemini Appraisal
-        else Gemini Times Out or Returns 429/500
+        else Gemini Times Out, Fails or Returns Unusable JSON (OpenAI is tried first if configured, 12s)
             AISvc->>Heuristic: Invoke generateFallbackCopy(keywords, category)
             Heuristic-->>AISvc: Returns Curated Appraisal Draft
             AISvc-->>API: Returns Fallback Appraisal (0% failure rate)
@@ -522,7 +522,7 @@ sequenceDiagram
 | **Financial Ledger** | **Append-only ledger + locked balance** | Balance column only | Every change is auditable (`balance_after`); a settlement's entries sum to zero (buyer -P = seller +0.95P + platform +0.05P). Simulated top-ups/withdrawals have no external counter-account, so this is not full double-entry bookkeeping. |
 | **Background Queue** | **PostgreSQL job queue (`SKIP LOCKED`)** | RabbitMQ, Kafka, BullMQ | No extra broker to run; jobs live next to the data they act on. It is a polling queue, not an outbox: if a job is missed, the in-process sweep or the lazy close still closes the auction (all paths are idempotent). |
 | **Real-Time Transport**| **Socket.IO (WebSockets)** | Server-Sent Events (SSE), HTTP Polling | Bi-directional, full-duplex communication over persistent TCP sockets with low latency and room partitioning. |
-| **AI Appraisal** | **Google Gemini 3.6 Flash** | OpenAI GPT-4o, Claude 3.5 | Fast inference latency, structured JSON mode output schema, backed by deterministic heuristic fallback. |
+| **AI Appraisal** | **Google Gemini 3.6 Flash** | OpenAI GPT-4o, Claude 3.5 | Fast inference, JSON-mode output checked on the server, backed by a built-in template fallback. |
 | **Media Ingestion** | **Multer memoryStorage + PostgreSQL BYTEA** | diskStorage, S3 / Supabase Storage | The free Render disk is wiped on every restart, so files on disk vanished. Images up to 5MB are held in memory and stored in an `uploads` table. Cost: up to 5MB of RAM per upload in flight and database space; a production setup would use object storage. |
 
 ---

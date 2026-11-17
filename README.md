@@ -70,7 +70,7 @@ AuctionLoom resolves these challenges through a strict, zero-trust engineering a
 * **Settlement Notifications**: Winners and sellers get an email with the lot, hammer price and the seller's payout details (all user-typed text is HTML-escaped).
 
 ### 🤖 Google Gemini AI Appraisal Assistant
-* **Luxury Copywriting Pipeline**: Uses Google Gemini (`gemini-3.6-flash`) with structured JSON schema prompt engineering to generate appraisal-grade titles, descriptions, and suggested starting bids.
+* **Luxury Copywriting Pipeline**: Uses Google Gemini (`gemini-3.6-flash`) in JSON mode (the prompt names the three fields; the server checks them) to generate appraisal-grade titles, descriptions, and suggested starting bids.
 * **Deterministic Fallback Engine**: If no API key is provided or the upstream provider fails, an intelligent heuristic copywriter guarantees continuous functionality without breaking the listing workflow.
 
 ### 🛡️ Platform Moderation & Role-Based Access Control (RBAC)

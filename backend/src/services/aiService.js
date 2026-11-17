@@ -69,12 +69,14 @@ Offered exclusively through AuctionLoom with full documentation, tamper-evident 
  */
 const callGemini = async (apiKey, keywords, category) => {
   console.log('[AIService] Calling Google Gemini API (gemini-3.6-flash)...');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent';
 
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      // The key goes in a header, not in the URL (?key=...), so it never lands in request logs
+      'x-goog-api-key': apiKey,
     },
     signal: AbortSignal.timeout(18000), // 18s timeout before fallback
     body: JSON.stringify({
@@ -85,8 +87,13 @@ const callGemini = async (apiKey, keywords, category) => {
       ],
       generationConfig: {
         responseMimeType: 'application/json',
-        temperature: 0.7,
-        maxOutputTokens: 500,
+        // Gemini 3 models think before they answer (3.6 Flash: "medium" by default), and the
+        // thinking tokens count against maxOutputTokens. With the old cap of 500 the thinking could
+        // use up most of it and cut the JSON off, so the template answered instead.
+        // Copywriting needs little reasoning: low thinking, and room for the 2-3 paragraphs.
+        // Temperature is left at the default (1.0): Google advises against lowering it for Gemini 3.
+        thinkingConfig: { thinkingLevel: 'low' },
+        maxOutputTokens: 4096,
       },
     }),
   });
@@ -97,8 +104,13 @@ const callGemini = async (apiKey, keywords, category) => {
   }
 
   const data = await response.json();
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText) throw new Error('No candidate content returned from Gemini.');
+  // The answer's text parts (thought summaries, if any, are marked thought: true and skipped)
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  const rawText = parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('');
+  if (!rawText) {
+    const reason = data.candidates?.[0]?.finishReason;
+    throw new Error(`No candidate content returned from Gemini${reason ? ` (finishReason ${reason})` : ''}.`);
+  }
 
   return cleanModelCopy(JSON.parse(rawText), keywords, 'google_gemini_api');
 };
