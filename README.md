@@ -283,7 +283,7 @@ auctionloom/
 │   │   ├── migrate.js               # Database schema initialization script
 │   │   └── reset_and_seed.js        # Database reset and test user seed script
 │   ├── clean_reset_and_verify.js    # Automated end-to-end database wipe & ledger test
-│   ├── verify_phases.mjs            # End-to-end test suite (11 phases, 108 checks), run in CI
+│   ├── verify_phases.mjs            # End-to-end test suite (11 phases, 111 checks), run in CI
 │   ├── stress_test.js               # Concurrency stress tests (6 scenarios), run in CI
 │   ├── benchmark_concurrency.js     # 100 simultaneous bids: latency + database checks
 │   ├── schema.sql                   # Authoritative PostgreSQL DDL schema definition
@@ -461,7 +461,7 @@ The frontend will be available at [http://localhost:5173](http://localhost:5173)
 | `npm run migrate` | `node scripts/migrate.js` | Executes DDL schema migrations against configured database. |
 | `npm run clean-verify` | `node clean_reset_and_verify.js` | Full DB purge, 6-user reseed, live bid race, and ledger audit. |
 | `npm run benchmark` | `node benchmark_concurrency.js` | 100 simultaneous bids over HTTP: latency percentiles plus database checks (exit code 1 if a check fails). The Admin Dashboard has a similar 1-click benchmark. |
-| `npm test` | `node verify_phases.mjs` | End-to-end suite: 11 phases, 108 checks (server must be running). |
+| `npm test` | `node verify_phases.mjs` | End-to-end suite: 11 phases, 111 checks (server must be running). |
 | `npm run stress` | `node stress_test.js` | 6 concurrency scenarios: bid race, double spend, double settlement, republish of a paid lot, cross settlement, bid vs delete. |
 
 ### Frontend (`frontend/package.json`)
@@ -701,7 +701,7 @@ SELECT * FROM jobs WHERE status = 'PENDING' ORDER BY created_at LIMIT 1 FOR UPDA
 
 Two suites run in GitHub Actions on every push, against a real PostgreSQL service and a running server:
 
-* `npm test` (`verify_phases.mjs`): 11 phases, 108 checks of real behaviour: auth and RBAC, bidding and locking, sockets and chat identity, the real scheduler and worker processes, uploads, wallet and settlement, CORS, input validation, rate limits and the audit regression checks (including the 5% fee in whole cents and reports that count each commission once).
+* `npm test` (`verify_phases.mjs`): 11 phases, 111 checks of real behaviour: auth and RBAC, bidding and locking, sockets and chat identity, the real scheduler and worker processes, uploads, wallet and settlement, CORS, input validation, rate limits and the audit regression checks (including the 5% fee in whole cents, reports that count each commission once, final commission-receipt decisions, role guards, and tokens from before a password change).
 * `npm run stress` (`stress_test.js`): 6 concurrency scenarios fired at the same moment, each checked in the database afterwards.
 
 ### Running the Test Suite
@@ -728,9 +728,9 @@ Phase 9   Uploads (stored in PostgreSQL, byte check, nosniff) and chat identity
 Phase 10  Wallet: top-up, overdraft refusal, settlement 95/5, idempotent re-settlement
 Phase 11  Regression checks from the pre-interview audit (precision, fee rounding, errors,
           validation, chat, benchmark, fan-out, report totals, CSV, rate limits, paid-lot
-          delete, status changes, ...)
+          delete, status changes, receipts, role guards, stale tokens, ...)
 
-Total assertions passed: 108/108
+Total assertions passed: 111/111
 
 Stress tests passed: 6/6
 ```
@@ -803,7 +803,7 @@ Deploy using the Blueprint in [render.yaml](render.yaml):
 * **Chat Identity**: Chat messages carry the name and role the server loaded for the socket's token; guests can't chat.
 * **File Upload Protections**: Image types only, ≤ 5MB, file bytes must match the type, extension taken from the type, served with `nosniff`.
 * **CORS Origin Filtering**: Only the configured frontend origins may call the API from a browser or open a WebSocket.
-* **Known gaps**: the database connection skips certificate verification (`rejectUnauthorized: false`), the login token lives in `localStorage` (readable by any script injected into the page), top-ups are simulated, a bid doesn't check the bidder's wallet (an unpaid winner is handled by the 24-hour payment window), there is no anti-sniping extension, uploads have no per-user quota, and sign-up reveals whether an email is already registered.
+* **Known gaps**: the database connection skips certificate verification (`rejectUnauthorized: false`), the login token lives in `localStorage` (readable by any script injected into the page), top-ups are simulated, a bid doesn't check the bidder's wallet (an unpaid winner is handled by the 24-hour payment window), there is no anti-sniping extension, uploads have no per-user quota, the home page loads the newest 100 auctions and filters them in the browser, and sign-up reveals whether an email is already registered.
 
 ---
 

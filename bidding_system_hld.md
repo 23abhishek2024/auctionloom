@@ -172,7 +172,7 @@ aution-bid/
 │   │       ├── scheduler.js      # Cron scanner (runs every 30s, enqueues jobs)
 │   │       └── jobWorker.js      # Distributed queue poller (SKIP LOCKED)
 │   ├── schema.sql                # Complete PostgreSQL 15 DDL with constraints & indexes
-│   ├── verify_phases.mjs         # End-to-end test suite (11 phases, 108 checks)
+│   ├── verify_phases.mjs         # End-to-end test suite (11 phases, 111 checks)
 │   ├── stress_test.js            # 6 concurrency stress scenarios
 │   ├── clean_reset_and_verify.js # Automated database purge, seed & live auction simulation
 │   └── Dockerfile                # Production Node.js Alpine container
