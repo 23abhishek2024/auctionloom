@@ -1,5 +1,12 @@
 const pool = require('../db');
 
+// COMMISSION ledger rows that are commission the platform RECEIVED: rows on an admin's wallet.
+// A seller paying commission from their wallet writes two COMMISSION rows, their debit and the
+// platform's credit; counting both doubled every such payment in the reports. The treasury wallet
+// stays out because older versions credited it as well as the admin for each lot fee.
+// (Use it with the wallet owner joined as "receiver".)
+const PLATFORM_RECEIVED = `receiver.role = 'admin' AND receiver.id <> '00000000-0000-0000-0000-000000000000'`;
+
 /**
  * Report Service
  * Read-only numbers for the admin dashboard: platform metrics, the monthly revenue chart,
@@ -50,7 +57,12 @@ async function getPlatformMetrics() {
     SELECT
       (
         COALESCE((SELECT SUM(COALESCE(NULLIF(commission_amount, 0), ROUND(current_price * 0.05, 2))) FROM auctions WHERE is_settled = TRUE), 0) +
-        COALESCE((SELECT SUM(amount) FROM wallet_transactions WHERE type = 'COMMISSION' AND reference_type != 'AUCTION' AND status = 'COMPLETED'), 0) +
+        COALESCE((SELECT SUM(wt.amount)
+                  FROM wallet_transactions wt
+                  JOIN wallets w ON w.id = wt.wallet_id
+                  JOIN users receiver ON receiver.id = w.user_id
+                  WHERE wt.type = 'COMMISSION' AND wt.reference_type != 'AUCTION' AND wt.status = 'COMPLETED'
+                    AND ${PLATFORM_RECEIVED}), 0) +
         COALESCE((SELECT SUM(amount) FROM commission_proofs WHERE status = 'APPROVED' AND (payment_method IS NULL OR payment_method = 'MANUAL_WIRE')), 0)
       )::numeric AS collected_commission
   `);
@@ -271,10 +283,11 @@ async function getCommissionLedger({ search, from, to, groupBySeller, limit, off
 }
 
 // Every commission payment, from three sources, as one list:
-//  1. COMMISSION entries in wallets (the auction escrow fee, or a seller paying from their wallet)
+//  1. COMMISSION entries the platform received in its admin wallet (the auction escrow fee, or a
+//     seller paying from their wallet; the seller's own debit row is not counted again, and the
+//     seller is named from the entry's metadata)
 //  2. settled auctions from before the wallet ledger existed (no ledger row for them)
 //  3. approved bank-transfer receipts
-// The treasury's own wallet is left out, so a fee is not counted twice.
 const UNIFIED_COMMISSIONS_FULL = `
   WITH unified_commissions AS (
     SELECT
@@ -295,12 +308,15 @@ const UNIFIED_COMMISSIONS_FULL = `
       'WALLET' AS method,
       wt.status AS status
     FROM wallet_transactions wt
-    LEFT JOIN wallets w ON w.id = wt.wallet_id
-    LEFT JOIN users payer ON payer.id = w.user_id
+    JOIN wallets w ON w.id = wt.wallet_id
+    JOIN users receiver ON receiver.id = w.user_id
+    LEFT JOIN users payer ON payer.id = CASE
+      WHEN wt.metadata->>'sellerId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      THEN (wt.metadata->>'sellerId')::uuid END
     LEFT JOIN auctions a ON a.id = wt.reference_id
     LEFT JOIN users seller ON seller.id = a.seller_id
     LEFT JOIN users winner ON winner.id = a.winner_id
-    WHERE wt.type = 'COMMISSION' AND w.user_id != '00000000-0000-0000-0000-000000000000'
+    WHERE wt.type = 'COMMISSION' AND ${PLATFORM_RECEIVED}
 
     UNION ALL
 
@@ -389,7 +405,8 @@ async function getCommissionTransactions({ type, search, from, to, limit, offset
         wt.amount::numeric AS commission
       FROM wallet_transactions wt
       JOIN wallets w ON w.id = wt.wallet_id
-      WHERE wt.type = 'COMMISSION' AND w.user_id != '00000000-0000-0000-0000-000000000000'
+      JOIN users receiver ON receiver.id = w.user_id
+      WHERE wt.type = 'COMMISSION' AND ${PLATFORM_RECEIVED}
 
       UNION ALL
 

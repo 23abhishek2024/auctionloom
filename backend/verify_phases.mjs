@@ -867,6 +867,32 @@ async function runVerification() {
     feeLedger.SETTLEMENT_DEBIT === '20.70' && feeLedger.COMMISSION === '1.04' && feeLedger.SETTLEMENT_CREDIT === '19.66',
     `settled ${feeLotRow.is_settled}, recorded fee ${feeLotRow.commission_amount}, ledger ${JSON.stringify(feeLedger)}`);
 
+  // 18. A seller paying commission from their wallet is counted once in the admin reports. The payment
+  //     writes two COMMISSION ledger rows (the seller's debit and the platform's credit); only the
+  //     platform's side is commission received.
+  const payerEmail = `commpay_${uniqueId}@test.com`;
+  const payer = await request('POST', '/api/auth/register', { email: payerEmail, password: 'Password@123', role: 'auctioneer' });
+  await request('POST', '/api/wallet/topup', { amount: 100 }, payer.data.token);
+  await pool.query('UPDATE users SET unpaid_commission = 12.34 WHERE id = $1', [payer.data.user.id]);
+  const commReport = async () => {
+    const [m, t] = await Promise.all([
+      request('GET', '/api/admin/metrics', null, adminToken),
+      request('GET', '/api/admin/commission-transactions?type=WALLET_DIRECT&limit=1', null, adminToken),
+    ]);
+    return { collected: m.data.metrics.collectedCommission, listed: t.data.data.summary.totalCommission, rows: t.data.data.pagination.total };
+  };
+  const beforePay = await commReport();
+  const payRes = await request('POST', '/api/wallet/settle-commission', { amount: 12.34 }, payer.data.token);
+  const afterPay = await commReport();
+  const grewBy = (k) => Math.round((afterPay[k] - beforePay[k]) * 100) / 100;
+  const payerRows = await request('GET', `/api/admin/commission-transactions?type=WALLET_DIRECT&search=commpay_${uniqueId}`, null, adminToken);
+  const feeLotRows = await request('GET', `/api/admin/commission-transactions?type=AUCTION_ESCROW&search=${encodeURIComponent(`Lot ${uniqueId}`)}`, null, adminToken);
+  assert('Phase 11', 'Admin reports count each commission once (a $12.34 wallet payment, the $1.04 lot fee)',
+    payRes.status === 200 && grewBy('collected') === 12.34 && grewBy('listed') === 12.34 && afterPay.rows - beforePay.rows === 1 &&
+    payerRows.data.data.pagination.total === 1 && payerRows.data.data.transactions[0].sellerEmail === payerEmail &&
+    feeLotRows.data.data.pagination.total === 1 && feeLotRows.data.data.transactions[0].commission === 1.04,
+    `collected +${grewBy('collected')}, listed +${grewBy('listed')}, rows +${afterPay.rows - beforePay.rows}, seller ${payerRows.data.data.transactions[0]?.sellerEmail}, lot fee rows ${feeLotRows.data.data.pagination.total} (${feeLotRows.data.data.transactions[0]?.commission})`);
+
   assert('Phase 11', 'Admin users table shows real totals (2 listings, 2 bids, 2 wins, $230 bid volume)',
     fanRow && fanRow.listings_count === 2 && fanRow.total_bids === 2 && fanRow.auctions_won === 2 && fanRow.total_spent === 230,
     fanRow ? `listings ${fanRow.listings_count}, bids ${fanRow.total_bids}, wins ${fanRow.auctions_won}, volume ${fanRow.total_spent}` : 'user not listed');
