@@ -71,6 +71,7 @@ export const AuctionDetailPage = () => {
     },
   ]);
   const [chatInput, setChatInput] = useState('');
+  const [chatError, setChatError] = useState(null);
   const [activeReactions, setActiveReactions] = useState([]);
   const [showReactions, setShowReactions] = useState(false);
   const [sellerPayout, setSellerPayout] = useState(null);
@@ -230,12 +231,24 @@ export const AuctionDetailPage = () => {
 
     // Socket event handler for CHAT_MESSAGE
     const handleChatMessage = (msg) => {
-      console.log('[Socket] Live CHAT_MESSAGE received:', msg);
       if (msg.auctionId === id) {
         setChatMessages((prev) => {
           if (prev.some((m) => m.id === msg.id)) return prev;
+          // Our own message coming back from the server: replace the optimistic copy
+          if (msg.clientId && prev.some((m) => m.id === msg.clientId)) {
+            return prev.map((m) => (m.id === msg.clientId ? msg : m));
+          }
           return [...prev, msg];
         });
+      }
+    };
+
+    // The server refused a chat message (not logged in, or sending too fast)
+    const handleChatError = (data) => {
+      if (data.auctionId === id) {
+        setChatMessages((prev) => prev.filter((m) => !m.pending));
+        setChatError(data.error);
+        setTimeout(() => setChatError(null), 5000);
       }
     };
 
@@ -272,6 +285,7 @@ export const AuctionDetailPage = () => {
     if (socket) {
       socket.on('PRICE_UPDATE', handlePriceUpdate);
       socket.on('CHAT_MESSAGE', handleChatMessage);
+      socket.on('CHAT_ERROR', handleChatError);
       socket.on('REACTION', handleReaction);
       socket.on('AUCTION_STATUS_CHANGED', handleStatusChanged);
     }
@@ -280,6 +294,7 @@ export const AuctionDetailPage = () => {
       if (socket) {
         socket.off('PRICE_UPDATE', handlePriceUpdate);
         socket.off('CHAT_MESSAGE', handleChatMessage);
+        socket.off('CHAT_ERROR', handleChatError);
         socket.off('REACTION', handleReaction);
         socket.off('AUCTION_STATUS_CHANGED', handleStatusChanged);
       }
@@ -504,33 +519,37 @@ export const AuctionDetailPage = () => {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
+    if (!user) {
+      setChatError('Log in to chat in the auction room.');
+      return;
+    }
+
     const text = chatInput.trim();
     const msgId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    const senderName = formatDisplayName(user);
-    const messagePayload = {
-      id: msgId,
-      auctionId: id,
-      text,
-      senderName,
-      senderId: user?.id || null,
-      role: user?.role || 'bidder',
-      timestamp: new Date().toISOString(),
-    };
 
-    // Optimistically show message immediately in chat box for instant feedback
-    setChatMessages((prev) => [...prev, messagePayload]);
+    // Optimistically show the message at once; the server's copy (with the sender details it
+    // worked out from the login token) replaces it when it arrives
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: msgId,
+        auctionId: id,
+        text,
+        senderName: formatDisplayName(user),
+        senderId: user.id,
+        role: user.role,
+        timestamp: new Date().toISOString(),
+        pending: true,
+      },
+    ]);
 
-    sendMessage(messagePayload);
+    // Only the room and the text are sent: name, id and role are decided by the server
+    sendMessage({ auctionId: id, text, clientId: msgId });
     setChatInput('');
   };
 
   const handleTriggerReaction = (emoji) => {
-    sendReaction({
-      auctionId: id,
-      emoji,
-      senderName: formatDisplayName(user),
-      senderId: user?.id || null,
-    });
+    sendReaction({ auctionId: id, emoji }); // the server adds who reacted
     setShowReactions(false);
   };
 
@@ -1329,13 +1348,13 @@ export const AuctionDetailPage = () => {
               <div className="space-y-4">
                 <div className="h-64 overflow-y-auto space-y-2.5 pr-2">
                   {chatMessages.map((msg) => {
-                    const isMe = Boolean(user && (msg.senderId ? msg.senderId === user.id : (user.name && msg.senderName === user.name)));
+                    const isMe = Boolean(user && msg.senderId === user.id);
                     const isSys = msg.role === 'system';
                     const senderDisplayName = formatDisplayName(msg.senderName);
                     return (
                       <div
                         key={msg.id}
-                        className={`p-3 rounded-xl text-xs ${
+                        className={`p-3 rounded-xl text-xs ${msg.pending ? 'opacity-60 ' : ''}${
                           isSys
                             ? 'bg-indigo-50 border border-indigo-200 text-indigo-900'
                             : isMe
@@ -1363,7 +1382,19 @@ export const AuctionDetailPage = () => {
                   <div ref={chatBottomRef} />
                 </div>
 
-                {/* Chat input form */}
+                {chatError && (
+                  <p className="text-[11px] text-rose-600 font-medium pt-1">{chatError}</p>
+                )}
+
+                {/* Chat input form (guests can read the chat; logging in lets them write) */}
+                {!user ? (
+                  <div className="pt-2 border-t border-slate-200 text-xs text-slate-500">
+                    <Link to="/login" state={{ from: `/auctions/${id}` }} className="font-semibold text-indigo-600 hover:underline">
+                      Log in
+                    </Link>{' '}
+                    to chat with bidders in this room.
+                  </div>
+                ) : (
                 <form onSubmit={handleSendChatMessage} className="flex gap-2 pt-2 border-t border-slate-200">
                   <input
                     id="live-chat-input-box"
@@ -1381,6 +1412,7 @@ export const AuctionDetailPage = () => {
                     <span>Send</span>
                   </button>
                 </form>
+                )}
               </div>
             )}
           </div>

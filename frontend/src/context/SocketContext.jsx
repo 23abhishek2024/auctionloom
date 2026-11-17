@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
+import { useAuth } from './AuthContext';
 
 const formatSocketUrl = (raw) => {
   if (!raw || typeof raw !== 'string') return 'http://localhost:5000';
@@ -22,13 +23,20 @@ export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const currentRoomRef = useRef(null);
+  const socketRef = useRef(null);
+  const { token } = useAuth();
+  const lastTokenRef = useRef(token);
 
   useEffect(() => {
     const socketInstance = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
+      // Read on every (re)connect: the server works out who is chatting from this token,
+      // so names and roles in the chat can't be faked from the browser
+      auth: (cb) => cb({ token: localStorage.getItem('token') }),
     });
+    socketRef.current = socketInstance;
 
     socketInstance.on('connect', () => {
       console.log('[SocketClient] Connected with id:', socketInstance.id);
@@ -55,6 +63,18 @@ export const SocketProvider = ({ children }) => {
       socketInstance.disconnect();
     };
   }, []);
+
+  // Logging in, logging out, renaming or becoming a seller gives a new token: reconnect so the
+  // server reads the new identity (the 'connect' handler above re-joins the current room)
+  useEffect(() => {
+    if (lastTokenRef.current === token) return;
+    lastTokenRef.current = token;
+    const s = socketRef.current;
+    if (s) {
+      s.disconnect();
+      s.connect();
+    }
+  }, [token]);
 
   const joinAuction = (auctionId) => {
     if (!auctionId) return;

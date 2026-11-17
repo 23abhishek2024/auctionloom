@@ -554,8 +554,8 @@ async function runVerification() {
   const dbAuctionImg = await pool.query('SELECT image_url FROM auctions WHERE id = $1', [auctionWithImgRes.data.auction.id]);
   assert('Phase 9', 'PostgreSQL database stores image_url column', dbAuctionImg.rows[0].image_url === uploadRes.data.url);
 
-  // 5. Socket.IO Live Room Chat (Video 33)
-  const chatSocket = io(SOCKET_URL, { transports: ['websocket'] });
+  // 5. Socket.IO Live Room Chat (Video 33): the login token in the handshake says who is chatting
+  const chatSocket = io(SOCKET_URL, { transports: ['websocket'], auth: { token: bidderToken } });
   await new Promise((resolve) => chatSocket.on('connect', resolve));
   chatSocket.emit('JOIN_AUCTION', auctionWithImgRes.data.auction.id);
 
@@ -568,15 +568,17 @@ async function runVerification() {
   chatSocket.emit('SEND_MESSAGE', {
     auctionId: auctionWithImgRes.data.auction.id,
     text: 'Is the original warranty card included with this watch?',
-    senderName: 'Verified Bidder',
-    senderId: bidderId,
-    senderEmail: 'verified_bidder@auctionloom.com', // an old client may still send it; it must not be broadcast
-    role: 'bidder',
+    // A modified client may try to claim another identity; the server must ignore all of this
+    senderName: 'AuctionLoom Admin',
+    senderId: sellerId,
+    senderEmail: 'verified_bidder@auctionloom.com',
+    role: 'admin',
   });
 
   const receivedChatMsg = await chatPromise;
   assert('Phase 9', 'Socket.IO CHAT_MESSAGE broadcast received in real time', receivedChatMsg.text === 'Is the original warranty card included with this watch?');
   assert('Phase 9', 'Chat message carries the sender id and ISO timestamp, never an email', receivedChatMsg.senderId === bidderId && receivedChatMsg.senderEmail === undefined && !!receivedChatMsg.timestamp);
+  assert('Phase 9', 'Chat sender name and role come from the server, not from the client', receivedChatMsg.role === 'bidder' && receivedChatMsg.senderName !== 'AuctionLoom Admin');
 
   // 6. Socket.IO Live Floating Reaction
   const reactionPromise = new Promise((resolve) => {
@@ -783,6 +785,30 @@ async function runVerification() {
   assert('Phase 11', `All ${badInputCases.length} malformed inputs rejected with 400`, notRejected.length === 0, notRejected.map(r => `${r.path} -> ${r.status}`).join('; '));
   const leaky = badInputResults.filter(r => /syntax|violates|overflow|character varying|is not a function|pg_|relation/i.test(r.error));
   assert('Phase 11', 'No error message exposes database or code internals', leaky.length === 0, leaky.map(r => r.error).join('; '));
+
+  // 5. Chat needs a login: a guest's message is refused and never broadcast
+  const chatRoomId = centsAuctionId;
+  const listener = io(SOCKET_URL, { transports: ['websocket'] });
+  const guest = io(SOCKET_URL, { transports: ['websocket'] });
+  await Promise.all([listener, guest].map((s) => new Promise((resolve) => s.on('connect', resolve))));
+  listener.emit('JOIN_AUCTION', chatRoomId);
+  const heard = [];
+  listener.on('CHAT_MESSAGE', (m) => heard.push(m));
+  const guestError = new Promise((resolve) => guest.on('CHAT_ERROR', resolve));
+  guest.emit('SEND_MESSAGE', { auctionId: chatRoomId, text: 'Pay me directly at evil.example', senderName: 'AuctionLoom Admin', role: 'admin' });
+  const guestErr = await Promise.race([guestError, new Promise((r) => setTimeout(() => r(null), 2000))]);
+  await new Promise((r) => setTimeout(r, 300));
+  assert('Phase 11', 'Guest chat message refused with CHAT_ERROR and not broadcast', !!guestErr && heard.length === 0);
+
+  // 6. Flood control: the 6th message within 10 seconds is refused
+  const flooder = io(SOCKET_URL, { transports: ['websocket'], auth: { token: bidderToken } });
+  await new Promise((resolve) => flooder.on('connect', resolve));
+  const floodError = new Promise((resolve) => flooder.on('CHAT_ERROR', resolve));
+  for (let i = 1; i <= 6; i++) flooder.emit('SEND_MESSAGE', { auctionId: chatRoomId, text: `message ${i}` });
+  const floodErr = await Promise.race([floodError, new Promise((r) => setTimeout(() => r(null), 2000))]);
+  await new Promise((r) => setTimeout(r, 300));
+  assert('Phase 11', 'Chat flood control: 5 messages delivered, the 6th refused', !!floodErr && heard.length === 5);
+  [listener, guest, flooder].forEach((s) => s.disconnect());
 
   console.log('\n===========================================================');
   console.log('   🎉 ALL PHASES (1 TO 10) ARE 100% VERIFIED AND PASSING!  ');
