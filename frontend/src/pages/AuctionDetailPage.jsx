@@ -547,6 +547,10 @@ export const AuctionDetailPage = () => {
   };
 
   // Derived state (calculated unconditionally before early returns)
+  // Lowest bid the server accepts: one cent above the current price. Worked out in whole cents,
+  // because 20.3 + 0.01 is 20.310000000000002 in floating point, and as the input's min that
+  // made the browser refuse a bid of 20.31.
+  const minNextBid = ((Math.round(parseFloat(auction?.current_price || 0) * 100) + 1) / 100).toFixed(2);
   const isSeller = user?.id === auction?.seller_id;
   const isAdmin = user?.role === 'admin';
   const highestBid = bids && bids.length > 0 ? bids[0] : null;
@@ -1459,7 +1463,7 @@ export const AuctionDetailPage = () => {
               </div>
 
               <span className="text-[11px] text-slate-500 font-mono">
-                Min next bid: <span className="text-slate-800 font-semibold">${(parseFloat(auction.current_price) + 1).toFixed(2)}</span>
+                Min next bid: <span className="text-slate-800 font-semibold">${minNextBid}</span>
               </span>
             </div>
 
@@ -1658,7 +1662,7 @@ export const AuctionDetailPage = () => {
                     <input
                       type="number"
                       step="0.01"
-                      min={parseFloat(auction.current_price) + 0.01}
+                      min={minNextBid}
                       value={bidAmount}
                       onChange={(e) => setBidAmount(e.target.value)}
                       placeholder="Enter amount"
