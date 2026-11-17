@@ -149,7 +149,7 @@ const forceDeleteAuction = async (req, res, next) => {
 
 /**
  * PUT /api/admin/auctions/:id/status
- * Moderate auction status: RESTRICTED, ACTIVE, CLOSED
+ * Moderate auction status: freeze (RESTRICTED) a running auction or resume (ACTIVE) a frozen one
  */
 const updateAuctionStatus = async (req, res, next) => {
   try {
@@ -160,9 +160,10 @@ const updateAuctionStatus = async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid auction ID format.' });
     }
 
-    if (typeof status !== 'string' || !['ACTIVE', 'CLOSED', 'RESTRICTED'].includes(status.toUpperCase())) {
+    // Admins can freeze (RESTRICTED) and resume (ACTIVE); closing happens by itself at the end time
+    if (typeof status !== 'string' || !['ACTIVE', 'RESTRICTED'].includes(status.toUpperCase())) {
       return res.status(400).json({
-        error: "Status must be one of 'ACTIVE', 'CLOSED', or 'RESTRICTED'.",
+        error: "Status must be 'RESTRICTED' (freeze) or 'ACTIVE' (resume). Auctions close by themselves at their end time.",
       });
     }
 

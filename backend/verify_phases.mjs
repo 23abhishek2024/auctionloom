@@ -779,7 +779,7 @@ async function runVerification() {
     w.settleLotEscrow(${JSON.stringify(args)})
       .then(() => console.log('SETTLED'), (e) => console.log('REFUSED ' + (e.statusCode || e.message)))
       .finally(() => require('./src/db').end());
-  `], { env: process.env, timeout: 30000 }, (err, stdout) => resolve((stdout || '').trim().split('\n').pop())));
+  `], { env: process.env, timeout: 30000 }, (err, stdout) => resolve((stdout || '').split('\n').find((line) => /^(SETTLED|REFUSED)/.test(line)))));
   const wrongPrice = await settleScript({ auctionId: centsAuctionId, winnerId: lotForRecheck.winner_id, sellerId: lotForRecheck.seller_id, hammerPrice: 1 });
   const wrongWinner = await settleScript({ auctionId: centsAuctionId, winnerId: bidderId, sellerId: lotForRecheck.seller_id, hammerPrice: 101.01 });
   const debitsForLot = (await pool.query(`SELECT count(*)::int AS c FROM wallet_transactions WHERE reference_id = $1`, [centsAuctionId])).rows[0].c;
@@ -791,7 +791,14 @@ async function runVerification() {
   const paidLotStill = await pool.query('SELECT 1 FROM auctions WHERE id = $1', [testAucId]);
   assert('Phase 11', 'Admin delete of a paid lot refused (409) and the lot stays', deletePaidLot.status === 409 && paidLotStill.rowCount === 1);
 
-  // 11. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
+  // 11. Admin status changes: only freeze/resume; a closed (sold) lot can't be frozen or reopened
+  const freezeClosed = await request('PUT', `/api/admin/auctions/${centsAuctionId}/status`, { status: 'RESTRICTED' }, adminToken);
+  const forceClose = await request('PUT', `/api/admin/auctions/${auctionId}/status`, { status: 'CLOSED' }, adminToken);
+  const closedLotState = (await pool.query('SELECT status FROM auctions WHERE id = $1', [centsAuctionId])).rows[0].status;
+  assert('Phase 11', 'Admin cannot freeze/reopen a closed lot (409) or force-close a running one (400)',
+    freezeClosed.status === 409 && forceClose.status === 400 && closedLotState === 'CLOSED');
+
+  // 12. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
   const bruteEmail = `brute_${uniqueId}@test.com`;
   let lastBrute;
   for (let i = 0; i < 11; i++) {

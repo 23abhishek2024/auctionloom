@@ -132,15 +132,27 @@ async function forceDeleteAuction(id) {
 }
 
 /**
- * Admin moderation: set an auction's status (ACTIVE, CLOSED or RESTRICTED) and tell everyone watching it.
+ * Admin moderation: freeze a running auction (ACTIVE -> RESTRICTED) or resume a frozen one
+ * (RESTRICTED -> ACTIVE), and tell everyone watching it. Nothing else is allowed: an auction
+ * closes by itself at its end time (with a winner and the 5% fee), and a closed one must not be
+ * reopened. The old version accepted any status, so ACTIVE -> CLOSED skipped the winner, and
+ * freeze + resume reopened a sold lot.
  */
 async function setAuctionStatus(id, status, reason) {
-  const updated = await auctionModel.updateStatus(id, status);
-  if (!updated) {
-    throw new AppError(404, 'Auction not found.');
-  }
+  const updated = await withLockedAuction(id, async (client, auction) => {
+    const allowed =
+      (auction.status === 'ACTIVE' && status === 'RESTRICTED') ||
+      (auction.status === 'RESTRICTED' && status === 'ACTIVE');
+    if (!allowed) {
+      throw new AppError(
+        409,
+        `Cannot change this auction from ${auction.status} to ${status}. Only a running auction can be frozen (RESTRICTED), and only a frozen one resumed (ACTIVE).`
+      );
+    }
+    return auctionModel.updateStatus(id, status, client);
+  });
 
-  // Real-time broadcast to room so all clients update live
+  // Real-time broadcast to room so all clients update live (after the commit)
   try {
     const io = getIO();
     io.to(id).emit('AUCTION_STATUS_CHANGED', {
@@ -149,7 +161,9 @@ async function setAuctionStatus(id, status, reason) {
       reason: reason || (status === 'RESTRICTED' ? 'Administrative hold applied.' : 'Restriction lifted.'),
       timestamp: new Date().toISOString(),
     });
-  } catch (_) {}
+  } catch (_) {
+    // Socket.IO not initialised (scripts): nothing to tell
+  }
 
   return updated;
 }

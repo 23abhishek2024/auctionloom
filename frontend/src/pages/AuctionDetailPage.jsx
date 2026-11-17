@@ -628,6 +628,8 @@ export const AuctionDetailPage = () => {
         <div className="flex items-center gap-2.5">
           {isAdmin && (
             <div className="flex items-center gap-2">
+              {/* Only a running auction can be frozen, and only a frozen one resumed (closed ones can't change) */}
+              {auction?.status !== 'CLOSED' && (
               <button
                 type="button"
                 onClick={handleAdminToggleRestrict}
@@ -652,6 +654,7 @@ export const AuctionDetailPage = () => {
                   </>
                 )}
               </button>
+              )}
 
               <button
                 type="button"

@@ -130,10 +130,10 @@ const auctionModel = {
   },
 
   /**
-   * Update the status of an auction (ACTIVE, CLOSED, RESTRICTED)
+   * Update the status of an auction (pass the transaction's client when the row is locked)
    */
-  updateStatus: async (auctionId, newStatus) => {
-    const result = await pool.query(
+  updateStatus: async (auctionId, newStatus, db = pool) => {
+    const result = await db.query(
       'UPDATE auctions SET status = $1 WHERE id = $2 RETURNING *',
       [newStatus, auctionId]
     );
