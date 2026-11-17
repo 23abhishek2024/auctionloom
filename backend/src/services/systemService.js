@@ -208,7 +208,9 @@ const BENCHMARK_MAX_IN_FLIGHT = 10; // leave the rest of the 20-connection pool 
  * The lot and its bids are deleted afterwards, so the benchmark never clutters the marketplace.
  */
 async function runBidBenchmark(count) {
-  // 1. A seller and up to 3 bidders that are not the seller
+  // 1. A seller and up to 3 bidders that are not the seller. Anyone but an admin may bid
+  //    (auctioneers too: the seed script makes every test user an auctioneer), so plain bidder
+  //    accounts come first and auctioneers fill in.
   const sellerRes = await pool.query(
     `SELECT id FROM users
      WHERE role IN ('auctioneer', 'admin') AND id <> '00000000-0000-0000-0000-000000000000'
@@ -216,12 +218,14 @@ async function runBidBenchmark(count) {
   );
   const sellerId = sellerRes.rows[0]?.id;
   const biddersRes = await pool.query(
-    `SELECT id, email, name FROM users WHERE role = 'bidder' AND id <> $1 ORDER BY created_at ASC LIMIT 3`,
+    `SELECT id, email, name FROM users
+     WHERE role <> 'admin' AND id <> $1
+     ORDER BY (role = 'bidder') DESC, created_at ASC LIMIT 3`,
     [sellerId || '00000000-0000-0000-0000-000000000000']
   );
   const bidders = biddersRes.rows;
   if (!sellerId || bidders.length < 2) {
-    throw new AppError(400, 'The benchmark needs one seller (auctioneer or admin) and at least two bidder accounts.');
+    throw new AppError(400, 'The benchmark needs one seller (auctioneer or admin) and at least two other non-admin accounts to bid.');
   }
 
   // 2. A fresh lot just for this run
