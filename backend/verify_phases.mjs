@@ -805,7 +805,21 @@ async function runVerification() {
     chartRes.status === 200 && chartRes.data.isSample === false && chartRes.data.chartData.some((m) => m.month === saleMonth),
     `months: ${(chartRes.data.chartData || []).map((m) => m.month).join(', ')}`);
 
-  // 13. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
+  // 13. Emails: user-typed text is escaped, and the IFSC code saved by the profile form appears
+  const emailCheck = await new Promise((resolve) => execFile(process.execPath, ['-e', `
+    const { buildAuctionWonEmail } = require('./src/services/emailService');
+    const { html } = buildAuctionWonEmail({
+      winnerName: '<a href="https://evil.example">Pay here</a>',
+      auction: { id: '00000000-0000-4000-8000-000000000000', title: '<img src=x onerror=alert(1)>', current_price: 10 },
+      seller: { name: 'Seller', email: 's@example.com', payout_methods: { bank_name: 'Test Bank', ifsc_swift: 'TEST0001234' } },
+      hammerPrice: 10,
+    });
+    console.log(JSON.stringify({ rawLink: html.includes('<a href="https://evil.example">'), rawImg: html.includes('<img src=x'), ifsc: html.includes('TEST0001234') }));
+  `], { env: process.env, timeout: 30000 }, (err, stdout) => resolve(JSON.parse((stdout || '{}').split('\n').find((l) => l.startsWith('{')) || '{}'))));
+  assert('Phase 11', 'Email HTML escapes user-typed names/titles and shows the saved IFSC code',
+    emailCheck.rawLink === false && emailCheck.rawImg === false && emailCheck.ifsc === true, JSON.stringify(emailCheck));
+
+  // 14. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
   const bruteEmail = `brute_${uniqueId}@test.com`;
   let lastBrute;
   for (let i = 0; i < 11; i++) {

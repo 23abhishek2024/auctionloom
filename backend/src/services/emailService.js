@@ -12,6 +12,18 @@ let etherealTransporter = null;
 let smtpTransporter = null;
 
 /**
+ * Names, titles and payout details are typed by users. Escape them before putting them into the
+ * HTML of an email, so a name like <a href="...">Pay here</a> shows as text instead of a link.
+ */
+const escapeHtml = (value) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+/**
  * Check whether an address is a known demo or simulated test account
  */
 const isTestEmail = (email) => {
@@ -122,9 +134,9 @@ const sendEmail = async ({ to, subject, html, text }) => {
 };
 
 /**
- * Send Winner Notification & Invoice when an auction concludes
+ * Subject and HTML of the winner's email (separate from sending, so it can be checked in tests)
  */
-const sendAuctionWonNotification = async ({ winnerEmail, winnerName, auction, seller, hammerPrice }) => {
+const buildAuctionWonEmail = ({ winnerName, auction, seller, hammerPrice }) => {
   const formattedPrice = Number(hammerPrice || auction.current_price).toLocaleString('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -133,22 +145,27 @@ const sendAuctionWonNotification = async ({ winnerEmail, winnerName, auction, se
   const subject = `🏆 You Won Lot #${auction.id.slice(0, 8)}: ${auction.title} on AuctionLoom!`;
 
   const sellerPayout = seller?.payout_methods || {};
-  const hasPayout = Object.keys(sellerPayout).length > 0;
+  // The profile saves the IFSC/SWIFT code as ifsc_swift (older data may say ifsc_or_swift)
+  const payoutFields = [
+    ['Bank', sellerPayout.bank_name],
+    ['Account #', sellerPayout.account_number],
+    ['IFSC / SWIFT', sellerPayout.ifsc_swift || sellerPayout.ifsc_or_swift],
+    ['UPI ID', sellerPayout.upi_id],
+    ['PayPal', sellerPayout.paypal_email],
+  ].filter(([, value]) => typeof value === 'string' && value.trim());
+  // Only when at least one field is filled in (a saved form with every field empty has keys but no data)
+  const hasPayout = payoutFields.length > 0;
 
   const payoutSection = hasPayout
     ? `
       <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-top: 16px;">
         <h4 style="margin: 0 0 8px 0; color: #0f172a; font-size: 14px; text-transform: uppercase;">Seller Verified Payout Coordinates</h4>
-        ${sellerPayout.bank_name ? `<p style="margin: 4px 0; font-size: 14px;"><strong>Bank:</strong> ${sellerPayout.bank_name}</p>` : ''}
-        ${sellerPayout.account_number ? `<p style="margin: 4px 0; font-size: 14px;"><strong>Account #:</strong> ${sellerPayout.account_number}</p>` : ''}
-        ${sellerPayout.ifsc_or_swift ? `<p style="margin: 4px 0; font-size: 14px;"><strong>IFSC / SWIFT:</strong> ${sellerPayout.ifsc_or_swift}</p>` : ''}
-        ${sellerPayout.upi_id ? `<p style="margin: 4px 0; font-size: 14px;"><strong>UPI ID:</strong> ${sellerPayout.upi_id}</p>` : ''}
-        ${sellerPayout.paypal_email ? `<p style="margin: 4px 0; font-size: 14px;"><strong>PayPal:</strong> ${sellerPayout.paypal_email}</p>` : ''}
+        ${payoutFields.map(([label, value]) => `<p style="margin: 4px 0; font-size: 14px;"><strong>${label}:</strong> ${escapeHtml(value)}</p>`).join('\n        ')}
       </div>
     `
     : `
       <p style="font-size: 14px; color: #64748b; margin-top: 12px;">
-        The seller has not registered automated digital coordinates yet. You may reply directly to this email or contact the seller at <strong>${seller.email}</strong> to coordinate payment and delivery.
+        The seller has not registered automated digital coordinates yet. You may reply directly to this email or contact the seller at <strong>${escapeHtml(seller.email)}</strong> to coordinate payment and delivery.
       </p>
     `;
 
@@ -170,7 +187,7 @@ const sendAuctionWonNotification = async ({ winnerEmail, winnerName, auction, se
           <!-- Body -->
           <div style="padding: 32px;">
             <p style="font-size: 16px; color: #334155; margin-top: 0;">
-              Congratulations <strong>${winnerName || 'Bidder'}</strong>,
+              Congratulations <strong>${escapeHtml(winnerName || 'Bidder')}</strong>,
             </p>
             <p style="font-size: 15px; color: #475569; line-height: 1.6;">
               You have placed the winning hammer bid on the following lot:
@@ -178,7 +195,7 @@ const sendAuctionWonNotification = async ({ winnerEmail, winnerName, auction, se
 
             <!-- Lot Card -->
             <div style="background: #f8fafc; border-left: 4px solid #38bdf8; padding: 16px; border-radius: 4px; margin: 20px 0;">
-              <h3 style="margin: 0 0 6px 0; color: #0f172a; font-size: 18px;">${auction.title}</h3>
+              <h3 style="margin: 0 0 6px 0; color: #0f172a; font-size: 18px;">${escapeHtml(auction.title)}</h3>
               <p style="margin: 0; font-size: 13px; color: #64748b;">Lot ID: ${auction.id}</p>
               <div style="margin-top: 12px; display: flex; justify-content: space-between; align-items: baseline;">
                 <span style="font-size: 14px; color: #64748b;">Winning Hammer Price:</span>
@@ -189,7 +206,7 @@ const sendAuctionWonNotification = async ({ winnerEmail, winnerName, auction, se
             <!-- Settlement Instructions -->
             <h3 style="font-size: 16px; color: #0f172a; margin-top: 24px;">Settlement & Payment Details</h3>
             <p style="font-size: 14px; color: #475569; line-height: 1.5; margin: 0;">
-              Seller: <strong>${seller.name || 'Seller'}</strong> (${seller.email})
+              Seller: <strong>${escapeHtml(seller.name || 'Seller')}</strong> (${escapeHtml(seller.email)})
             </p>
             ${payoutSection}
 
@@ -212,17 +229,21 @@ const sendAuctionWonNotification = async ({ winnerEmail, winnerName, auction, se
     </html>
   `;
 
-  return sendEmail({
-    to: winnerEmail,
-    subject,
-    html,
-  });
+  return { subject, html };
 };
 
 /**
- * Send Seller Notification when their lot is successfully sold
+ * Send Winner Notification & Invoice when an auction concludes
  */
-const sendAuctionSoldNotification = async ({ sellerEmail, sellerName, auction, winner, hammerPrice }) => {
+const sendAuctionWonNotification = async ({ winnerEmail, winnerName, auction, seller, hammerPrice }) => {
+  const { subject, html } = buildAuctionWonEmail({ winnerName, auction, seller, hammerPrice });
+  return sendEmail({ to: winnerEmail, subject, html });
+};
+
+/**
+ * Subject and HTML of the seller's "lot sold" email
+ */
+const buildAuctionSoldEmail = ({ sellerName, auction, winner, hammerPrice }) => {
   const formattedPrice = Number(hammerPrice || auction.current_price).toLocaleString('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -245,14 +266,14 @@ const sendAuctionSoldNotification = async ({ sellerEmail, sellerName, auction, w
             <p style="margin: 8px 0 0 0; color: #34d399; font-size: 14px; font-weight: 600; text-transform: uppercase;">Lot Sold Notice</p>
           </div>
           <div style="padding: 32px;">
-            <p style="font-size: 16px; color: #334155;">Hello <strong>${sellerName || 'Seller'}</strong>,</p>
+            <p style="font-size: 16px; color: #334155;">Hello <strong>${escapeHtml(sellerName || 'Seller')}</strong>,</p>
             <p style="font-size: 15px; color: #475569; line-height: 1.6;">
-              Great news! Bidding has concluded for <strong>${auction.title}</strong> and a winning bidder was declared.
+              Great news! Bidding has concluded for <strong>${escapeHtml(auction.title)}</strong> and a winning bidder was declared.
             </p>
             <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 8px; margin: 20px 0;">
               <p style="margin: 4px 0; font-size: 14px;"><strong>Winning Hammer Price:</strong> <span style="color: #059669; font-weight: 700;">${formattedPrice}</span></p>
               <p style="margin: 4px 0; font-size: 14px;"><strong>Platform Fee (5%):</strong> ${commission}</p>
-              <p style="margin: 4px 0; font-size: 14px;"><strong>Winning Bidder:</strong> ${winner.name || 'Bidder'} (${winner.email})</p>
+              <p style="margin: 4px 0; font-size: 14px;"><strong>Winning Bidder:</strong> ${escapeHtml(winner.name || 'Bidder')} (${escapeHtml(winner.email)})</p>
             </div>
             <p style="font-size: 14px; color: #64748b;">
               Please coordinate directly with the winning bidder to verify payment settlement and ship the item.
@@ -269,11 +290,15 @@ const sendAuctionSoldNotification = async ({ sellerEmail, sellerName, auction, w
     </html>
   `;
 
-  return sendEmail({
-    to: sellerEmail,
-    subject,
-    html,
-  });
+  return { subject, html };
+};
+
+/**
+ * Send Seller Notification when their lot is successfully sold
+ */
+const sendAuctionSoldNotification = async ({ sellerEmail, sellerName, auction, winner, hammerPrice }) => {
+  const { subject, html } = buildAuctionSoldEmail({ sellerName, auction, winner, hammerPrice });
+  return sendEmail({ to: sellerEmail, subject, html });
 };
 
 module.exports = {
@@ -281,4 +306,7 @@ module.exports = {
   sendAuctionWonNotification,
   sendAuctionSoldNotification,
   isTestEmail,
+  escapeHtml,
+  buildAuctionWonEmail,
+  buildAuctionSoldEmail,
 };
