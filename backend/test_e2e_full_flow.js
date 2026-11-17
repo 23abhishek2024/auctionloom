@@ -24,7 +24,8 @@ async function api(path, options = {}) {
 async function runE2ETest() {
   console.log('=== STARTING END-TO-END AUCTION & COMMISSION FLOW TEST ===\n');
 
-  // 1. Verify Admin Login with both passwords
+  // 1. Admin login (run `npm run seed` first). There is exactly one admin password: an old version
+  //    also accepted a hard-coded second one, which was a back door and is gone.
   console.log('1. Testing Admin login...');
   const adminLogin1 = await api('/auth/login', {
     method: 'POST',
@@ -32,11 +33,13 @@ async function runE2ETest() {
   });
   console.log('   ✅ admin@gmail.com login with test@123 succeeded! Token received.');
 
-  const adminLogin2 = await api('/auth/login', {
+  const backdoorRes = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',
-    body: { email: 'admin@gmail.com', password: 'Admin@1234' },
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'admin@gmail.com', password: 'Admin@1234' }),
   });
-  console.log('   ✅ admin@gmail.com login with Admin@1234 succeeded! Fallback working.');
+  if (backdoorRes.status !== 401) throw new Error(`The old fallback admin password must be refused (got ${backdoorRes.status})`);
+  console.log('   ✅ The old hard-coded fallback password is refused (401).');
 
   const adminToken = adminLogin1.data.token;
 
