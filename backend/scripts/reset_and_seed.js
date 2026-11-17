@@ -36,7 +36,8 @@ async function resetAndSeed() {
       { name: 'Test3', email: 'test3@gmail.com', alt: 'test3@gamil.com', role: 'auctioneer' },
       { name: 'Test4', email: 'test4@gmail.com', alt: 'test4@gamil.com', role: 'auctioneer' },
       { name: 'Test5', email: 'test5@gmail.com', alt: 'test5@gamil.com', role: 'auctioneer' },
-      { name: 'Admin', email: 'admin@gmail.com', alt: 'admin@gamil.com', role: 'admin' },
+      // No typo alias for the admin: a second admin account with a known password would be a back door
+      { name: 'Admin', email: 'admin@gmail.com', role: 'admin' },
     ];
 
     const usersMap = {};
@@ -215,7 +216,7 @@ async function resetAndSeed() {
     console.log('  • Test3: test3@gmail.com  (or test3@gamil.com) - Name: Test3');
     console.log('  • Test4: test4@gmail.com  (or test4@gamil.com) - Name: Test4');
     console.log('  • Test5: test5@gmail.com  (or test5@gamil.com) - Name: Test5');
-    console.log('  • Admin: admin@gmail.com  (or admin@gamil.com) - Name: Admin');
+    console.log('  • Admin: admin@gmail.com - Name: Admin');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   } catch (err) {
