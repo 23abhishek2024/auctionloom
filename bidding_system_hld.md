@@ -16,7 +16,7 @@
 
 ---
 
-## 2. System Requirements & SLA Guarantees
+## 2. System Requirements
 
 ### 2.1 Functional Requirements
 - **Real-Time Bidding**: Bidders can place bids on active lots. Bids must be strictly monotonic (greater than `current_price`), non-seller (anti-shill), and rejected if the lot is restricted or expired.
@@ -27,16 +27,16 @@
 - **AI Luxury Appraisal**: Sellers can auto-generate luxury auction titles, historical descriptions, and suggested opening bids by providing product keywords and categories.
 - **Administrative Governance**: Admins can inspect platform revenue metrics, review manual wire transfer commission proofs, and apply immediate restriction freezes on suspect lots.
 
-### 2.2 Non-Functional Requirements (NFRs) & Engineering SLAs
+### 2.2 Non-Functional Requirements: What Holds and What Was Measured
 
-| Metric | Target SLA | Implementation Mechanism |
+| Metric | What holds / what was measured | Mechanism |
 | :--- | :--- | :--- |
-| **Bid Processing Latency** | p95 < 25ms, p99 < 50ms | PostgreSQL index scans on `id`, row-level exclusive locks held for < 3ms. |
-| **WebSocket Telemetry** | p95 < 15ms | Socket.IO room partitioning (`io.to(auctionId)`), memory-buffered event loops. |
-| **Data Consistency** | Strict Serializability / ACID | PostgreSQL ACID transactions for bids, wallets, and lot closures. |
-| **Availability** | 99.99% Uptime | Node.js multi-worker clustering with automated worker respawn on crash. |
-| **Throughput** | 10,000+ bids/sec (partitioned) | Independent row locks per auction lot allow parallel writes across distinct lots. |
-| **Security & Rate Limiting** | Zero unauthorized access | Stateless JWT authentication, role-based access control (RBAC), token bucket (5,000 req/15m). |
+| **Bid latency** | A single bid takes a few milliseconds of database time. With `npm run benchmark` (100 bids fired at once at ONE lot, local machine) they finished in about 0.3 s, p95 about 0.3 s, because every bid waits for the same row lock. | `SELECT ... FOR UPDATE` on the auction row; short transactions. |
+| **WebSocket updates** | Sent right after the bid commits; latency is network-bound and was not measured. | Socket.IO rooms per auction (`io.to(auctionId)`). |
+| **Data consistency** | ACID transactions at PostgreSQL's default READ COMMITTED level, plus row locks on the auction / wallet rows, so no lost updates or double charges (checked by `npm run stress`). Not SERIALIZABLE isolation. | `FOR UPDATE` row locks, `CHECK (balance >= 0)`, idempotency keys, locked re-checks. |
+| **Availability** | Demo hosting: the free Render instance sleeps after 15 minutes idle (first request then takes about a minute). An always-on instance would be needed in production. | Health check `/health`; keep-alive workflow keeps the database from pausing. |
+| **Throughput** | Different lots lock different rows, so they don't wait for each other; bids on one lot are serialized. Not load-tested beyond the benchmark. | Independent row locks per auction. |
+| **Security & rate limiting** | JWT + role checks on every protected route; per-IP fixed-window limits (5,000 requests / 15 min), 10 failed logins / 15 min per account, 50 sign-ups / hour. | `authMiddleware`, `roleMiddleware`, `express-rate-limit`. |
 
 ---
 
@@ -55,7 +55,7 @@ graph TD
         
         subgraph Middlewares
             Logger[Logger Middleware\nInjects crypto.randomUUID req.id]
-            RateLimiter[Rate Limiter\nToken Bucket 5,000 req / 15 min]
+            RateLimiter[Rate Limiter\nFixed window 5,000 req / 15 min per IP]
             Auth[JWT Auth & RBAC\nBidder / Auctioneer / Admin]
             Multer[Multer Memory Storage\n5MB, byte check, stored in PostgreSQL]
         end
@@ -149,7 +149,7 @@ aution-bid/
 │   │   ├── middlewares/
 │   │   │   ├── logger.js         # Injects crypto.randomUUID() req.id and logs latency
 │   │   │   ├── auth.js           # JWT verification & RBAC roleMiddleware
-│   │   │   ├── rateLimiter.js    # Token bucket DDoS defense (5,000 req/15m)
+│   │   │   ├── rateLimiter.js    # Per-IP limits: API, failed logins, sign-ups
 │   │   │   └── upload.js         # Multer memoryStorage, image type filter, 5MB limit
 │   │   ├── services/             # Business rules, transactions & SQL (never touch req/res)
 │   │   │   ├── socketService.js  # Socket.IO room isolation & broadcast dispatch
