@@ -81,7 +81,8 @@ async function getListedAuctions(userId) {
 }
 
 /**
- * All auctions where the user has placed bids, with:
+ * All auctions where the user has placed bids (display names only: placing a bid must not reveal
+ * the seller's email; the winner gets it from the won list and the payout page), with:
  * - my_highest_bid
  * - current_price
  * - is_highest_bidder (true if user holds current highest bid)
@@ -94,7 +95,6 @@ async function getBidParticipations(userId) {
             my_bids.my_bid_count,
             (a.current_price <= my_bids.my_highest_bid) AS is_highest_bidder,
             COALESCE(NULLIF(s.name, ''), split_part(s.email, '@', 1)) AS seller_name,
-            s.email AS seller_email,
             COALESCE(NULLIF(w.name, ''), split_part(w.email, '@', 1)) AS winner_name,
             (a.status = 'CLOSED' AND a.winner_id IS NOT DISTINCT FROM $1::uuid) AS is_winner
      FROM (

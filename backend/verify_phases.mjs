@@ -720,6 +720,8 @@ async function runVerification() {
     winnerWon.data.won.some(a => a.id === centsAuctionId) && !loserWon.data.won.some(a => a.id === centsAuctionId));
   assert('Phase 11', 'Outbid bidder sees is_winner = false for that lot',
     loserBids.data.participations.find(p => p.id === centsAuctionId)?.is_winner === false);
+  assert('Phase 11', 'My-bids list never reveals the seller\'s email (bidding must not leak it)',
+    loserBids.data.participations.every(p => p.seller_email === undefined && p.winner_email === undefined));
 
   // 3. Errors: every response carries a request id, and a broken JSON body is a 400 with a plain message
   const badJsonRes = await new Promise((resolve, reject) => {
