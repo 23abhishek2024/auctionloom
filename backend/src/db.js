@@ -161,6 +161,16 @@ pool.connect(async (err, client, release) => {
       );
       CREATE INDEX IF NOT EXISTS idx_payment_requests_wallet ON payment_requests(wallet_id);
 
+      -- Uploaded images live in the database: the free Render disk is wiped on every restart
+      CREATE TABLE IF NOT EXISTS uploads (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        mime_type VARCHAR(50) NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp', 'image/gif')),
+        size_bytes INT NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 5242880),
+        data BYTEA NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
       -- Ensure admin@gmail.com has a wallet. Its balance is never rewritten here: it changes only
       -- through ledger-backed credits and debits. (An old start-up "sync" reset a zero admin balance
       -- to the total commission ever earned, recreating money the admin had already withdrawn.)

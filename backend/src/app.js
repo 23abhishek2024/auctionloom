@@ -31,6 +31,7 @@ const commissionRoutes = require('./routes/commissionRoutes');
 const walletRoutes = require('./routes/walletRoutes');
 const { getLeaderboard } = require('./controllers/userController');
 const auctionClosureService = require('./services/auctionClosureService');
+const uploadService = require('./services/uploadService');
 const path = require('path');
 
 // Services
@@ -67,8 +68,30 @@ app.use((req, res, next) => {
 });
 app.use(rateLimiterMiddleware);
 
-// Serve static uploaded files (Node.js Video 28 - Multer)
-app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+// Serve uploaded images (Node.js Video 28 - Multer). New uploads live in PostgreSQL (see uploadService);
+// files from before that change may still be on a local disk, so those are served too, images only.
+// nosniff: the browser must treat the bytes as the declared image type, never guess "HTML".
+app.get('/uploads/:file', async (req, res, next) => {
+  try {
+    const image = await uploadService.getImage(req.params.file);
+    if (!image) return next(); // not in the database: maybe a legacy file on disk
+    res.set({
+      'Content-Type': image.mimeType,
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'public, max-age=31536000, immutable', // an upload never changes
+    });
+    res.send(image.data);
+  } catch (err) {
+    next(err);
+  }
+});
+app.use(
+  '/uploads',
+  (req, res, next) => (/\.(png|jpe?g|gif|webp)$/i.test(req.path) ? next() : res.status(404).json({ error: 'Not found' })),
+  express.static(path.join(__dirname, '../public/uploads'), {
+    setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+  })
+);
 
 // ── Routes ────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);

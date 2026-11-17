@@ -1,4 +1,5 @@
 const commissionService = require('../services/commissionService');
+const uploadService = require('../services/uploadService');
 const { requireMoney, optionalString } = require('../utils/validators');
 
 /**
@@ -17,10 +18,12 @@ const submitProof = async (req, res, next) => {
     const amount = requireMoney(req.body.amount, 'Payment amount');
     const comment = optionalString(req.body.comment, 'Comment', 500);
 
+    // The receipt image is stored only after the other fields passed their checks
+    const saved = await uploadService.saveImage(req.file, req.user.id);
     const proof = await commissionService.submitProof(req.user.id, {
       amount,
       comment,
-      proofUrl: `/uploads/${req.file.filename}`, // Relative URL to the uploaded file
+      proofUrl: saved.url, // e.g. /uploads/<uuid>.png, served from the database
     });
 
     res.status(201).json({

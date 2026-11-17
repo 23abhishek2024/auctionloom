@@ -2,7 +2,6 @@ import 'dotenv/config';
 import http from 'http';
 import { io } from 'socket.io-client';
 import pg from 'pg';
-import fs from 'fs';
 import jwt from 'jsonwebtoken';
 
 const { Pool } = pg;
@@ -509,15 +508,21 @@ async function runVerification() {
   const uploadRes = await uploadMultipart(dummyPngBuffer, 'test-item.png', sellerToken);
   assert('Phase 9', 'Multer upload endpoint responds with 200 OK', uploadRes.status === 200);
   assert('Phase 9', 'Multer response contains valid /uploads/ URL', typeof uploadRes.data.url === 'string' && uploadRes.data.url.startsWith('/uploads/'));
-  assert('Phase 9', 'Uploaded image file persisted on server disk', fs.existsSync(`./public${uploadRes.data.url}`));
+  const storedUpload = await pool.query('SELECT mime_type, size_bytes FROM uploads WHERE id = $1', [uploadRes.data.url.slice('/uploads/'.length, -'.png'.length)]);
+  assert('Phase 9', 'Uploaded image stored in PostgreSQL (survives restarts of a free server)', storedUpload.rowCount === 1 && storedUpload.rows[0].mime_type === 'image/png');
 
   // 2. Static serving check
   const staticFileRes = await new Promise((resolve) => {
     http.get(`http://localhost:${API_PORT}${uploadRes.data.url}`, (res) => {
-      resolve({ status: res.statusCode, contentType: res.headers['content-type'] });
+      res.resume();
+      resolve({ status: res.statusCode, contentType: res.headers['content-type'], nosniff: res.headers['x-content-type-options'] });
     }).on('error', (err) => resolve({ status: 500, error: err.message }));
   });
-  assert('Phase 9', 'Express statically serves uploaded image at /uploads/*', staticFileRes.status === 200);
+  assert('Phase 9', 'Uploaded image served at /uploads/* as image/png with nosniff', staticFileRes.status === 200 && staticFileRes.contentType === 'image/png' && staticFileRes.nosniff === 'nosniff');
+
+  // An HTML page disguised as a PNG (declared type and name lie) is refused by the byte check
+  const disguisedRes = await uploadMultipart(Buffer.from('<html><body><script>alert(1)</script></body></html>'), 'evil.html', sellerToken);
+  assert('Phase 9', 'HTML file disguised as an image is rejected (400), never stored or served', disguisedRes.status === 400);
 
   // 3. Create Auction with image_url
   const auctionWithImgRes = await request('POST', '/api/auctions', {
