@@ -131,9 +131,9 @@ async function runVerification() {
     WHERE table_schema = 'public'
   `);
   const tableNames = tableQuery.rows.map(r => r.table_name);
-  const expectedTables = ['users', 'auctions', 'bids', 'jobs', 'commission_proofs', 'wallets', 'wallet_transactions', 'payment_requests'];
+  const expectedTables = ['users', 'auctions', 'bids', 'jobs', 'commission_proofs', 'wallets', 'wallet_transactions', 'payment_requests', 'uploads'];
   const missingTables = expectedTables.filter(t => !tableNames.includes(t));
-  assert('Phase 2', 'All 8 tables exist after migration', missingTables.length === 0, missingTables.length ? `missing: ${missingTables.join(', ')}` : '');
+  assert('Phase 2', 'All 9 tables exist after migration', missingTables.length === 0, missingTables.length ? `missing: ${missingTables.join(', ')}` : '');
 
   const openJobIndex = await pool.query(
     `SELECT indexdef FROM pg_indexes WHERE tablename = 'jobs' AND indexname = 'unique_open_job'`
