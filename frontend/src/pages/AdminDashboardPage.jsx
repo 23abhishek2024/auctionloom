@@ -175,32 +175,31 @@ export const AdminDashboardPage = () => {
     }
   };
 
-  const handleCommExportCsv = () => {
-    const params = new URLSearchParams({
-      format: 'csv',
+  // Through the shared API client: same backend URL as every other call (the old hand-built URL fell
+  // back to localhost in a production build without VITE_API_URL), the token, and error handling
+  // (a failed request used to be saved as a .csv file holding the error JSON)
+  const handleCommExportCsv = async () => {
+    const params = {
       ...(commSearch ? { search: commSearch } : {}),
       ...(commFrom ? { from: commFrom } : {}),
       ...(commTo ? { to: commTo } : {}),
-    });
-    const token = localStorage.getItem('token');
-    const rawBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-    const base = rawBase.match(/https?:\/\/[^\s\r\n]+/)?.[0]?.replace(/\/+$/, '') || 'http://localhost:5000/api';
-    const endpoint = commTab === 'transactions' ? 'commission-transactions' : 'commission-ledger';
+    };
+    const report = commTab === 'transactions' ? 'commission-transactions' : 'commission-ledger';
     if (commTab === 'ledger') {
-      params.append('groupBySeller', commGrouped);
+      params.groupBySeller = commGrouped;
     } else if (commTxType !== 'ALL') {
-      params.append('type', commTxType);
+      params.type = commTxType;
     }
-    const url = `${base}/admin/${endpoint}?${params.toString()}`;
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.blob())
-      .then((blob) => {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = commTab === 'transactions' ? 'commission_transactions.csv' : (commGrouped ? 'commission_by_seller.csv' : 'commission_ledger.csv');
-        a.click();
-      })
-      .catch(() => alert('CSV export failed. Please try again.'));
+    try {
+      const res = await adminApi.exportCommissionCsv(report, params);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(res.data);
+      a.download = commTab === 'transactions' ? 'commission_transactions.csv' : (commGrouped ? 'commission_by_seller.csv' : 'commission_ledger.csv');
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch {
+      alert('CSV export failed. Please try again.');
+    }
   };
 
   // Handle Proof Approval / Rejection

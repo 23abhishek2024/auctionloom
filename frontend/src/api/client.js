@@ -101,6 +101,9 @@ export const adminApi = {
     api.put(`/admin/commission-proofs/${id}/status`, { status, admin_notes: notes }),
   getCommissionLedger: (params) => api.get('/admin/commission-ledger', { params }),
   getCommissionTransactions: (params) => api.get('/admin/commission-transactions', { params }),
+  // CSV download of either report ('commission-ledger' or 'commission-transactions') as a Blob
+  exportCommissionCsv: (report, params) =>
+    api.get(`/admin/${report}`, { params: { ...params, format: 'csv' }, responseType: 'blob' }),
   purgeAndResetDatabase: (data) => api.post('/admin/system/purge-and-reset', data),
   runBenchmark: (data) => api.post('/admin/system/run-benchmark', data),
 };
