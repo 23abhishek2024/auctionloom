@@ -216,7 +216,8 @@ async function republishAuction(id, user, { endTime, startingPrice }) {
     // A lot the winner has already paid for is sold. Republishing it would sell the same item twice,
     // and the second sale's settlement would reuse this lot's idempotency keys and charge the new winner $0.
     if (auction.is_settled) {
-      throw new AppError(400, 'This lot has been sold and paid for, so it cannot be republished. Create a new listing instead.');
+      // 409 like deleting a paid lot: the request is fine, the lot's state (paid) is what conflicts
+      throw new AppError(409, 'This lot has been sold and paid for, so it cannot be republished. Create a new listing instead.');
     }
 
     // A sold but unpaid lot is held for its winner during the payment window. Republishing earlier

@@ -132,7 +132,7 @@ async function main() {
     const r = await call('POST', `/auctions/${settledLot}/republish`, seller.token, { end_time: new Date(Date.now() + 3600e3).toISOString() });
     const row = (await pool.query('SELECT status, winner_id, is_settled FROM auctions WHERE id = $1', [settledLot])).rows[0];
     report('Republishing a lot that was already paid for is refused',
-      r.status === 400 && row.status === 'CLOSED' && row.winner_id === b2.id && row.is_settled === true,
+      r.status === 409 && row.status === 'CLOSED' && row.winner_id === b2.id && row.is_settled === true,
       `HTTP ${r.status} "${r.data.error}"; lot still CLOSED, same winner, still settled`);
   }
 
