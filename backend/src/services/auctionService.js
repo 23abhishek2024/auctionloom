@@ -1,6 +1,6 @@
 const pool = require('../db');
 const auctionModel = require('../models/auctionModel');
-const userModel = require('../models/userModel');
+const { loadTokenUser } = require('../middlewares/auth');
 const auctionClosureService = require('./auctionClosureService');
 const { getIO } = require('./socketService');
 const { AppError } = require('../utils/AppError');
@@ -17,12 +17,14 @@ const { isUuidFormat } = require('../utils/validators');
 const PAYMENT_WINDOW_HOURS = 24;
 
 /**
- * Is the viewer an admin right now? (optionalAuth only decodes the token, and a token's role can be stale)
+ * The viewer as the database knows them now, or null for a guest. optionalAuth only checks the
+ * token's signature; here the account must still exist and the token must be newer than the last
+ * password change, the same check as authMiddleware. (Before, only the admin check did this, so a
+ * token from before a password change still showed the seller and winner their email preview link.)
  */
-const isCurrentAdmin = async (viewer) => {
-  if (!viewer || viewer.role !== 'admin' || !isUuidFormat(viewer.id)) return false;
-  const current = await userModel.findRoleById(viewer.id);
-  return current?.role === 'admin';
+const currentViewer = async (viewer) => {
+  if (!viewer || !isUuidFormat(viewer.id)) return null;
+  return loadTokenUser(viewer); // { id, name, email, role } or null
 };
 
 /**
@@ -40,13 +42,15 @@ const toPublicAuction = (auction, viewer, viewerIsAdmin) => {
 };
 
 /**
- * All auctions matching the filters (status, search, seller_id, sort, limit, offset),
- * with emails shown only to the people allowed to see them.
+ * One page of auctions matching the filters (status, search, seller_id, sort, limit, offset; at most
+ * 100 per page), with emails shown only to the people allowed to see them.
+ * Returns { auctions, total, limit, offset }; total counts every match, not just this page.
  */
 async function listAuctions(filters, viewer) {
-  const rows = await auctionModel.findAll(filters);
-  const viewerIsAdmin = await isCurrentAdmin(viewer);
-  return rows.map((a) => toPublicAuction(a, viewer, viewerIsAdmin));
+  const { rows, total, limit, offset } = await auctionModel.findAll(filters);
+  const current = await currentViewer(viewer);
+  const viewerIsAdmin = current?.role === 'admin';
+  return { auctions: rows.map((a) => toPublicAuction(a, current, viewerIsAdmin)), total, limit, offset };
 }
 
 /**
@@ -62,8 +66,9 @@ async function getAuction(id, viewer) {
     auction = await auctionModel.findById(id);
   }
 
-  const viewerIsAdmin = await isCurrentAdmin(viewer);
-  return toPublicAuction(auction, viewer, viewerIsAdmin);
+  const current = await currentViewer(viewer);
+  const viewerIsAdmin = current?.role === 'admin';
+  return toPublicAuction(auction, current, viewerIsAdmin);
 }
 
 /**
@@ -74,47 +79,85 @@ async function createAuction(sellerId, { title, description, startingPrice, endT
 }
 
 /**
- * Delete an auction. Its seller can delete it until the first bid; an admin can delete it anytime.
+ * Run `fn(client, auction)` in one transaction with the auction row locked (SELECT ... FOR UPDATE).
+ * That is the same lock a bid takes, so no bid can arrive between our checks and the delete.
+ * Throws 404 if there is no such auction.
+ */
+async function withLockedAuction(id, fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const auction = await auctionModel.findByIdForUpdate(client, id);
+    if (!auction) throw new AppError(404, 'Auction not found.');
+    const result = await fn(client, auction);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// A lot that was paid for is part of the money records (ledger rows point at it), so it is never deleted
+const refuseIfPaid = (auction) => {
+  if (auction.is_settled) {
+    throw new AppError(409, 'This lot has been paid for, so it is part of the financial records and cannot be deleted.');
+  }
+};
+
+/**
+ * Delete an auction. Its seller can delete it until the first bid; an admin can delete it anytime,
+ * except a lot that has been paid for.
+ * Check and delete happen under one row lock: before, a bid placed between the "no bids yet"
+ * check and the delete was deleted along with the auction.
  */
 async function deleteAuction(id, user) {
-  const auction = await auctionModel.findById(id);
-  if (!auction) {
-    throw new AppError(404, 'Auction not found.');
-  }
-
-  if (auction.seller_id !== user.id && user.role !== 'admin') {
-    throw new AppError(403, 'You are not authorized to delete this auction.');
-  }
-
-  const hasBids = await auctionModel.hasBids(id);
-  if (hasBids && user.role !== 'admin') {
-    throw new AppError(400, 'Cannot delete auction after bids have already been placed.');
-  }
-
-  await auctionModel.deleteWithBidsAndJobs(id);
+  await withLockedAuction(id, async (client, auction) => {
+    if (auction.seller_id !== user.id && user.role !== 'admin') {
+      throw new AppError(403, 'You are not authorized to delete this auction.');
+    }
+    refuseIfPaid(auction);
+    if (user.role !== 'admin' && (await auctionModel.hasBids(id, client))) {
+      throw new AppError(400, 'Cannot delete auction after bids have already been placed.');
+    }
+    await auctionModel.deleteWithBidsAndJobs(client, id);
+  });
 }
 
 /**
- * Admin override: delete any auction, with its bids and queued jobs. Returns the deleted row.
+ * Admin override: delete any unpaid auction, with its bids and queued jobs. Returns the deleted row.
  */
 async function forceDeleteAuction(id) {
-  const deleted = await auctionModel.deleteWithBidsAndJobs(id);
-  if (!deleted) {
-    throw new AppError(404, 'Auction not found.');
-  }
-  return deleted;
+  return withLockedAuction(id, async (client, auction) => {
+    refuseIfPaid(auction);
+    return auctionModel.deleteWithBidsAndJobs(client, id);
+  });
 }
 
 /**
- * Admin moderation: set an auction's status (ACTIVE, CLOSED or RESTRICTED) and tell everyone watching it.
+ * Admin moderation: freeze a running auction (ACTIVE -> RESTRICTED) or resume a frozen one
+ * (RESTRICTED -> ACTIVE), and tell everyone watching it. Nothing else is allowed: an auction
+ * closes by itself at its end time (with a winner and the 5% fee), and a closed one must not be
+ * reopened. The old version accepted any status, so ACTIVE -> CLOSED skipped the winner, and
+ * freeze + resume reopened a sold lot.
  */
 async function setAuctionStatus(id, status, reason) {
-  const updated = await auctionModel.updateStatus(id, status);
-  if (!updated) {
-    throw new AppError(404, 'Auction not found.');
-  }
+  const updated = await withLockedAuction(id, async (client, auction) => {
+    const allowed =
+      (auction.status === 'ACTIVE' && status === 'RESTRICTED') ||
+      (auction.status === 'RESTRICTED' && status === 'ACTIVE');
+    if (!allowed) {
+      throw new AppError(
+        409,
+        `Cannot change this auction from ${auction.status} to ${status}. Only a running auction can be frozen (RESTRICTED), and only a frozen one resumed (ACTIVE).`
+      );
+    }
+    return auctionModel.updateStatus(id, status, client);
+  });
 
-  // Real-time broadcast to room so all clients update live
+  // Real-time broadcast to room so all clients update live (after the commit)
   try {
     const io = getIO();
     io.to(id).emit('AUCTION_STATUS_CHANGED', {
@@ -123,7 +166,9 @@ async function setAuctionStatus(id, status, reason) {
       reason: reason || (status === 'RESTRICTED' ? 'Administrative hold applied.' : 'Restriction lifted.'),
       timestamp: new Date().toISOString(),
     });
-  } catch (_) {}
+  } catch (_) {
+    // Socket.IO not initialised (scripts): nothing to tell
+  }
 
   return updated;
 }
@@ -171,7 +216,8 @@ async function republishAuction(id, user, { endTime, startingPrice }) {
     // A lot the winner has already paid for is sold. Republishing it would sell the same item twice,
     // and the second sale's settlement would reuse this lot's idempotency keys and charge the new winner $0.
     if (auction.is_settled) {
-      throw new AppError(400, 'This lot has been sold and paid for, so it cannot be republished. Create a new listing instead.');
+      // 409 like deleting a paid lot: the request is fine, the lot's state (paid) is what conflicts
+      throw new AppError(409, 'This lot has been sold and paid for, so it cannot be republished. Create a new listing instead.');
     }
 
     // A sold but unpaid lot is held for its winner during the payment window. Republishing earlier

@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     name                VARCHAR(255),
     unpaid_commission   DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
     payout_methods      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    password_changed_at TIMESTAMP WITH TIME ZONE,          -- login tokens issued before this are refused
     created_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -62,6 +63,8 @@ CREATE TABLE IF NOT EXISTS bids (
 
 -- Index for fast retrieval of bids per auction
 CREATE INDEX IF NOT EXISTS idx_bids_auction_id ON bids(auction_id);
+-- Index for one user's bids (their stats, "my bids", the leaderboard and the admin user totals)
+CREATE INDEX IF NOT EXISTS idx_bids_bidder_id ON bids(bidder_id);
 
 -- ============================================================
 -- 4. JOBS (Distributed Job Queue - PostgreSQL-backed)
@@ -76,11 +79,12 @@ CREATE TABLE IF NOT EXISTS jobs (
     locked_by       VARCHAR(100),                 -- worker PID
     attempts        INT NOT NULL DEFAULT 0,       -- times claimed; the reaper fails a job after 3
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    -- Unique constraint: prevents scheduler from inserting duplicate jobs
-    -- for the same auction. ON CONFLICT DO NOTHING relies on this.
-    CONSTRAINT unique_pending_job UNIQUE (type, payload)
+    updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- At most one OPEN (pending or running) job per auction: the scheduler's ON CONFLICT DO NOTHING
+-- relies on this. Finished jobs don't count, so a republished auction can get a new close job.
+CREATE UNIQUE INDEX IF NOT EXISTS unique_open_job ON jobs (type, payload) WHERE status IN ('PENDING', 'IN_PROGRESS');
 
 -- Index for workers to efficiently find PENDING jobs
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status) WHERE status = 'PENDING';
@@ -92,11 +96,16 @@ CREATE TABLE IF NOT EXISTS commission_proofs (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     amount          DECIMAL(12, 2) NOT NULL,
+    payment_method  VARCHAR(50) DEFAULT 'MANUAL_WIRE',  -- MANUAL_WIRE (receipt upload) or WALLET
+    transaction_id  VARCHAR(255),
     comment         TEXT,
-    proof_url       TEXT NOT NULL,
+    notes           TEXT,
+    proof_url       TEXT,
+    screenshot_url  TEXT,
     status          VARCHAR(50) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
     admin_notes     TEXT,
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    reviewed_at     TIMESTAMP WITH TIME ZONE,
     updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -104,7 +113,7 @@ CREATE INDEX IF NOT EXISTS idx_commission_proofs_status ON commission_proofs(sta
 CREATE INDEX IF NOT EXISTS idx_commission_proofs_user_id ON commission_proofs(user_id);
 
 -- ============================================================
--- 6. WALLETS (Production-Grade Double-Entry Balance Store)
+-- 6. WALLETS (one balance per user, never below zero)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS wallets (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -116,10 +125,10 @@ CREATE TABLE IF NOT EXISTS wallets (
     updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets(user_id);
+-- No separate index on user_id: UNIQUE already creates one
 
 -- ============================================================
--- 7. WALLET_TRANSACTIONS (Immutable Double-Entry Ledger)
+-- 7. WALLET_TRANSACTIONS (append-only ledger: one row per balance change, with balance_after)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS wallet_transactions (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -137,7 +146,7 @@ CREATE TABLE IF NOT EXISTS wallet_transactions (
 
 CREATE INDEX IF NOT EXISTS idx_wallet_tx_wallet_id ON wallet_transactions(wallet_id);
 CREATE INDEX IF NOT EXISTS idx_wallet_tx_created_at ON wallet_transactions(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_wallet_tx_idempotency ON wallet_transactions(idempotency_key);
+-- idempotency_key is UNIQUE, which already indexes it
 
 -- ============================================================
 -- 8. PAYMENT_REQUESTS (Gateway-Ready Abstraction Layer)
@@ -161,3 +170,15 @@ CREATE TABLE IF NOT EXISTS payment_requests (
 
 CREATE INDEX IF NOT EXISTS idx_payment_requests_wallet ON payment_requests(wallet_id);
 
+-- ============================================================
+-- 9. UPLOADS (images stored in the database)
+-- The free Render disk is wiped on every restart, so uploaded images live here.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS uploads (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id         UUID REFERENCES users(id) ON DELETE SET NULL,
+    mime_type       VARCHAR(50) NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp', 'image/gif')),
+    size_bytes      INT NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 5242880),
+    data            BYTEA NOT NULL,
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

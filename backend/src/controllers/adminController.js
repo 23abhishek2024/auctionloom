@@ -3,7 +3,32 @@ const userService = require('../services/userService');
 const commissionService = require('../services/commissionService');
 const reportService = require('../services/reportService');
 const systemService = require('../services/systemService');
-const { isUUID } = require('../utils/validators');
+const walletService = require('../services/walletService');
+const {
+  isUUID,
+  requireUuid,
+  optionalString,
+  optionalQueryString,
+  optionalDateParam,
+} = require('../utils/validators');
+const { AppError } = require('../utils/AppError');
+
+// Shared query checks for the commission reports: page, limit, search text, date range and format
+const readReportQuery = (query, maxLimit) => {
+  const page = Math.max(1, parseInt(optionalQueryString(query.page, 'page', 6) || '1', 10) || 1);
+  const limit = Math.min(maxLimit, Math.max(1, parseInt(optionalQueryString(query.limit, 'limit', 6) || '20', 10) || 20));
+  const format = (optionalQueryString(query.format, 'format', 10) || 'json').toLowerCase();
+  if (format !== 'json' && format !== 'csv') throw new AppError(400, 'format must be json or csv.');
+  return {
+    page,
+    limit,
+    offset: (page - 1) * limit,
+    search: (optionalQueryString(query.search, 'search', 100) || '').trim(),
+    from: optionalDateParam(query.from, 'from'),
+    to: optionalDateParam(query.to, 'to'),
+    format,
+  };
+};
 
 /**
  * Admin Controller
@@ -13,6 +38,16 @@ const { isUUID } = require('../utils/validators');
 
 // ── CSV exports (presentation only: the rows come from reportService) ──
 
+// One text field: quoted, with quotes doubled, so commas, quotes and line breaks in user-typed titles
+// and names stay inside the field. Text starting with = + - @ gets a leading ' so a spreadsheet shows
+// it instead of running it as a formula (CSV injection).
+const csvText = (value) => {
+  const text = String(value ?? '');
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${safe.replace(/"/g, '""')}"`;
+};
+const csvDate = (value) => csvText(value ? new Date(value).toISOString() : '');
+
 const sendCsv = (res, filename, lines) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -21,23 +56,26 @@ const sendCsv = (res, filename, lines) => {
 
 const sellerLedgerCsvLines = (rows) => [
   'Seller Name,Seller Email,Auctions,Total Volume ($),Total Commission ($),First Settlement,Last Settlement',
-  ...rows.map((r) =>
-    `"${r.sellerName}","${r.sellerEmail}",${r.auctionsCount},${r.totalVolume.toFixed(2)},${r.totalCommission.toFixed(2)},"${r.firstSettlement ? new Date(r.firstSettlement).toISOString() : ''}","${r.lastSettlement ? new Date(r.lastSettlement).toISOString() : ''}"`
-  ),
+  ...rows.map((r) => [
+    csvText(r.sellerName), csvText(r.sellerEmail), r.auctionsCount, r.totalVolume.toFixed(2), r.totalCommission.toFixed(2),
+    csvDate(r.firstSettlement), csvDate(r.lastSettlement),
+  ].join(',')),
 ];
 
 const auctionLedgerCsvLines = (rows) => [
   'Auction Title,Seller,Seller Email,Winner,Winner Email,Hammer Price ($),Commission 5% ($),Settled At',
-  ...rows.map((r) =>
-    `"${r.auctionTitle}","${r.sellerName}","${r.sellerEmail}","${r.winnerName}","${r.winnerEmail}",${r.hammerPrice.toFixed(2)},${r.commission.toFixed(2)},"${r.settledAt ? new Date(r.settledAt).toISOString() : ''}"`
-  ),
+  ...rows.map((r) => [
+    csvText(r.auctionTitle), csvText(r.sellerName), csvText(r.sellerEmail), csvText(r.winnerName), csvText(r.winnerEmail),
+    r.hammerPrice.toFixed(2), r.commission.toFixed(2), csvDate(r.settledAt),
+  ].join(',')),
 ];
 
 const commissionTransactionsCsvLines = (transactions) => [
   'Transaction ID,Date,Type,Auction Title,Seller Name,Seller Email,Winner Name,Winner Email,Gross Amount ($),Commission ($),Status',
-  ...transactions.map((r) =>
-    `"${r.id}","${new Date(r.date).toISOString()}","${r.type}","${r.auctionTitle.replace(/"/g, '""')}","${r.sellerName.replace(/"/g, '""')}","${r.sellerEmail || ''}","${r.winnerName || ''}","${r.winnerEmail || ''}",${r.grossAmount.toFixed(2)},${r.commission.toFixed(2)},"${r.status}"`
-  ),
+  ...transactions.map((r) => [
+    csvText(r.id), csvDate(r.date), csvText(r.type), csvText(r.auctionTitle), csvText(r.sellerName), csvText(r.sellerEmail),
+    csvText(r.winnerName), csvText(r.winnerEmail), r.grossAmount.toFixed(2), r.commission.toFixed(2), csvText(r.status),
+  ].join(',')),
 ];
 
 /**
@@ -55,12 +93,13 @@ const getAdminMetrics = async (req, res, next) => {
 
 /**
  * GET /api/admin/revenue-chart
- * Returns monthly gross volume and platform commission breakdown for charts
+ * Monthly gross volume and platform commission for the chart; isSample = true means
+ * there are no sales yet and the months are example numbers
  */
 const getRevenueChart = async (req, res, next) => {
   try {
-    const chartData = await reportService.getRevenueChart();
-    res.json({ chartData });
+    const { months, isSample } = await reportService.getRevenueChart();
+    res.json({ chartData: months, isSample });
   } catch (err) {
     next(err);
   }
@@ -72,7 +111,7 @@ const getRevenueChart = async (req, res, next) => {
  */
 const getAllUsers = async (req, res, next) => {
   try {
-    const users = await userService.listUsers(req.query.search);
+    const users = await userService.listUsers(optionalQueryString(req.query.search, 'search', 100));
     res.json({
       users,
       count: users.length,
@@ -88,11 +127,19 @@ const getAllUsers = async (req, res, next) => {
  */
 const updateUserRole = async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = requireUuid(req.params.id, 'user ID');
     const { role } = req.body;
 
     if (!['admin', 'auctioneer', 'bidder'].includes(role)) {
       return res.status(400).json({ error: "Invalid role. Must be 'admin', 'auctioneer', or 'bidder'." });
+    }
+    // Same rules as the admin page: no admin changes their own role (the last admin could lock
+    // everyone out), and the platform treasury is a system account that keeps its role
+    if (id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot change your own role. Ask another admin.' });
+    }
+    if (id === walletService.PLATFORM_TREASURY_USER_ID) {
+      return res.status(400).json({ error: 'The platform treasury is a system account; its role cannot change.' });
     }
 
     const user = await userService.changeRole(id, role);
@@ -125,7 +172,7 @@ const forceDeleteAuction = async (req, res, next) => {
 
 /**
  * PUT /api/admin/auctions/:id/status
- * Moderate auction status: RESTRICTED, ACTIVE, CLOSED
+ * Moderate auction status: freeze (RESTRICTED) a running auction or resume (ACTIVE) a frozen one
  */
 const updateAuctionStatus = async (req, res, next) => {
   try {
@@ -136,14 +183,15 @@ const updateAuctionStatus = async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid auction ID format.' });
     }
 
-    if (!status || !['ACTIVE', 'CLOSED', 'RESTRICTED'].includes(status.toUpperCase())) {
+    // Admins can freeze (RESTRICTED) and resume (ACTIVE); closing happens by itself at the end time
+    if (typeof status !== 'string' || !['ACTIVE', 'RESTRICTED'].includes(status.toUpperCase())) {
       return res.status(400).json({
-        error: "Status must be one of 'ACTIVE', 'CLOSED', or 'RESTRICTED'.",
+        error: "Status must be 'RESTRICTED' (freeze) or 'ACTIVE' (resume). Auctions close by themselves at their end time.",
       });
     }
 
     const normalizedStatus = status.toUpperCase();
-    const auction = await auctionService.setAuctionStatus(id, normalizedStatus, reason);
+    const auction = await auctionService.setAuctionStatus(id, normalizedStatus, optionalString(reason, 'Reason', 300));
 
     res.json({
       message: `Auction status successfully updated to ${normalizedStatus}.`,
@@ -160,7 +208,7 @@ const updateAuctionStatus = async (req, res, next) => {
  */
 const getAllPaymentProofs = async (req, res, next) => {
   try {
-    const { status } = req.query;
+    const status = optionalQueryString(req.query.status, 'status', 20);
     const statusFilter = status && ['PENDING', 'APPROVED', 'REJECTED'].includes(status.toUpperCase())
       ? status.toUpperCase()
       : null;
@@ -181,14 +229,14 @@ const getAllPaymentProofs = async (req, res, next) => {
  */
 const updatePaymentProofStatus = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const { status, admin_notes } = req.body;
+    const id = requireUuid(req.params.id, 'proof ID');
+    const { status } = req.body;
 
     if (!['APPROVED', 'REJECTED'].includes(status)) {
       return res.status(400).json({ error: "Status must be 'APPROVED' or 'REJECTED'." });
     }
 
-    const proof = await commissionService.reviewProof(id, status, admin_notes);
+    const proof = await commissionService.reviewProof(id, status, optionalString(req.body.admin_notes, 'Admin notes', 500));
     res.json({
       message: `Payment proof status successfully updated to ${status}.`,
       proof,
@@ -205,13 +253,7 @@ const updatePaymentProofStatus = async (req, res, next) => {
  */
 const getCommissionLedger = async (req, res, next) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page || '1'));
-    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '20')));
-    const offset = (page - 1) * limit;
-    const search = (req.query.search || '').trim();
-    const from = req.query.from || null;
-    const to = req.query.to || null;
-    const format = (req.query.format || 'json').toLowerCase();
+    const { page, limit, offset, search, from, to, format } = readReportQuery(req.query, 200);
     const groupBySeller = req.query.groupBySeller === 'true';
 
     const ledger = await reportService.getCommissionLedger({ search, from, to, groupBySeller, limit, offset });
@@ -252,14 +294,8 @@ const getCommissionLedger = async (req, res, next) => {
  */
 const getCommissionTransactions = async (req, res, next) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page || '1'));
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20')));
-    const offset = (page - 1) * limit;
-    const search = (req.query.search || '').trim();
-    const type = (req.query.type || 'ALL').toUpperCase();
-    const from = req.query.from || null;
-    const to = req.query.to || null;
-    const format = (req.query.format || 'json').toLowerCase();
+    const { page, limit, offset, search, from, to, format } = readReportQuery(req.query, 100);
+    const type = (optionalQueryString(req.query.type, 'type', 20) || 'ALL').toUpperCase();
 
     const report = await reportService.getCommissionTransactions({ type, search, from, to, limit, offset });
 
@@ -288,10 +324,18 @@ const getCommissionTransactions = async (req, res, next) => {
 /**
  * POST /api/admin/system/purge-and-reset
  * Wipes all tables, strictly sets up admin@gmail.com + test1..test5@gmail.com (password: test@123),
- * sets all wallets to $0.00, and optionally runs 3 test auctions with full double-entry flow.
+ * sets all wallets to $0.00, and optionally runs 3 test auctions through the real settlement.
  */
 const purgeAndResetDatabase = async (req, res, next) => {
   try {
+    // On the live site one click would wipe every account and auction and bring back the well-known
+    // demo password; it only runs there if the server owner turned it on (ALLOW_DEMO_RESET=true)
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_RESET !== 'true') {
+      return res.status(403).json({
+        error: 'Database reset is turned off on the live site. Set ALLOW_DEMO_RESET=true on the server to allow it.',
+      });
+    }
+
     const { users, balances } = await systemService.purgeAndReset({
       runTestAuctions: req.body.runTestAuctions !== false,
     });
@@ -315,7 +359,10 @@ const purgeAndResetDatabase = async (req, res, next) => {
  */
 const runConcurrencyBenchmark = async (req, res, next) => {
   try {
-    const count = parseInt(req.body.requests, 10) || 100;
+    const count = req.body.requests === undefined ? 100 : Number(req.body.requests);
+    if (!Number.isInteger(count) || count < 2 || count > 500) {
+      return res.status(400).json({ error: 'requests must be a whole number from 2 to 500.' });
+    }
     const data = await systemService.runBidBenchmark(count);
     return res.status(200).json({ success: true, data });
   } catch (err) {

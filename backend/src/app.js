@@ -30,7 +30,9 @@ const adminRoutes = require('./routes/adminRoutes');
 const commissionRoutes = require('./routes/commissionRoutes');
 const walletRoutes = require('./routes/walletRoutes');
 const { getLeaderboard } = require('./controllers/userController');
+const pool = require('./db');
 const auctionClosureService = require('./services/auctionClosureService');
+const uploadService = require('./services/uploadService');
 const path = require('path');
 
 // Services
@@ -39,10 +41,23 @@ const { initSocket } = require('./services/socketService');
 const app = express();
 const server = http.createServer(app);
 
+// Behind a load balancer every request arrives from the proxy's address and the client's own IP is
+// in X-Forwarded-For. "trust proxy" = how many proxy hops to trust when reading it, so req.ip (used by
+// the rate limiters) is the real client. Default: 1 in production (Render), 0 locally. If /health
+// shows a "clientIp" that isn't yours after deploying, set TRUST_PROXY to the right number of hops.
+const trustProxyHops = process.env.TRUST_PROXY !== undefined
+  ? parseInt(process.env.TRUST_PROXY, 10) || 0
+  : (process.env.NODE_ENV === 'production' ? 1 : 0);
+if (trustProxyHops > 0) app.set('trust proxy', trustProxyHops);
+
 // ── Init Socket.IO ────────────────────────────────────────────
 initSocket(server);
 
 // ── Global Middlewares ────────────────────────────────────────
+// Request id + access log first, so even a request that fails in a later middleware
+// (for example a malformed JSON body) gets an id and a log line.
+app.use(loggerMiddleware);
+
 // CORS: only our own frontends may call the API from a browser. Requests without an Origin header
 // (curl, server-to-server, the keep-alive ping) are not cross-site browser calls, so CORS doesn't apply.
 const allowedOrigins = getAllowedOrigins();
@@ -55,11 +70,38 @@ app.use(
   })
 );
 app.use(express.json());
-app.use(loggerMiddleware);
+// Express 5 leaves req.body undefined when a request has no JSON body; controllers read
+// fields from it, so default to {} and let their own checks answer "x is required" (400).
+app.use((req, res, next) => {
+  if (req.body === undefined) req.body = {};
+  next();
+});
 app.use(rateLimiterMiddleware);
 
-// Serve static uploaded files (Node.js Video 28 - Multer)
-app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+// Serve uploaded images (Node.js Video 28 - Multer). New uploads live in PostgreSQL (see uploadService);
+// files from before that change may still be on a local disk, so those are served too, images only.
+// nosniff: the browser must treat the bytes as the declared image type, never guess "HTML".
+app.get('/uploads/:file', async (req, res, next) => {
+  try {
+    const image = await uploadService.getImage(req.params.file);
+    if (!image) return next(); // not in the database: maybe a legacy file on disk
+    res.set({
+      'Content-Type': image.mimeType,
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'public, max-age=31536000, immutable', // an upload never changes
+    });
+    res.send(image.data);
+  } catch (err) {
+    next(err);
+  }
+});
+app.use(
+  '/uploads',
+  (req, res, next) => (/\.(png|jpe?g|gif|webp)$/i.test(req.path) ? next() : res.status(404).json({ error: 'Not found' })),
+  express.static(path.join(__dirname, '../public/uploads'), {
+    setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+  })
+);
 
 // ── Routes ────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
@@ -103,7 +145,8 @@ app.get('/', (req, res) => {
 
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', pid: process.pid, time: new Date().toISOString() });
+  // clientIp: the caller's own address as the server sees it (to check the trust proxy setting)
+  res.json({ status: 'ok', pid: process.pid, time: new Date().toISOString(), clientIp: req.ip });
 });
 
 // REST API Discovery Catalog
@@ -158,24 +201,52 @@ app.use((req, res) => {
 });
 
 // ── Global Error Handler ──────────────────────────────────────
-app.use((err, req, res, next) => {
+// Express knows this is the error handler because it takes 4 arguments (the unused 4th is _next).
+app.use((err, req, res, _next) => {
   // An expected failure reported by a service (not found, not allowed, ...): answer with its status
   if (err instanceof AppError) {
     return sendAppError(res, err);
   }
-  const reqId = req.id || 'unknown';
-  console.error(`[${reqId}] ❌ Unhandled Error:`, err.message);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal Server Error',
+
+  // A file upload the client can fix (too large, unexpected field, ...)
+  if (err.name === 'MulterError') {
+    return res.status(400).json({ error: err.message });
+  }
+
+  // A malformed request the client can fix: invalid JSON, a body that is too large, ...
+  // (body-parser marks these with a 4xx status and expose = true)
+  const status = err.status || err.statusCode;
+  if (status >= 400 && status < 500 && err.expose !== false) {
+    const message = err.type === 'entity.parse.failed' ? 'Request body is not valid JSON.' : err.message;
+    return res.status(status).json({ error: message });
+  }
+
+  // Anything else is a bug or an outage. Log the details with the request id, and tell the client
+  // only that something went wrong plus the id, so database and code details never leave the server.
+  const requestId = req.id || 'unknown';
+  console.error(`[${requestId}] ❌ Unhandled Error:`, err.stack || err.message);
+  res.status(500).json({
+    error: 'Something went wrong on our side. Please try again.',
+    requestId,
   });
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`[App] Worker ${process.pid} listening on port ${PORT}`);
-  // Automated background sweep: close expired auctions every 15s (ensures seamless lot settlement)
-  auctionClosureService.closeExpiredAuctions();
-  setInterval(() => auctionClosureService.closeExpiredAuctions(), 15000);
+// In-process sweep: closes ended auctions every 15 s, so a single server (like the free Render
+// instance, which can't run separate worker processes) still closes them on time.
+// SWEEP_INTERVAL_MS=0 turns it off; the test suite does this to prove the job queue works on its own.
+const SWEEP_INTERVAL_MS = process.env.SWEEP_INTERVAL_MS !== undefined ? parseInt(process.env.SWEEP_INTERVAL_MS, 10) || 0 : 15000;
+// Upgrade an older database first, then take requests (see upgradeSchema in db.js for why)
+pool.upgradeSchema().then(() => {
+  server.listen(PORT, () => {
+    console.log(`[App] Worker ${process.pid} listening on port ${PORT}`);
+    if (SWEEP_INTERVAL_MS > 0) {
+      auctionClosureService.closeExpiredAuctions();
+      setInterval(() => auctionClosureService.closeExpiredAuctions(), SWEEP_INTERVAL_MS);
+    } else {
+      console.log('[App] In-process closing sweep is off (SWEEP_INTERVAL_MS=0).');
+    }
+  });
 });
 
 module.exports = app;

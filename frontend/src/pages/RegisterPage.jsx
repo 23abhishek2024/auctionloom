@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { UserPlus, Mail, Lock, AlertCircle, Gavel, User, Store, Eye, EyeOff } from 'lucide-react';
+import { UserPlus, Mail, Lock, AlertCircle, Gavel, User, Eye, EyeOff } from 'lucide-react';
 
 export const RegisterPage = () => {
   const [name, setName] = useState('');
@@ -10,7 +10,7 @@ export const RegisterPage = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [role, setRole] = useState('auctioneer');
+  const [role] = useState('auctioneer'); // every account can buy and sell
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -37,8 +37,8 @@ export const RegisterPage = () => {
       return;
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters long.');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long.');
       return;
     }
 
@@ -129,7 +129,7 @@ export const RegisterPage = () => {
           {/* Password */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-700 mb-1.5">
-              Password (min 6 chars) *
+              Password (min 8 chars) *
             </label>
             <div className="relative">
               <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />

@@ -5,9 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   PlusCircle,
   ArrowLeft,
-  Calendar,
   DollarSign,
-  FileText,
   Tag,
   AlertCircle,
   Sparkles,
@@ -16,7 +14,6 @@ import {
   UploadCloud,
   Image as ImageIcon,
   Check,
-  X,
 } from 'lucide-react';
 
 const PRESET_GALLERY = [
@@ -155,7 +152,7 @@ export const CreateAuctionPage = () => {
         keywords: aiKeywords.trim(),
       });
 
-      const { title, description, suggested_starting_price } = res.data;
+      const { title, description, suggested_starting_price, source } = res.data;
 
       setFormData((prev) => ({
         ...prev,
@@ -164,7 +161,12 @@ export const CreateAuctionPage = () => {
         starting_price: prev.starting_price || (suggested_starting_price ? suggested_starting_price.toString() : ''),
       }));
 
-      setAiMessage('✨ Listing copy generated successfully! You can review and edit below.');
+      // Say which generator answered: the server falls back to a fixed template when no AI service does
+      const writtenBy = {
+        google_gemini_api: 'Listing copy written by Google Gemini.',
+        openai_api: 'Listing copy written by OpenAI.',
+      }[source] || 'No AI service answered, so the draft comes from the built-in template.';
+      setAiMessage(`✨ ${writtenBy} You can review and edit below.`);
       setTimeout(() => setAiMessage(null), 5000);
     } catch (err) {
       console.error('AI Generator Error:', err);

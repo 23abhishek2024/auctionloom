@@ -38,24 +38,32 @@ const poolConfig = process.env.DATABASE_URL
 const pool = new Pool(poolConfig);
 
 /**
- * Test the connection on startup.
- * This will throw an error immediately if your DB credentials are wrong.
+ * Bring an older database up to the current schema (columns and tables added since it was created).
+ * Every statement is idempotent. The API server calls this once at start-up, BEFORE it accepts
+ * requests (see app.js): the ALTER TABLEs take exclusive table locks, and a query running at the
+ * same moment can deadlock with them. (It used to run as a side effect of require('./db') in every
+ * process: the scheduler's first pass deadlocked with it, and so could a bid or a seed script.)
+ * Exits the process if the database can't be reached at all; a failed upgrade is only logged.
  */
-pool.connect(async (err, client, release) => {
-  if (err) {
+async function upgradeSchema() {
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
     console.error('[DB] ❌ Failed to connect to PostgreSQL:', err.message);
     process.exit(1); // Kill the process — no point running without a DB
   }
   try {
-    // Auto-migration: ensure latest schema columns and tables exist in production DB
     await client.query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);
       ALTER TABLE users ADD COLUMN IF NOT EXISTS unpaid_commission NUMERIC(12,2) DEFAULT 0.00;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS payout_methods JSONB DEFAULT '{}'::jsonb;
+      -- Changing the password logs out every other session: tokens issued before this time are refused
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP WITH TIME ZONE;
 
-      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS start_time TIMESTAMP;
+      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS start_time TIMESTAMP WITH TIME ZONE;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'General';
-      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS republished_at TIMESTAMP;
+      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS republished_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS commission_amount NUMERIC(12,2) DEFAULT 0.00;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS commission_calculated BOOLEAN DEFAULT FALSE;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS is_settled BOOLEAN DEFAULT FALSE;
@@ -78,6 +86,19 @@ pool.connect(async (err, client, release) => {
       -- Job queue: count how many times a job was claimed, so a job that keeps crashing workers ends FAILED
       ALTER TABLE IF EXISTS jobs ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0;
 
+      -- One user's bids (their stats, "my bids", the leaderboard, admin totals) were found by a full scan
+      CREATE INDEX IF NOT EXISTS idx_bids_bidder_id ON bids(bidder_id);
+
+      -- Job queue: only OPEN jobs must be unique. The old UNIQUE (type, payload) also counted finished
+      -- jobs, so a republished auction (or one whose close failed) could never be queued again.
+      DO $$
+      BEGIN
+        IF to_regclass('public.jobs') IS NOT NULL THEN
+          ALTER TABLE jobs DROP CONSTRAINT IF EXISTS unique_pending_job;
+          CREATE UNIQUE INDEX IF NOT EXISTS unique_open_job ON jobs (type, payload) WHERE status IN ('PENDING', 'IN_PROGRESS');
+        END IF;
+      END $$;
+
       ALTER TABLE auctions DROP CONSTRAINT IF EXISTS auctions_status_check;
       ALTER TABLE auctions ADD CONSTRAINT auctions_status_check CHECK (status IN ('ACTIVE', 'CLOSED', 'RESTRICTED'));
 
@@ -87,7 +108,7 @@ pool.connect(async (err, client, release) => {
       ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS notes TEXT;
       ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS comment TEXT;
       ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS proof_url TEXT;
-      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;
+      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE commission_proofs ALTER COLUMN screenshot_url DROP NOT NULL;
       ALTER TABLE commission_proofs ALTER COLUMN proof_url DROP NOT NULL;
 
@@ -101,8 +122,8 @@ pool.connect(async (err, client, release) => {
         notes TEXT,
         status VARCHAR(20) DEFAULT 'PENDING',
         admin_notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        reviewed_at TIMESTAMP
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        reviewed_at TIMESTAMP WITH TIME ZONE
       );
       CREATE INDEX IF NOT EXISTS idx_commission_proofs_user ON commission_proofs(user_id);
       CREATE INDEX IF NOT EXISTS idx_commission_proofs_status ON commission_proofs(status);
@@ -116,7 +137,6 @@ pool.connect(async (err, client, release) => {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets(user_id);
 
       INSERT INTO users (id, email, password_hash, role, name)
       VALUES ('00000000-0000-0000-0000-000000000000', 'treasury@auctionloom.internal', 'SYSTEM_ACCOUNT_DO_NOT_LOGIN', 'admin', 'AuctionLoom Treasury')
@@ -141,7 +161,46 @@ pool.connect(async (err, client, release) => {
       );
       CREATE INDEX IF NOT EXISTS idx_wallet_tx_wallet_id ON wallet_transactions(wallet_id);
       CREATE INDEX IF NOT EXISTS idx_wallet_tx_created_at ON wallet_transactions(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_wallet_tx_idempotency ON wallet_transactions(idempotency_key);
+      -- Every time column stores its time zone (TIMESTAMPTZ). Older databases can hold some as plain
+      -- TIMESTAMP (reviewed_at always was): convert them. A plain TIMESTAMP was written by NOW() in this
+      -- server's time zone, so it is read back in the same zone (current_setting('TimeZone')).
+      DO $$
+      DECLARE col RECORD;
+      BEGIN
+        FOR col IN
+          SELECT table_name, column_name FROM information_schema.columns
+          WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'
+            AND table_name IN ('users', 'auctions', 'bids', 'jobs', 'commission_proofs', 'wallets',
+                               'wallet_transactions', 'payment_requests', 'uploads')
+        LOOP
+          EXECUTE format(
+            'ALTER TABLE %I ALTER COLUMN %I TYPE TIMESTAMP WITH TIME ZONE USING %I AT TIME ZONE current_setting(''TimeZone'')',
+            col.table_name, col.column_name, col.column_name);
+        END LOOP;
+      END $$;
+
+      -- wallets.user_id and wallet_transactions.idempotency_key are UNIQUE, and a UNIQUE constraint
+      -- comes with its own index: the two extra indexes only cost space and time on every write.
+      -- Each is dropped only where the unique index on that column is there to replace it.
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM pg_index i
+          JOIN pg_class t ON t.oid = i.indrelid
+          JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = i.indkey[0]
+          WHERE t.relname = 'wallets' AND a.attname = 'user_id' AND i.indisunique AND i.indnatts = 1
+        ) THEN
+          DROP INDEX IF EXISTS idx_wallets_user_id;
+        END IF;
+        IF EXISTS (
+          SELECT 1 FROM pg_index i
+          JOIN pg_class t ON t.oid = i.indrelid
+          JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = i.indkey[0]
+          WHERE t.relname = 'wallet_transactions' AND a.attname = 'idempotency_key' AND i.indisunique AND i.indnatts = 1
+        ) THEN
+          DROP INDEX IF EXISTS idx_wallet_tx_idempotency;
+        END IF;
+      END $$;
 
       CREATE TABLE IF NOT EXISTS payment_requests (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -161,6 +220,16 @@ pool.connect(async (err, client, release) => {
       );
       CREATE INDEX IF NOT EXISTS idx_payment_requests_wallet ON payment_requests(wallet_id);
 
+      -- Uploaded images live in the database: the free Render disk is wiped on every restart
+      CREATE TABLE IF NOT EXISTS uploads (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        mime_type VARCHAR(50) NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp', 'image/gif')),
+        size_bytes INT NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 5242880),
+        data BYTEA NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
       -- Ensure admin@gmail.com has a wallet. Its balance is never rewritten here: it changes only
       -- through ledger-backed credits and debits. (An old start-up "sync" reset a zero admin balance
       -- to the total commission ever earned, recreating money the admin had already withdrawn.)
@@ -172,9 +241,9 @@ pool.connect(async (err, client, release) => {
   } catch (migErr) {
     console.warn('[DB] ⚠️ Schema auto-migration notice:', migErr.message);
   } finally {
-    release(); // Release the client back to the pool
+    client.release(); // Release the client back to the pool
   }
-});
+}
 
 // Listen for unexpected pool errors
 pool.on('error', (err) => {
@@ -183,3 +252,4 @@ pool.on('error', (err) => {
 });
 
 module.exports = pool;
+module.exports.upgradeSchema = upgradeSchema;

@@ -13,7 +13,8 @@
     "migrate": "node scripts/migrate.js",
     "seed": "node scripts/reset_and_seed.js",
     "clean-verify": "node clean_reset_and_verify.js",
-    "benchmark": "node benchmark_concurrency.js"
+    "benchmark": "node benchmark_concurrency.js",
+    "stress": "node stress_test.js"
   },
   "keywords": [],
   "author": "",

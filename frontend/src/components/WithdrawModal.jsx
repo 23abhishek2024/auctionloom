@@ -2,7 +2,6 @@ import React, { useRef, useState } from 'react';
 import { walletApi } from '../api/client';
 import { newIdempotencyKey } from '../utils/idempotency';
 import {
-  Wallet,
   X,
   ArrowUpRight,
   CheckCircle2,
@@ -254,7 +253,7 @@ export const WithdrawModal = ({ isOpen, onClose, onSuccess, currentBalance = 0 }
         {/* Security Footer */}
         <div className="bg-slate-50 border-t border-slate-100 px-6 py-3 flex items-center justify-between text-[11px] text-slate-400 font-mono">
           <span className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> Double-Entry Row Locked
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> Row-locked & recorded in the ledger
           </span>
           <span>Zero-Overdraft Invariant</span>
         </div>

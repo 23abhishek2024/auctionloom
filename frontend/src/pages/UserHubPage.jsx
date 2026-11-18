@@ -8,28 +8,22 @@ import {
   Trophy,
   TrendingUp,
   Tag,
-  Clock,
   ArrowUpRight,
   PlusCircle,
   Pencil,
   CheckCircle2,
-  AlertCircle,
-  Layers,
   Sparkles,
-  Zap,
-  Radio,
   RefreshCw,
   RotateCcw,
   CreditCard,
-  Building2,
-  QrCode,
-  DollarSign,
   X,
 } from 'lucide-react';
 import { auctionApi } from '../api/client';
 
 export const UserHubPage = () => {
-  const { user, updateName, upgradeToSeller } = useAuth();
+  const { user, updateName, upgradeToSeller, changePassword } = useAuth();
+  const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' });
+  const [passwordStatus, setPasswordStatus] = useState({ saving: false, error: null, message: null });
   const tabsSectionRef = useRef(null);
 
   const [stats, setStats] = useState({
@@ -185,6 +179,26 @@ export const UserHubPage = () => {
       alert(err.response?.data?.error || 'Failed to update name.');
     } finally {
       setSavingName(false);
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (passwordForm.next.length < 8) {
+      setPasswordStatus({ saving: false, error: 'The new password must be at least 8 characters.', message: null });
+      return;
+    }
+    if (passwordForm.next !== passwordForm.confirm) {
+      setPasswordStatus({ saving: false, error: 'The two new passwords do not match.', message: null });
+      return;
+    }
+    try {
+      setPasswordStatus({ saving: true, error: null, message: null });
+      const message = await changePassword(passwordForm.current, passwordForm.next);
+      setPasswordForm({ current: '', next: '', confirm: '' });
+      setPasswordStatus({ saving: false, error: null, message });
+    } catch (err) {
+      setPasswordStatus({ saving: false, error: err.response?.data?.error || 'Could not change the password.', message: null });
     }
   };
 
@@ -471,10 +485,16 @@ export const UserHubPage = () => {
             }`}
           >
             <CreditCard className="w-4 h-4" />
-            <span>Payout Coordinates</span>
+            <span>Payout &amp; Password</span>
           </button>
         </div>
 
+        {/* Loading the hub failed (it used to fail silently) */}
+        {error && (
+          <div className="mb-6 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+            {error}
+          </div>
+        )}
 
         {/* ── TAB 1: BIDS & PARTICIPATIONS ───────────────────── */}
         {activeTab === 'bids' && (
@@ -859,6 +879,42 @@ export const UserHubPage = () => {
                   className="btn-primary px-6 py-2.5 rounded-xl text-xs font-semibold shadow-md shadow-indigo-500/20 active:scale-95 transition-all"
                 >
                   {savingPayout ? 'Saving Coordinates...' : 'Save Payout Details'}
+                </button>
+              </div>
+            </form>
+
+            {/* Change password (logs out every other session) */}
+            <form onSubmit={handleChangePassword} className="mt-10 pt-8 border-t border-slate-200 space-y-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Change Password</h3>
+                <p className="text-xs text-slate-500">At least 8 characters. Every other device you are logged in on will be logged out.</p>
+              </div>
+              {[
+                ['current', 'Current password', 'current-password'],
+                ['next', 'New password', 'new-password'],
+                ['confirm', 'Repeat new password', 'new-password'],
+              ].map(([key, label, autoComplete]) => (
+                <div key={key}>
+                  <label className="block text-xs font-semibold uppercase tracking-wider font-mono text-slate-700 mb-1.5">{label}</label>
+                  <input
+                    type="password"
+                    autoComplete={autoComplete}
+                    value={passwordForm[key]}
+                    onChange={(e) => setPasswordForm({ ...passwordForm, [key]: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    required
+                  />
+                </div>
+              ))}
+              {passwordStatus.error && <p className="text-xs text-rose-600 font-medium">{passwordStatus.error}</p>}
+              {passwordStatus.message && <p className="text-xs text-emerald-600 font-medium">{passwordStatus.message}</p>}
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={passwordStatus.saving}
+                  className="btn-primary px-6 py-2.5 rounded-xl text-xs font-semibold shadow-md shadow-indigo-500/20 active:scale-95 transition-all disabled:opacity-50"
+                >
+                  {passwordStatus.saving ? 'Changing...' : 'Change Password'}
                 </button>
               </div>
             </form>

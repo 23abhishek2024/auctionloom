@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { auctionApi } from '../api/client';
 import { AuctionCard } from '../components/AuctionCard';
-import { Search, SlidersHorizontal, RefreshCw, Zap, ShieldCheck, Flame, Plus } from 'lucide-react';
+import { Search, RefreshCw, Zap, Flame, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export const DashboardPage = () => {
   const [auctions, setAuctions] = useState([]);
+  const [totalAuctions, setTotalAuctions] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL'); // ALL, ACTIVE, ENDING_SOON, CLOSED
-  const { user, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
 
   const fetchAuctions = async () => {
     try {
@@ -19,6 +20,8 @@ export const DashboardPage = () => {
       setError(null);
       const res = await auctionApi.getAll();
       setAuctions(res.data.auctions || []);
+      // The API returns at most 100 per page; total counts all of them
+      setTotalAuctions(res.data.total ?? (res.data.auctions || []).length);
     } catch (err) {
       console.error('Failed to fetch auctions:', err);
       setError(err.response?.data?.error || 'Failed to connect to the backend auction service.');
@@ -72,11 +75,11 @@ export const DashboardPage = () => {
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 mb-4 leading-tight">
             High-Speed Live Bidding.{' '}
             <span className="bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent">
-              Zero Delays.
+              Live Prices.
             </span>
           </h1>
           <p className="text-slate-600 text-sm sm:text-base leading-relaxed mb-6">
-            Experience real-time interactive auctions with instantaneous live price broadcasts and verified authentic listings.
+            Experience real-time interactive auctions with live price broadcasts and a chat room for every lot.
             Discover luxury timepieces, collector vehicles, and rare fine art.
           </p>
 
@@ -112,7 +115,7 @@ export const DashboardPage = () => {
         {/* Quick Stats Badges */}
         <div className="mt-8 pt-6 border-t border-slate-200/80 grid grid-cols-2 sm:grid-cols-3 gap-4 max-w-lg">
           <div>
-            <div className="text-2xl font-extrabold text-slate-900 font-mono">{auctions.length}</div>
+            <div className="text-2xl font-extrabold text-slate-900 font-mono">{totalAuctions}</div>
             <div className="text-xs text-slate-500">Total Auctions</div>
           </div>
           <div>
@@ -123,8 +126,8 @@ export const DashboardPage = () => {
             <div className="text-xs text-slate-500">Active Now</div>
           </div>
           <div className="col-span-2 sm:col-span-1">
-            <div className="text-2xl font-extrabold text-indigo-600 font-mono">100%</div>
-            <div className="text-xs text-slate-500">ACID Guaranteed</div>
+            <div className="text-2xl font-extrabold text-indigo-600 font-mono">Locked</div>
+            <div className="text-xs text-slate-500">Every bid row-locked (ACID)</div>
           </div>
         </div>
       </div>

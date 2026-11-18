@@ -4,21 +4,19 @@ import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { walletApi } from '../api/client';
 import { TopupModal } from './TopupModal';
-import { 
-  Gavel, 
-  PlusCircle, 
-  LogIn, 
-  LogOut, 
-  UserPlus, 
-  Radio, 
-  Pencil, 
-  LayoutDashboard, 
-  Trophy, 
-  ShieldAlert, 
-  HelpCircle, 
-  Wallet, 
-  Zap,
-  ChevronDown
+import {
+  Gavel,
+  PlusCircle,
+  LogIn,
+  LogOut,
+  UserPlus,
+  Pencil,
+  LayoutDashboard,
+  Trophy,
+  ShieldAlert,
+  HelpCircle,
+  Wallet,
+  ChevronDown,
 } from 'lucide-react';
 import { formatDisplayName, getInitials } from '../utils/formatters';
 

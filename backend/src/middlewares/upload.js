@@ -1,37 +1,19 @@
 /**
  * Multer File Upload Middleware (Node.js Video 28)
- * 
- * Handles multipart/form-data for image uploads with validation,
- * unique naming, size limits, and storage directory auto-creation.
+ *
+ * Reads one image of at most 5 MB into memory; uploadService checks its content and stores it
+ * in PostgreSQL. Nothing is written to the server's disk: on Render's free plan the disk is wiped
+ * on every restart, redeploy or sleep, which used to make uploaded pictures disappear.
  */
 
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
 
-// Target directory for uploads
-const uploadDir = path.join(__dirname, '../../public/uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
 
-// Storage engine configuration
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const uniqueId = crypto.randomUUID();
-    cb(null, `auction-${Date.now()}-${uniqueId}${ext}`);
-  },
-});
-
-// File filter (images only)
+// First check: the type the browser declares (the bytes are checked again in uploadService)
 const fileFilter = (req, file, cb) => {
-  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-  if (allowedMimeTypes.includes(file.mimetype)) {
+  if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
     cb(null, true);
   } else {
     const err = new Error('Invalid file type. Only JPEG, PNG, WEBP, and GIF images are permitted.');
@@ -40,13 +22,15 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Multer upload instance
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5 MB max file size
+    fileSize: MAX_FILE_BYTES,
+    files: 1,
   },
 });
 
 module.exports = upload;
+module.exports.ALLOWED_MIME_TYPES = ALLOWED_MIME_TYPES;
+module.exports.MAX_FILE_BYTES = MAX_FILE_BYTES;

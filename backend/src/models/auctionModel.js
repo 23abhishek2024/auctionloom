@@ -1,5 +1,7 @@
 const pool = require('../db');
 
+const MAX_PAGE_SIZE = 100;
+
 const auctionModel = {
   /**
    * Get all auctions with optional filters, search, and sorting
@@ -31,24 +33,24 @@ const auctionModel = {
     else if (sort === 'price_desc') orderBy = 'ORDER BY a.current_price DESC';
     else if (sort === 'ending_soon') orderBy = 'ORDER BY a.end_time ASC';
 
-    let paginationClause = '';
+    // A page is at most MAX_PAGE_SIZE auctions (the default too): the list never returns the whole table
     const parsedLimit = parseInt(limit, 10);
     const parsedOffset = parseInt(offset, 10);
-    if (!isNaN(parsedLimit) && parsedLimit > 0) {
-      params.push(parsedLimit);
-      paginationClause += ` LIMIT $${params.length}`;
-    }
-    if (!isNaN(parsedOffset) && parsedOffset >= 0) {
-      params.push(parsedOffset);
-      paginationClause += ` OFFSET $${params.length}`;
-    }
+    const pageSize = !isNaN(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, MAX_PAGE_SIZE) : MAX_PAGE_SIZE;
+    const pageOffset = !isNaN(parsedOffset) && parsedOffset > 0 ? parsedOffset : 0;
+    params.push(pageSize);
+    let paginationClause = ` LIMIT $${params.length}`;
+    params.push(pageOffset);
+    paginationClause += ` OFFSET $${params.length}`;
 
+    // COUNT(*) OVER () = how many auctions match the filters in total, counted before LIMIT/OFFSET
     const query = `
       SELECT a.*, 
              COALESCE(NULLIF(u.name, ''), split_part(u.email, '@', 1)) AS seller_name,
              u.email AS seller_email,
              COALESCE(NULLIF(w.name, ''), split_part(w.email, '@', 1)) AS winner_name,
-             w.email AS winner_email
+             w.email AS winner_email,
+             COUNT(*) OVER ()::int AS total_count
       FROM auctions a
       JOIN users u ON a.seller_id = u.id
       LEFT JOIN users w ON a.winner_id = w.id
@@ -58,7 +60,18 @@ const auctionModel = {
     `;
 
     const result = await pool.query(query, params);
-    return result.rows;
+    let total = result.rows.length ? result.rows[0].total_count : 0;
+    // A page past the end has no rows to carry the window count (it used to report total 0):
+    // count the matching auctions on their own, with the same filters and no LIMIT/OFFSET
+    if (!result.rows.length && pageOffset > 0) {
+      const countRes = await pool.query(
+        `SELECT COUNT(*)::int AS total FROM auctions a ${whereClause}`,
+        params.slice(0, params.length - 2)
+      );
+      total = countRes.rows[0].total;
+    }
+    const rows = result.rows.map(({ total_count, ...auction }) => auction);
+    return { rows, total, limit: pageSize, offset: pageOffset };
   },
 
   /**
@@ -78,6 +91,14 @@ const auctionModel = {
       [id]
     );
     return result.rows[0];
+  },
+
+  /**
+   * Whether an auction with this id exists (one primary-key lookup)
+   */
+  exists: async (id) => {
+    const result = await pool.query('SELECT EXISTS (SELECT 1 FROM auctions WHERE id = $1) AS found', [id]);
+    return result.rows[0].found;
   },
 
   /**
@@ -130,10 +151,10 @@ const auctionModel = {
   },
 
   /**
-   * Update the status of an auction (ACTIVE, CLOSED, RESTRICTED)
+   * Update the status of an auction (pass the transaction's client when the row is locked)
    */
-  updateStatus: async (auctionId, newStatus) => {
-    const result = await pool.query(
+  updateStatus: async (auctionId, newStatus, db = pool) => {
+    const result = await db.query(
       'UPDATE auctions SET status = $1 WHERE id = $2 RETURNING *',
       [newStatus, auctionId]
     );
@@ -153,21 +174,23 @@ const auctionModel = {
   },
 
   /**
-   * Check if an auction has received any bids
+   * Check if an auction has received any bids (pass the transaction's client to see its view)
    */
-  hasBids: async (auctionId) => {
-    const result = await pool.query('SELECT COUNT(*)::int AS count FROM bids WHERE auction_id = $1', [auctionId]);
-    return (result.rows[0]?.count || 0) > 0;
+  hasBids: async (auctionId, db = pool) => {
+    const result = await db.query('SELECT EXISTS (SELECT 1 FROM bids WHERE auction_id = $1) AS has_bids', [auctionId]);
+    return result.rows[0].has_bids;
   },
 
   /**
    * Delete an auction together with its bids and any queued jobs for it.
+   * Call it inside a transaction (with that transaction's client) so the three deletes
+   * happen together or not at all.
    * Returns the deleted auction row, or undefined if there was no such auction.
    */
-  deleteWithBidsAndJobs: async (id) => {
-    await pool.query(`DELETE FROM jobs WHERE payload->>'auction_id' = $1`, [id]);
-    await pool.query('DELETE FROM bids WHERE auction_id = $1', [id]);
-    const result = await pool.query('DELETE FROM auctions WHERE id = $1 RETURNING *', [id]);
+  deleteWithBidsAndJobs: async (client, id) => {
+    await client.query(`DELETE FROM jobs WHERE payload->>'auction_id' = $1`, [id]);
+    await client.query('DELETE FROM bids WHERE auction_id = $1', [id]);
+    const result = await client.query('DELETE FROM auctions WHERE id = $1 RETURNING *', [id]);
     return result.rows[0];
   },
 

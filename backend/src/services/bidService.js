@@ -3,6 +3,7 @@ const auctionModel = require('../models/auctionModel');
 const bidModel = require('../models/bidModel');
 const { getIO } = require('./socketService');
 const { AppError } = require('../utils/AppError');
+const { toCents } = require('../utils/validators');
 
 /**
  * Bid Service
@@ -12,7 +13,8 @@ const { AppError } = require('../utils/AppError');
  */
 
 /**
- * Place a bid of `amount` (a number) by `bidder` (the logged-in user) on an auction.
+ * Place a bid of `amount` (a number in whole cents, checked by the controller) by `bidder`
+ * (the logged-in user) on an auction.
  * Returns the new bid. Throws AppError when the auction is missing, frozen, closed or ended,
  * when the bidder is its seller, or when the amount is not above the current price.
  */
@@ -44,7 +46,8 @@ async function placeBid({ auctionId, bidder, amount }) {
     if (bidder.id === auction.seller_id) {
       throw new AppError(400, 'You cannot bid on your own auction.');
     }
-    if (amount <= parseFloat(auction.current_price)) {
+    // Compared in whole cents, so every accepted bid is strictly higher than the one before it
+    if (toCents(amount) <= toCents(auction.current_price)) {
       throw new AppError(400, `Bid must be higher than current price of $${auction.current_price}.`);
     }
 

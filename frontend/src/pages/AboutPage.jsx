@@ -1,6 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Cpu, Database, Award, CheckCircle2, Lock, Zap, Sparkles } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { ShieldCheck, Lock, Zap, Sparkles } from 'lucide-react';
 
 export const AboutPage = () => {
   return (
@@ -34,9 +33,9 @@ export const AboutPage = () => {
           <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 mb-4">
             <Zap className="w-6 h-6" />
           </div>
-          <h3 className="text-xl font-bold text-slate-900">Zero-Latency WebSockets</h3>
+          <h3 className="text-xl font-bold text-slate-900">Live WebSockets</h3>
           <p className="text-sm text-slate-600 leading-relaxed">
-            Persistent Socket.IO bi-directional connections broadcast price updates and in-room auction chat instantaneously to all active participants across the globe.
+            Persistent Socket.IO connections push each new price right after the bid is committed, plus in-room chat and reactions, to everyone watching the auction.
           </p>
         </div>
 

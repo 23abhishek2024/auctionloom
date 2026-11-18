@@ -12,18 +12,19 @@ const bidModel = {
        FROM bids b
        JOIN users u ON b.bidder_id = u.id
        WHERE b.auction_id = $1
-       ORDER BY b.amount DESC`,
+       ORDER BY b.amount DESC, b.created_at ASC`,
       [auctionId]
     );
     return result.rows;
   },
 
   /**
-   * Get the highest bid for an auction
+   * Get the highest bid for an auction. Accepted bids are strictly increasing, so amounts can't tie;
+   * if old data ever has a tie, the earlier bid wins (a fixed rule instead of whatever order the database picks).
    */
   findHighestBid: async (client, auctionId) => {
     const result = await client.query(
-      'SELECT * FROM bids WHERE auction_id = $1 ORDER BY amount DESC LIMIT 1',
+      'SELECT * FROM bids WHERE auction_id = $1 ORDER BY amount DESC, created_at ASC, id ASC LIMIT 1',
       [auctionId]
     );
     return result.rows[0];

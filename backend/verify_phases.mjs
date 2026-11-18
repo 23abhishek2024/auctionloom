@@ -1,9 +1,10 @@
 import 'dotenv/config';
 import http from 'http';
+import { execFile } from 'child_process';
 import { io } from 'socket.io-client';
 import pg from 'pg';
-import fs from 'fs';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 
 const { Pool } = pg;
 
@@ -15,7 +16,7 @@ const DB_CONFIG = {
   port: parseInt(process.env.DB_PORT, 10) || 5432,
   database: process.env.DB_NAME || 'auctionloom',
   user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgresql@82521',
+  password: process.env.DB_PASSWORD || 'postgres',
 };
 
 const pool = new Pool(DB_CONFIG);
@@ -49,14 +50,19 @@ function request(method, path, body = null, token = null) {
   });
 }
 
-function uploadMultipart(filePathOrBuffer, filename, token = null) {
+// POST one PNG as multipart/form-data (by default to /api/upload as "image"; extra text fields go first)
+function uploadMultipart(filePathOrBuffer, filename, token = null, { path = '/api/upload', field = 'image', fields = {} } = {}) {
   return new Promise((resolve, reject) => {
     const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
     const crlf = '\r\n';
 
+    const textParts = Object.entries(fields).map(([name, value]) =>
+      `--${boundary}${crlf}Content-Disposition: form-data; name="${name}"${crlf}${crlf}${value}${crlf}`
+    ).join('');
     const postDataStart = Buffer.from(
+      textParts +
       `--${boundary}${crlf}` +
-      `Content-Disposition: form-data; name="image"; filename="${filename}"${crlf}` +
+      `Content-Disposition: form-data; name="${field}"; filename="${filename}"${crlf}` +
       `Content-Type: image/png${crlf}${crlf}`
     );
     const postDataEnd = Buffer.from(`${crlf}--${boundary}--${crlf}`);
@@ -67,7 +73,7 @@ function uploadMultipart(filePathOrBuffer, filename, token = null) {
     const req = http.request({
       hostname: 'localhost',
       port: API_PORT,
-      path: '/api/upload',
+      path,
       method: 'POST',
       headers: {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
@@ -104,24 +110,20 @@ function assert(phase, testName, condition, details = '') {
 
 async function runVerification() {
   console.log('===========================================================');
-  console.log('   AUCTIONLOOM: DETAILED 1 TO 7 PHASE VERIFICATION SUITE   ');
+  console.log('   AUCTIONLOOM: END-TO-END VERIFICATION SUITE (PHASES 1-11)   ');
   console.log('===========================================================\n');
 
   // ============================================================
-  // PHASE 1: Environment & Initial Setup
+  // PHASE 1: Server up, API catalogue and unknown routes
   // ============================================================
-  console.log('--- Checking Phase 1: Environment & MVC Structure ---');
-  const backendSrc = './src';
-  const frontendSrc = '../frontend/src';
+  console.log('--- Checking Phase 1: Server & API catalogue ---');
 
-  assert('Phase 1', 'Backend controllers folder exists', fs.existsSync(`${backendSrc}/controllers`));
-  assert('Phase 1', 'Backend models folder exists', fs.existsSync(`${backendSrc}/models`));
-  assert('Phase 1', 'Backend routes folder exists', fs.existsSync(`${backendSrc}/routes`));
-  assert('Phase 1', 'Backend middlewares folder exists', fs.existsSync(`${backendSrc}/middlewares`));
-  assert('Phase 1', 'Backend services folder exists', fs.existsSync(`${backendSrc}/services`));
-  assert('Phase 1', 'Backend workers folder exists', fs.existsSync(`${backendSrc}/workers`));
-  assert('Phase 1', 'Frontend source files exist', fs.existsSync(`${frontendSrc}/App.jsx`));
-  assert('Phase 1', 'Git repo initialized', fs.existsSync('../.git'));
+  const rootRes = await request('GET', '/');
+  assert('Phase 1', 'GET / answers that the API is online', rootRes.status === 200 && rootRes.data.status === 'online');
+  const catalogueRes = await request('GET', '/api');
+  assert('Phase 1', 'GET /api lists the REST resources', catalogueRes.status === 200 && !!catalogueRes.data.resources?.auctions);
+  const unknownRes = await request('GET', '/api/does-not-exist');
+  assert('Phase 1', 'Unknown route answered with a JSON 404', unknownRes.status === 404 && typeof unknownRes.data.error === 'string');
 
   // ============================================================
   // PHASE 2: Database Setup & Connectivity
@@ -135,16 +137,15 @@ async function runVerification() {
     WHERE table_schema = 'public'
   `);
   const tableNames = tableQuery.rows.map(r => r.table_name);
-  assert('Phase 2', 'Users table exists', tableNames.includes('users'));
-  assert('Phase 2', 'Auctions table exists', tableNames.includes('auctions'));
-  assert('Phase 2', 'Bids table exists', tableNames.includes('bids'));
-  assert('Phase 2', 'Jobs table exists', tableNames.includes('jobs'));
+  const expectedTables = ['users', 'auctions', 'bids', 'jobs', 'commission_proofs', 'wallets', 'wallet_transactions', 'payment_requests', 'uploads'];
+  const missingTables = expectedTables.filter(t => !tableNames.includes(t));
+  assert('Phase 2', 'All 9 tables exist after migration', missingTables.length === 0, missingTables.length ? `missing: ${missingTables.join(', ')}` : '');
 
-  const constraintsQuery = await pool.query(`
-    SELECT conname FROM pg_constraint WHERE conrelid = 'jobs'::regclass
-  `);
-  const constraintNames = constraintsQuery.rows.map(r => r.conname);
-  assert('Phase 2', 'Jobs table has unique_pending_job constraint', constraintNames.includes('unique_pending_job'));
+  const openJobIndex = await pool.query(
+    `SELECT indexdef FROM pg_indexes WHERE tablename = 'jobs' AND indexname = 'unique_open_job'`
+  );
+  assert('Phase 2', 'Jobs table has a unique index on OPEN jobs only (pending or running)',
+    openJobIndex.rowCount === 1 && /WHERE/i.test(openJobIndex.rows[0].indexdef));
 
   // ============================================================
   // PHASE 3: Core API, Middlewares, Authentication & RBAC
@@ -326,7 +327,11 @@ async function runVerification() {
   await new Promise((resolve) => socketClient.on('connect', resolve));
   assert('Phase 5', 'Socket.IO client connected to backend server', socketClient.connected);
 
-  socketClient.emit('JOIN_AUCTION', auctionId);
+  // Joining is acknowledged with { joined }, and only a real auction has a live room
+  const joinAck = await socketClient.timeout(5000).emitWithAck('JOIN_AUCTION', auctionId);
+  assert('Phase 5', 'Joining the live room of a real auction is acknowledged', joinAck?.joined === true);
+  const ghostAck = await socketClient.timeout(5000).emitWithAck('JOIN_AUCTION', randomUUID());
+  assert('Phase 5', 'An auction id that does not exist gets no live room', ghostAck?.joined === false);
 
   // Wait for PRICE_UPDATE event
   const priceUpdatePromise = new Promise((resolve, reject) => {
@@ -353,142 +358,88 @@ async function runVerification() {
   socketClient.disconnect();
 
   // ============================================================
-  // PHASE 6: Distributed Background Workers & Job Queue
+  // PHASE 6: Scheduler & job worker (the real processes, run once each)
+  // The test server runs with SWEEP_INTERVAL_MS=0, so only the queue closes auctions here.
   // ============================================================
   console.log('\n--- Checking Phase 6: Scheduler & Distributed Job Worker ---');
 
-  // Create an auction with valid future end_time, then simulate expiration in DB
-  const initialEndTime = new Date(Date.now() + 60000).toISOString();
+  const runOnce = (script) => new Promise((resolve, reject) => {
+    execFile(process.execPath, [script, '--once'], { env: process.env, timeout: 60000 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`${script} --once failed: ${stderr || err.message}`));
+      else resolve(stdout);
+    });
+  });
+  const closeJobsFor = async (id) => (await pool.query(
+    `SELECT status FROM jobs WHERE type = 'CLOSE_AUCTION' AND payload->>'auction_id' = $1 ORDER BY created_at`, [id]
+  )).rows.map(r => r.status);
+
+  // An auction with one real bid, whose end time has passed
   const expiredAuctionRes = await request('POST', '/api/auctions', {
     title: `Auto-Closing Auction #${uniqueId}`,
     description: 'Testing background scheduler and worker queue.',
     starting_price: 200.00,
-    end_time: initialEndTime,
+    end_time: new Date(Date.now() + 60000).toISOString(),
   }, sellerToken);
   assert('Phase 6', 'Auction created via API for expiration test', expiredAuctionRes.status === 201);
   const expiredAuctionId = expiredAuctionRes.data.auction.id;
+  const expiringBid = await request('POST', '/api/bids', { auction_id: expiredAuctionId, amount: 250 }, bidderToken);
+  await pool.query(`UPDATE auctions SET end_time = NOW() - INTERVAL '10 seconds' WHERE id = $1`, [expiredAuctionId]);
 
-  // Simulate auction ending in PostgreSQL
-  await pool.query(
-    `UPDATE auctions SET end_time = NOW() - INTERVAL '10 seconds' WHERE id = $1`,
-    [expiredAuctionId]
-  );
+  // 1. Scheduler pass: node src/workers/scheduler.js --once
+  await runOnce('src/workers/scheduler.js');
+  assert('Phase 6', 'Scheduler queued one PENDING CLOSE_AUCTION job for the ended auction',
+    expiringBid.status === 201 && JSON.stringify(await closeJobsFor(expiredAuctionId)) === '["PENDING"]');
+  await runOnce('src/workers/scheduler.js');
+  assert('Phase 6', 'A second scheduler pass adds no duplicate job (unique index on open jobs)', (await closeJobsFor(expiredAuctionId)).length === 1);
 
-  // Place a winning bid directly in DB to simulate active bid
-  await pool.query(
-    `INSERT INTO bids (auction_id, bidder_id, amount) VALUES ($1, $2, $3)`,
-    [expiredAuctionId, bidderId, 250.00]
-  );
-  await pool.query(
-    `UPDATE auctions SET current_price = 250.00 WHERE id = $1`,
-    [expiredAuctionId]
-  );
-
-  // 1. Simulate Scheduler
-  const endedActive = await pool.query(
-    `SELECT * FROM auctions WHERE status = 'ACTIVE' AND end_time <= NOW() AND id = $1`,
-    [expiredAuctionId]
-  );
-  assert('Phase 6', 'Scheduler correctly identifies ended ACTIVE auction', endedActive.rows.length === 1);
-
-  const insertJobRes = await pool.query(
-    `INSERT INTO jobs (type, payload) VALUES ('CLOSE_AUCTION', $1) ON CONFLICT DO NOTHING RETURNING *`,
-    [JSON.stringify({ auction_id: expiredAuctionId })]
-  );
-  assert('Phase 6', 'Scheduler queues CLOSE_AUCTION job into jobs table', insertJobRes.rows.length === 1 || insertJobRes.rowCount >= 0);
-
-  // 2. Simulate Worker: SELECT ... FOR UPDATE SKIP LOCKED
-  const client = await pool.connect();
-  let jobToProcess = null;
-  try {
-    await client.query('BEGIN');
-    const jobRes = await client.query(
-      `SELECT * FROM jobs WHERE status = 'PENDING' AND type = 'CLOSE_AUCTION' FOR UPDATE SKIP LOCKED LIMIT 1`
-    );
-    jobToProcess = jobRes.rows[0];
-    if (jobToProcess) {
-      await client.query(
-        `UPDATE jobs SET status = 'IN_PROGRESS', locked_at = NOW(), locked_by = 'test_runner' WHERE id = $1`,
-        [jobToProcess.id]
-      );
-    }
-    await client.query('COMMIT');
-  } finally {
-    client.release();
-  }
-
-  assert('Phase 6', 'Worker locks pending job using FOR UPDATE SKIP LOCKED', !!jobToProcess);
-
-  // Process job: close auction with highest bidder
-  const workerClient = await pool.connect();
-  try {
-    await workerClient.query('BEGIN');
-    const highestBidRes = await workerClient.query(
-      `SELECT * FROM bids WHERE auction_id = $1 ORDER BY amount DESC, created_at ASC LIMIT 1`,
-      [expiredAuctionId]
-    );
-    const winnerId = highestBidRes.rows[0]?.bidder_id || null;
-    await workerClient.query(
-      `UPDATE auctions SET status = 'CLOSED', winner_id = $1 WHERE id = $2`,
-      [winnerId, expiredAuctionId]
-    );
-    await workerClient.query(
-      `UPDATE jobs SET status = 'COMPLETED', updated_at = NOW() WHERE id = $1`,
-      [jobToProcess.id]
-    );
-    await workerClient.query('COMMIT');
-  } finally {
-    workerClient.release();
-  }
-
-  // Verify auction is closed with winner
-  const finalAuctionCheck = await pool.query(
-    `SELECT status, winner_id FROM auctions WHERE id = $1`,
-    [expiredAuctionId]
-  );
+  // 2. Worker pass: node src/workers/jobWorker.js --once (claims with FOR UPDATE SKIP LOCKED, runs closeAuction)
+  await runOnce('src/workers/jobWorker.js');
+  const finalAuctionCheck = await pool.query(`SELECT status, winner_id FROM auctions WHERE id = $1`, [expiredAuctionId]);
+  assert('Phase 6', 'Worker marked the job COMPLETED', JSON.stringify(await closeJobsFor(expiredAuctionId)) === '["COMPLETED"]');
   assert('Phase 6', 'Auction status transitioned to CLOSED by worker', finalAuctionCheck.rows[0].status === 'CLOSED');
   assert('Phase 6', 'Auction winner_id correctly assigned to highest bidder', finalAuctionCheck.rows[0].winner_id === bidderId);
 
+  // 3. A finished job doesn't block a new one: a republished auction gets a fresh close job
+  const requeueLot = await request('POST', '/api/auctions', { title: `Requeue test #${uniqueId}`, starting_price: 10, duration_minutes: 60 }, sellerToken);
+  const requeueId = requeueLot.data.auction.id;
+  await pool.query(`UPDATE auctions SET end_time = NOW() - INTERVAL '1 second' WHERE id = $1`, [requeueId]);
+  await runOnce('src/workers/scheduler.js');
+  await runOnce('src/workers/jobWorker.js'); // closes it with no winner, so the seller may republish at once
+  const requeueRepublish = await request('POST', `/api/auctions/${requeueId}/republish`, { end_time: new Date(Date.now() + 3600000).toISOString() }, sellerToken);
+  await pool.query(`UPDATE auctions SET end_time = NOW() - INTERVAL '1 second' WHERE id = $1`, [requeueId]);
+  await runOnce('src/workers/scheduler.js');
+  assert('Phase 6', 'Republished auction gets a new close job after the first one COMPLETED',
+    requeueRepublish.status === 200 && JSON.stringify(await closeJobsFor(requeueId)) === '["COMPLETED","PENDING"]');
+  await runOnce('src/workers/jobWorker.js');
+
   // ============================================================
-  // PHASE 7: Frontend UI & Dev Server
+  // PHASE 7: Browser origins (CORS and the Socket.IO handshake)
+  // (The React app itself is checked by the CI frontend build job.)
   // ============================================================
-  console.log('\n--- Checking Phase 7: React Frontend & Real-Time UI ---');
+  console.log('\n--- Checking Phase 7: CORS & WebSocket origin allow-list ---');
 
-  const isCI = process.env.CI === 'true';
+  const originGet = (origin) => new Promise((resolve, reject) => {
+    http.get({ hostname: 'localhost', port: API_PORT, path: '/api/auctions?limit=1', headers: { Origin: origin } }, (res) => {
+      res.resume();
+      resolve(res.headers['access-control-allow-origin']);
+    }).on('error', reject);
+  });
+  assert('Phase 7', 'CORS allows the real frontend origin', (await originGet('https://auctionloom.vercel.app')) === 'https://auctionloom.vercel.app');
+  assert('Phase 7', 'CORS gives no allow header to another website', (await originGet('https://evil.example')) === undefined);
 
-  assert('Phase 7', 'AuthContext.jsx component present', fs.existsSync(`${frontendSrc}/context/AuthContext.jsx`));
-  assert('Phase 7', 'SocketContext.jsx component present', fs.existsSync(`${frontendSrc}/context/SocketContext.jsx`));
-  assert('Phase 7', 'Navbar.jsx component present', fs.existsSync(`${frontendSrc}/components/Navbar.jsx`));
-  assert('Phase 7', 'AuctionCard.jsx component present', fs.existsSync(`${frontendSrc}/components/AuctionCard.jsx`));
-  assert('Phase 7', 'AuctionDetailPage.jsx with live room present', fs.existsSync(`${frontendSrc}/pages/AuctionDetailPage.jsx`));
-  assert('Phase 7', 'DashboardPage.jsx with search/filters present', fs.existsSync(`${frontendSrc}/pages/DashboardPage.jsx`));
-
-  if (!isCI) {
-    assert('Phase 7', 'Frontend production build dist exists', fs.existsSync('../frontend/dist/index.html'));
-
-    // Test live Vite frontend server response
-    const viteResponse = await new Promise((resolve) => {
-      http.get('http://localhost:5173', (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => resolve({ status: res.statusCode, body: data }));
-      }).on('error', (err) => resolve({ status: 500, error: err.message }));
-    });
-
-    assert('Phase 7', 'Vite frontend dev server responds with 200 OK on port 5173', viteResponse.status === 200);
-    assert('Phase 7', 'Vite serves HTML with root element and React module entry', viteResponse.body?.includes('<div id="root">') && viteResponse.body?.includes('main.jsx'));
-  } else {
-    assert('Phase 7', 'CI Pipeline: Frontend components verified', true);
-  }
+  const evilSocket = io(SOCKET_URL, { transports: ['websocket'], extraHeaders: { Origin: 'https://evil.example' }, reconnection: false });
+  const evilOutcome = await new Promise((resolve) => {
+    evilSocket.on('connect', () => resolve('connected'));
+    evilSocket.on('connect_error', () => resolve('refused'));
+    setTimeout(() => resolve('timeout'), 3000);
+  });
+  evilSocket.disconnect();
+  assert('Phase 7', 'Socket.IO handshake from another website is refused', evilOutcome === 'refused');
 
   // ============================================================
   // PHASE 8: AI Assistant & Copywriter
   // ============================================================
   console.log('\n--- Checking Phase 8: AI Auction Assistant ---');
-
-  assert('Phase 8', 'aiService.js exists', fs.existsSync(`${backendSrc}/services/aiService.js`));
-  assert('Phase 8', 'aiController.js exists', fs.existsSync(`${backendSrc}/controllers/aiController.js`));
-  assert('Phase 8', 'aiRoutes.js exists', fs.existsSync(`${backendSrc}/routes/aiRoutes.js`));
 
   // 1. RBAC Check: Bidder forbidden from accessing /api/ai/generate
   const aiBidderRes = await request('POST', '/api/ai/generate', {
@@ -517,10 +468,6 @@ async function runVerification() {
   // ============================================================
   console.log('\n--- Checking Phase 9: Multer Image Upload & Socket.IO Live Room Chat ---');
 
-  assert('Phase 9', 'Multer upload middleware exists', fs.existsSync(`${backendSrc}/middlewares/upload.js`));
-  assert('Phase 9', 'Upload routes exist', fs.existsSync(`${backendSrc}/routes/uploadRoutes.js`));
-  assert('Phase 9', 'Public uploads directory exists', fs.existsSync('./public/uploads'));
-
   // 1. Upload an image via Multer (1x1 PNG buffer)
   const dummyPngBuffer = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
@@ -530,15 +477,21 @@ async function runVerification() {
   const uploadRes = await uploadMultipart(dummyPngBuffer, 'test-item.png', sellerToken);
   assert('Phase 9', 'Multer upload endpoint responds with 200 OK', uploadRes.status === 200);
   assert('Phase 9', 'Multer response contains valid /uploads/ URL', typeof uploadRes.data.url === 'string' && uploadRes.data.url.startsWith('/uploads/'));
-  assert('Phase 9', 'Uploaded image file persisted on server disk', fs.existsSync(`./public${uploadRes.data.url}`));
+  const storedUpload = await pool.query('SELECT mime_type, size_bytes FROM uploads WHERE id = $1', [uploadRes.data.url.slice('/uploads/'.length, -'.png'.length)]);
+  assert('Phase 9', 'Uploaded image stored in PostgreSQL (survives restarts of a free server)', storedUpload.rowCount === 1 && storedUpload.rows[0].mime_type === 'image/png');
 
   // 2. Static serving check
   const staticFileRes = await new Promise((resolve) => {
     http.get(`http://localhost:${API_PORT}${uploadRes.data.url}`, (res) => {
-      resolve({ status: res.statusCode, contentType: res.headers['content-type'] });
+      res.resume();
+      resolve({ status: res.statusCode, contentType: res.headers['content-type'], nosniff: res.headers['x-content-type-options'] });
     }).on('error', (err) => resolve({ status: 500, error: err.message }));
   });
-  assert('Phase 9', 'Express statically serves uploaded image at /uploads/*', staticFileRes.status === 200);
+  assert('Phase 9', 'Uploaded image served at /uploads/* as image/png with nosniff', staticFileRes.status === 200 && staticFileRes.contentType === 'image/png' && staticFileRes.nosniff === 'nosniff');
+
+  // An HTML page disguised as a PNG (declared type and name lie) is refused by the byte check
+  const disguisedRes = await uploadMultipart(Buffer.from('<html><body><script>alert(1)</script></body></html>'), 'evil.html', sellerToken);
+  assert('Phase 9', 'HTML file disguised as an image is rejected (400), never stored or served', disguisedRes.status === 400);
 
   // 3. Create Auction with image_url
   const auctionWithImgRes = await request('POST', '/api/auctions', {
@@ -554,8 +507,8 @@ async function runVerification() {
   const dbAuctionImg = await pool.query('SELECT image_url FROM auctions WHERE id = $1', [auctionWithImgRes.data.auction.id]);
   assert('Phase 9', 'PostgreSQL database stores image_url column', dbAuctionImg.rows[0].image_url === uploadRes.data.url);
 
-  // 5. Socket.IO Live Room Chat (Video 33)
-  const chatSocket = io(SOCKET_URL, { transports: ['websocket'] });
+  // 5. Socket.IO Live Room Chat (Video 33): the login token in the handshake says who is chatting
+  const chatSocket = io(SOCKET_URL, { transports: ['websocket'], auth: { token: bidderToken } });
   await new Promise((resolve) => chatSocket.on('connect', resolve));
   chatSocket.emit('JOIN_AUCTION', auctionWithImgRes.data.auction.id);
 
@@ -568,15 +521,17 @@ async function runVerification() {
   chatSocket.emit('SEND_MESSAGE', {
     auctionId: auctionWithImgRes.data.auction.id,
     text: 'Is the original warranty card included with this watch?',
-    senderName: 'Verified Bidder',
-    senderId: bidderId,
-    senderEmail: 'verified_bidder@auctionloom.com', // an old client may still send it; it must not be broadcast
-    role: 'bidder',
+    // A modified client may try to claim another identity; the server must ignore all of this
+    senderName: 'AuctionLoom Admin',
+    senderId: sellerId,
+    senderEmail: 'verified_bidder@auctionloom.com',
+    role: 'admin',
   });
 
   const receivedChatMsg = await chatPromise;
   assert('Phase 9', 'Socket.IO CHAT_MESSAGE broadcast received in real time', receivedChatMsg.text === 'Is the original warranty card included with this watch?');
   assert('Phase 9', 'Chat message carries the sender id and ISO timestamp, never an email', receivedChatMsg.senderId === bidderId && receivedChatMsg.senderEmail === undefined && !!receivedChatMsg.timestamp);
+  assert('Phase 9', 'Chat sender name and role come from the server, not from the client', receivedChatMsg.role === 'bidder' && receivedChatMsg.senderName !== 'AuctionLoom Admin');
 
   // 6. Socket.IO Live Floating Reaction
   const reactionPromise = new Promise((resolve) => {
@@ -597,31 +552,21 @@ async function runVerification() {
   chatSocket.disconnect();
 
   // ============================================================
-  // PHASE 10: Production-Grade Wallet & Double-Entry Ledger System
+  // PHASE 10: Wallet & append-only ledger
   // ============================================================
-  console.log('\n--- Checking Phase 10: Production-Grade Wallet & Double-Entry Ledger System ---');
+  console.log('\n--- Checking Phase 10: Wallet & append-only ledger ---');
 
   // 1. Verify schema tables in PostgreSQL
   const walletTableRes = await pool.query(`
     SELECT column_name FROM information_schema.columns WHERE table_name = 'wallets'
   `);
   const walletColumns = walletTableRes.rows.map(r => r.column_name);
-  assert('Phase 10', 'Wallets table exists in PostgreSQL', walletTableRes.rows.length > 0);
-  assert('Phase 10', 'Wallets table has balance column', walletColumns.includes('balance'));
-  assert('Phase 10', 'Wallets table has version column for concurrency control', walletColumns.includes('version'));
-
   const txTableRes = await pool.query(`
     SELECT column_name FROM information_schema.columns WHERE table_name = 'wallet_transactions'
   `);
   const txColumns = txTableRes.rows.map(r => r.column_name);
-  assert('Phase 10', 'wallet_transactions table exists for double-entry audit', txTableRes.rows.length > 0);
-  assert('Phase 10', 'wallet_transactions has idempotency_key column', txColumns.includes('idempotency_key'));
-  assert('Phase 10', 'wallet_transactions has balance_after column', txColumns.includes('balance_after'));
-
-  const payReqRes = await pool.query(`
-    SELECT column_name FROM information_schema.columns WHERE table_name = 'payment_requests'
-  `);
-  assert('Phase 10', 'payment_requests table exists for gateway abstraction', payReqRes.rows.length > 0);
+  assert('Phase 10', 'Wallet schema: balance + version on wallets, idempotency_key + balance_after on the ledger',
+    ['balance', 'version'].every(c => walletColumns.includes(c)) && ['idempotency_key', 'balance_after'].every(c => txColumns.includes(c)));
 
   // 2. Test GET /api/wallet
   const initialWalletRes = await request('GET', '/api/wallet', null, bidderToken);
@@ -707,11 +652,359 @@ async function runVerification() {
   // 9. Verify Ledger History Audit Integrity
   const finalLedgerRes = await request('GET', '/api/wallet', null, bidderToken);
   const txs = finalLedgerRes.data?.data?.transactions;
-  assert('Phase 10', 'Double-entry ledger contains immutable audit records', Array.isArray(txs) && txs.length >= 2);
+  assert('Phase 10', 'Ledger lists the wallet history (top-up and settlement entries)', Array.isArray(txs) && txs.length >= 2);
   assert('Phase 10', 'Ledger tracks balance_after snapshot on every transaction', txs.every(t => typeof t.balanceAfter === 'number'));
 
+  // ============================================================
+  // PHASE 11: Regression checks from the pre-interview audit
+  // ============================================================
+  console.log('\n--- Checking Phase 11: Audit regression checks ---');
+
+  const endAuctionNow = async (id) => {
+    await pool.query(`UPDATE auctions SET end_time = NOW() - INTERVAL '1 second' WHERE id = $1`, [id]);
+    return request('GET', `/api/auctions/${id}`); // closes it just in time
+  };
+
+  // 1. Money precision: whole cents only, so two bids can never tie after rounding
+  const centsAuctionRes = await request('POST', '/api/auctions', {
+    title: `Cents Precision Lot #${uniqueId}`,
+    starting_price: 100,
+    end_time: new Date(Date.now() + 3600000).toISOString(),
+  }, sellerToken);
+  const centsAuctionId = centsAuctionRes.data.auction.id;
+  const firstCentsBid = await request('POST', '/api/bids', { auction_id: centsAuctionId, amount: 101 }, bidderToken);
+  const threeDecimalBid = await request('POST', '/api/bids', { auction_id: centsAuctionId, amount: 101.004 }, bidder2Token);
+  assert('Phase 11', 'Bid with 3 decimal places (101.004) rejected with 400 instead of being rounded into a tie', firstCentsBid.status === 201 && threeDecimalBid.status === 400);
+  const centsBid = await request('POST', '/api/bids', { auction_id: centsAuctionId, amount: '101.01' }, bidder2Token);
+  assert('Phase 11', 'Bid one cent higher (101.01) accepted', centsBid.status === 201);
+  const storedCentsBids = await pool.query('SELECT amount FROM bids WHERE auction_id = $1 ORDER BY created_at', [centsAuctionId]);
+  assert('Phase 11', 'Stored bid amounts are strictly increasing (no ties)', storedCentsBids.rows.map(r => r.amount).join(',') === '101.00,101.01');
+
+  // 2. "Won" is decided by winner_id only: the outbid bidder does not see the lot as won
+  await endAuctionNow(centsAuctionId);
+  const winnerWon = await request('GET', '/api/users/me/won', null, bidder2Token);
+  const loserWon = await request('GET', '/api/users/me/won', null, bidderToken);
+  const loserBids = await request('GET', '/api/users/me/bids', null, bidderToken);
+  assert('Phase 11', 'Only the real winner lists the closed lot under won auctions',
+    winnerWon.data.won.some(a => a.id === centsAuctionId) && !loserWon.data.won.some(a => a.id === centsAuctionId));
+  assert('Phase 11', 'Outbid bidder sees is_winner = false for that lot',
+    loserBids.data.participations.find(p => p.id === centsAuctionId)?.is_winner === false);
+  assert('Phase 11', 'My-bids list never reveals the seller\'s email (bidding must not leak it)',
+    loserBids.data.participations.every(p => p.seller_email === undefined && p.winner_email === undefined));
+
+  // 3. Errors: every response carries a request id, and a broken JSON body is a 400 with a plain message
+  const badJsonRes = await new Promise((resolve, reject) => {
+    const req = http.request({ hostname: 'localhost', port: API_PORT, path: '/api/auth/login', method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => {
+      let body = '';
+      res.on('data', (c) => body += c);
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, data: JSON.parse(body) }));
+    });
+    req.on('error', reject);
+    req.end('{not json');
+  });
+  assert('Phase 11', 'Malformed JSON body answered 400 with a plain message (no parser internals)', badJsonRes.status === 400 && badJsonRes.data.error === 'Request body is not valid JSON.');
+  assert('Phase 11', 'Responses carry an X-Request-Id header for log lookup', typeof badJsonRes.headers['x-request-id'] === 'string' && badJsonRes.headers['x-request-id'].length > 10);
+
+  // 4. Input validation: bad input is a 400 with a plain message, never a database error
+  const badInputCases = [
+    ['GET', '/api/auctions?seller_id=abc', null, null],
+    ['GET', '/api/auctions?status=ACTIVE&status=CLOSED', null, null],
+    ['POST', '/api/wallet/topup', { amount: 99999999999 }, bidderToken],
+    ['POST', '/api/wallet/topup', { amount: 10.555 }, bidderToken],
+    ['POST', '/api/wallet/settle-lot', { auctionId: 'not-a-uuid' }, bidderToken],
+    ['POST', '/api/auctions', { title: 'x'.repeat(300), starting_price: 10, duration_minutes: 5 }, sellerToken],
+    ['POST', '/api/auctions', { title: 'Too far', starting_price: 10, end_time: new Date(Date.now() + 400 * 86400000).toISOString() }, sellerToken],
+    ['POST', '/api/auth/register', { email: 'not-an-email', password: 'Password@123' }, null],
+    ['POST', '/api/auth/register', { email: `short_${uniqueId}@test.com`, password: '1' }, null],
+    ['POST', '/api/auth/login', { email: 123, password: 'x' }, null],
+    ['GET', '/api/users/auction-payout/not-a-uuid', null, bidderToken],
+    ['GET', '/api/admin/commission-ledger?from=abc', null, adminToken],
+    ['PUT', '/api/admin/users/not-a-uuid/role', { role: 'bidder' }, adminToken],
+  ];
+  const badInputResults = [];
+  for (const [method, path, body, token] of badInputCases) {
+    const r = await request(method, path, body, token);
+    badInputResults.push({ path, status: r.status, error: r.data?.error || '' });
+  }
+  const notRejected = badInputResults.filter(r => r.status !== 400);
+  assert('Phase 11', `All ${badInputCases.length} malformed inputs rejected with 400`, notRejected.length === 0, notRejected.map(r => `${r.path} -> ${r.status}`).join('; '));
+  const leaky = badInputResults.filter(r => /syntax|violates|overflow|character varying|is not a function|pg_|relation/i.test(r.error));
+  assert('Phase 11', 'No error message exposes database or code internals', leaky.length === 0, leaky.map(r => r.error).join('; '));
+
+  // 5. Chat needs a login: a guest's message is refused and never broadcast
+  const chatRoomId = centsAuctionId;
+  const listener = io(SOCKET_URL, { transports: ['websocket'] });
+  const guest = io(SOCKET_URL, { transports: ['websocket'] });
+  await Promise.all([listener, guest].map((s) => new Promise((resolve) => s.on('connect', resolve))));
+  await listener.timeout(5000).emitWithAck('JOIN_AUCTION', chatRoomId);
+  const heard = [];
+  listener.on('CHAT_MESSAGE', (m) => heard.push(m));
+  const guestError = new Promise((resolve) => guest.on('CHAT_ERROR', resolve));
+  guest.emit('SEND_MESSAGE', { auctionId: chatRoomId, text: 'Pay me directly at evil.example', senderName: 'AuctionLoom Admin', role: 'admin' });
+  const guestErr = await Promise.race([guestError, new Promise((r) => setTimeout(() => r(null), 2000))]);
+  await new Promise((r) => setTimeout(r, 300));
+  assert('Phase 11', 'Guest chat message refused with CHAT_ERROR and not broadcast', !!guestErr && heard.length === 0);
+
+  // 6. Flood control: the 6th message within 10 seconds is refused
+  const flooder = io(SOCKET_URL, { transports: ['websocket'], auth: { token: bidderToken } });
+  await new Promise((resolve) => flooder.on('connect', resolve));
+  const floodError = new Promise((resolve) => flooder.on('CHAT_ERROR', resolve));
+  for (let i = 1; i <= 6; i++) flooder.emit('SEND_MESSAGE', { auctionId: chatRoomId, text: `message ${i}` });
+  const floodErr = await Promise.race([floodError, new Promise((r) => setTimeout(() => r(null), 2000))]);
+  await new Promise((r) => setTimeout(r, 300));
+  assert('Phase 11', 'Chat flood control: 5 messages delivered, the 6th refused', !!floodErr && heard.length === 5);
+  [listener, guest, flooder].forEach((s) => s.disconnect());
+
+  // 7. Admin benchmark: runs the real bid code on a throw-away lot and reports checks it computed
+  const benchRes = await request('POST', '/api/admin/system/run-benchmark', { requests: 40 }, adminToken);
+  const bench = benchRes.data?.data;
+  const benchLotLeft = bench ? await pool.query('SELECT 1 FROM auctions WHERE id = $1', [bench.dbState.auctionId]) : { rowCount: 1 };
+  assert('Phase 11', 'Admin benchmark checks the database (all checks true, 0 race conditions) and deletes its lot',
+    benchRes.status === 200 && bench.dbState.raceConditionsDetected === 0 &&
+    Object.values(bench.dbState.checks).every(Boolean) && bench.successfulBids + bench.rejectedBids === 40 && benchLotLeft.rowCount === 0,
+    benchRes.status === 200 ? `accepted ${bench.successfulBids}, refused ${bench.rejectedBids}` : JSON.stringify(benchRes.data));
+  const benchTooBig = await request('POST', '/api/admin/system/run-benchmark', { requests: 100000 }, adminToken);
+  assert('Phase 11', 'Admin benchmark size is capped (100000 requests -> 400)', benchTooBig.status === 400);
+
+  // 8. Admin users table: a user with 2 listings, 2 bids ($110 + $120) and 2 wins must show $230, not 2 x 2 x $230
+  const multiReg = await request('POST', '/api/auth/register', { email: `fanout_${uniqueId}@test.com`, password: 'Password@123', role: 'auctioneer', name: `Fanout ${uniqueId}` });
+  const multiToken = multiReg.data.token;
+  const multiId = multiReg.data.user.id;
+  for (const t of ['Fan-out listing A', 'Fan-out listing B']) {
+    await request('POST', '/api/auctions', { title: t, starting_price: 50, duration_minutes: 60 }, multiToken);
+  }
+  const fanLots = [];
+  for (const price of [110, 120]) {
+    const lot = await request('POST', '/api/auctions', { title: `Fan-out lot ${price}`, starting_price: 100, duration_minutes: 60 }, sellerToken);
+    await request('POST', `/api/auctions/${lot.data.auction.id}/bids`, { amount: price }, multiToken);
+    fanLots.push(lot.data.auction.id);
+  }
+  for (const id of fanLots) await endAuctionNow(id);
+  const adminUsers = await request('GET', `/api/admin/users?search=fanout_${uniqueId}`, null, adminToken);
+  const fanRow = adminUsers.data.users.find(u => u.id === multiId);
+  // 9. Settlement re-checks the lot under its row lock: a stale winner or price moves no money
+  const lotForRecheck = (await pool.query('SELECT winner_id, seller_id FROM auctions WHERE id = $1', [centsAuctionId])).rows[0];
+  const settleScript = (args) => new Promise((resolve) => execFile(process.execPath, ['-e', `
+    const w = require('./src/services/walletService');
+    w.settleLotEscrow(${JSON.stringify(args)})
+      .then(() => console.log('SETTLED'), (e) => console.log('REFUSED ' + (e.statusCode || e.message)))
+      .finally(() => require('./src/db').end());
+  `], { env: process.env, timeout: 30000 }, (err, stdout) => resolve((stdout || '').split('\n').find((line) => /^(SETTLED|REFUSED)/.test(line)))));
+  const wrongPrice = await settleScript({ auctionId: centsAuctionId, winnerId: lotForRecheck.winner_id, sellerId: lotForRecheck.seller_id, hammerPrice: 1 });
+  const wrongWinner = await settleScript({ auctionId: centsAuctionId, winnerId: bidderId, sellerId: lotForRecheck.seller_id, hammerPrice: 101.01 });
+  const debitsForLot = (await pool.query(`SELECT count(*)::int AS c FROM wallet_transactions WHERE reference_id = $1`, [centsAuctionId])).rows[0].c;
+  assert('Phase 11', 'Settlement with a stale price or winner is refused (409) and moves no money',
+    wrongPrice === 'REFUSED 409' && wrongWinner === 'REFUSED 409' && debitsForLot === 0, `${wrongPrice} / ${wrongWinner} / ledger rows ${debitsForLot}`);
+
+  // 10. A lot that was paid for can't be deleted, not even by an admin (it is part of the money records)
+  const deletePaidLot = await request('DELETE', `/api/admin/auctions/${testAucId}`, null, adminToken);
+  const paidLotStill = await pool.query('SELECT 1 FROM auctions WHERE id = $1', [testAucId]);
+  assert('Phase 11', 'Admin delete of a paid lot refused (409) and the lot stays', deletePaidLot.status === 409 && paidLotStill.rowCount === 1);
+
+  // 11. Admin status changes: only freeze/resume; a closed (sold) lot can't be frozen or reopened
+  const freezeClosed = await request('PUT', `/api/admin/auctions/${centsAuctionId}/status`, { status: 'RESTRICTED' }, adminToken);
+  const forceClose = await request('PUT', `/api/admin/auctions/${auctionId}/status`, { status: 'CLOSED' }, adminToken);
+  const closedLotState = (await pool.query('SELECT status FROM auctions WHERE id = $1', [centsAuctionId])).rows[0].status;
+  assert('Phase 11', 'Admin cannot freeze/reopen a closed lot (409) or force-close a running one (400)',
+    freezeClosed.status === 409 && forceClose.status === 400 && closedLotState === 'CLOSED');
+
+  // 12. Revenue chart: real sales are grouped by the month they sold, and isSample is false
+  const chartRes = await request('GET', '/api/admin/revenue-chart', null, adminToken);
+  const saleMonth = new Date().toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }).replace(',', '');
+  assert('Phase 11', 'Revenue chart uses real sales (isSample false) and includes this month',
+    chartRes.status === 200 && chartRes.data.isSample === false && chartRes.data.chartData.some((m) => m.month === saleMonth),
+    `months: ${(chartRes.data.chartData || []).map((m) => m.month).join(', ')}`);
+
+  // 13. Emails: user-typed text is escaped, and the IFSC code saved by the profile form appears
+  const emailCheck = await new Promise((resolve) => execFile(process.execPath, ['-e', `
+    const { buildAuctionWonEmail } = require('./src/services/emailService');
+    const { html } = buildAuctionWonEmail({
+      winnerName: '<a href="https://evil.example">Pay here</a>',
+      auction: { id: '00000000-0000-4000-8000-000000000000', title: '<img src=x onerror=alert(1)>', current_price: 10 },
+      seller: { name: 'Seller', email: 's@example.com', payout_methods: { bank_name: 'Test Bank', ifsc_swift: 'TEST0001234' } },
+      hammerPrice: 10,
+    });
+    console.log(JSON.stringify({ rawLink: html.includes('<a href="https://evil.example">'), rawImg: html.includes('<img src=x'), ifsc: html.includes('TEST0001234') }));
+  `], { env: process.env, timeout: 30000 }, (err, stdout) => resolve(JSON.parse((stdout || '{}').split('\n').find((l) => l.startsWith('{')) || '{}'))));
+  assert('Phase 11', 'Email HTML escapes user-typed names/titles and shows the saved IFSC code',
+    emailCheck.rawLink === false && emailCheck.rawImg === false && emailCheck.ifsc === true, JSON.stringify(emailCheck));
+
+  // 14. The auctions list is paged: at most 100 per page, with the total across all pages
+  const totalInDb = (await pool.query('SELECT COUNT(*)::int AS c FROM auctions')).rows[0].c;
+  const bigPage = await request('GET', '/api/auctions?limit=1000');
+  const onePage = await request('GET', '/api/auctions?limit=1');
+  const pastEnd = await request('GET', `/api/auctions?limit=10&offset=${totalInDb + 10}`);
+  assert('Phase 11', 'Auctions list capped at 100 per page and reports the full total (also on a page past the end)',
+    bigPage.data.count === Math.min(100, totalInDb) && bigPage.data.total === totalInDb && onePage.data.count === 1 && onePage.data.total === totalInDb &&
+    pastEnd.data.count === 0 && pastEnd.data.total === totalInDb,
+    `db ${totalInDb}, limit=1000 -> ${bigPage.data.count} (total ${bigPage.data.total}), limit=1 -> ${onePage.data.count}, past the end -> ${pastEnd.data.count} (total ${pastEnd.data.total})`);
+
+  // 15. Change password: wrong current password is a 400 (not 401, which would log the browser out);
+  //     after a change the old token stops working everywhere and the returned token works
+  const pwUser = await request('POST', '/api/auth/register', { email: `pwchange_${uniqueId}@test.com`, password: 'Password@123', role: 'bidder' });
+  const oldPwToken = pwUser.data.token;
+  await new Promise((r) => setTimeout(r, 1100)); // tokens carry whole seconds: make the change a later second
+  const wrongCurrent = await request('PUT', '/api/auth/password', { currentPassword: 'nope-nope', newPassword: 'NewPassword@456' }, oldPwToken);
+  const changed = await request('PUT', '/api/auth/password', { currentPassword: 'Password@123', newPassword: 'NewPassword@456' }, oldPwToken);
+  const oldTokenAfter = await request('GET', '/api/auth/me', null, oldPwToken);
+  const newTokenAfter = await request('GET', '/api/auth/me', null, changed.data.token);
+  const loginNew = await request('POST', '/api/auth/login', { email: `pwchange_${uniqueId}@test.com`, password: 'NewPassword@456' });
+  assert('Phase 11', 'Change password: wrong current = 400, old token then refused (401), new token and new password work',
+    wrongCurrent.status === 400 && changed.status === 200 && oldTokenAfter.status === 401 && newTokenAfter.status === 200 && loginNew.status === 200,
+    `${wrongCurrent.status}/${changed.status}/${oldTokenAfter.status}/${newTokenAfter.status}/${loginNew.status}`);
+
+  // 16. Login brute force: after 10 failed attempts for one email, the 11th is refused with 429
+  const bruteEmail = `brute_${uniqueId}@test.com`;
+  let lastBrute;
+  for (let i = 0; i < 11; i++) {
+    lastBrute = await request('POST', '/api/auth/login', { email: bruteEmail, password: `wrong-${i}` });
+  }
+  assert('Phase 11', 'Login limiter: 11th failed login for one account answered 429', lastBrute.status === 429);
+  const otherLogin = await request('POST', '/api/auth/login', { email: sellerEmail, password: 'Password@123' });
+  assert('Phase 11', 'Other accounts can still log in from the same IP', otherLogin.status === 200);
+
+  // 17. The 5% fee is worked out in whole cents: $20.70 * 5% = $1.035, rounded half up to $1.04.
+  //     (Floating point gave $1.03 at settlement, and closing used a different formula.)
+  //     The bidder's wallet covers the price, so closing the lot also settles it.
+  const feeLot = await request('POST', '/api/auctions', { title: `Fee "Rounding", Lot ${uniqueId}`, starting_price: 20, duration_minutes: 60 }, sellerToken);
+  const feeLotId = feeLot.data.auction.id;
+  await request('POST', `/api/auctions/${feeLotId}/bids`, { amount: 20.70 }, bidderToken);
+  await endAuctionNow(feeLotId);
+  const feeLotRow = (await pool.query('SELECT is_settled, commission_amount FROM auctions WHERE id = $1', [feeLotId])).rows[0];
+  const feeLedger = Object.fromEntries((await pool.query(
+    'SELECT type, amount FROM wallet_transactions WHERE reference_id = $1', [feeLotId]
+  )).rows.map((r) => [r.type, r.amount]));
+  assert('Phase 11', 'Platform fee in whole cents: a $20.70 sale records and takes $1.04, seller gets $19.66',
+    feeLotRow.is_settled === true && feeLotRow.commission_amount === '1.04' &&
+    feeLedger.SETTLEMENT_DEBIT === '20.70' && feeLedger.COMMISSION === '1.04' && feeLedger.SETTLEMENT_CREDIT === '19.66',
+    `settled ${feeLotRow.is_settled}, recorded fee ${feeLotRow.commission_amount}, ledger ${JSON.stringify(feeLedger)}`);
+
+  // 18. A seller paying commission from their wallet is counted once in the admin reports. The payment
+  //     writes two COMMISSION ledger rows (the seller's debit and the platform's credit); only the
+  //     platform's side is commission received.
+  const payerEmail = `commpay_${uniqueId}@test.com`;
+  const payer = await request('POST', '/api/auth/register', { email: payerEmail, password: 'Password@123', role: 'auctioneer' });
+  await request('POST', '/api/wallet/topup', { amount: 100 }, payer.data.token);
+  await pool.query('UPDATE users SET unpaid_commission = 12.34 WHERE id = $1', [payer.data.user.id]);
+  const commReport = async () => {
+    const [m, t] = await Promise.all([
+      request('GET', '/api/admin/metrics', null, adminToken),
+      request('GET', '/api/admin/commission-transactions?type=WALLET_DIRECT&limit=1', null, adminToken),
+    ]);
+    return { collected: m.data.metrics.collectedCommission, listed: t.data.data.summary.totalCommission, rows: t.data.data.pagination.total };
+  };
+  const beforePay = await commReport();
+  const payRes = await request('POST', '/api/wallet/settle-commission', { amount: 12.34 }, payer.data.token);
+  const afterPay = await commReport();
+  const grewBy = (k) => Math.round((afterPay[k] - beforePay[k]) * 100) / 100;
+  const payerRows = await request('GET', `/api/admin/commission-transactions?type=WALLET_DIRECT&search=commpay_${uniqueId}`, null, adminToken);
+  const feeLotRows = await request('GET', `/api/admin/commission-transactions?type=AUCTION_ESCROW&search=${encodeURIComponent(`Lot ${uniqueId}`)}`, null, adminToken);
+  assert('Phase 11', 'Admin reports count each commission once (a $12.34 wallet payment, the $1.04 lot fee)',
+    payRes.status === 200 && grewBy('collected') === 12.34 && grewBy('listed') === 12.34 && afterPay.rows - beforePay.rows === 1 &&
+    payerRows.data.data.pagination.total === 1 && payerRows.data.data.transactions[0].sellerEmail === payerEmail &&
+    feeLotRows.data.data.pagination.total === 1 && feeLotRows.data.data.transactions[0].commission === 1.04,
+    `collected +${grewBy('collected')}, listed +${grewBy('listed')}, rows +${afterPay.rows - beforePay.rows}, seller ${payerRows.data.data.transactions[0]?.sellerEmail}, lot fee rows ${feeLotRows.data.data.pagination.total} (${feeLotRows.data.data.transactions[0]?.commission})`);
+
+  // 20. CSV export: a title with quotes and a comma stays one field
+  const parseCsvLine = (line) => {
+    const fields = []; let cur = ''; let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (quoted) {
+        if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (c === '"') quoted = false; else cur += c;
+      } else if (c === '"') quoted = true; else if (c === ',') { fields.push(cur); cur = ''; } else cur += c;
+    }
+    fields.push(cur);
+    return fields;
+  };
+  const csvRes = await new Promise((resolve, reject) => {
+    http.get({ hostname: 'localhost', port: API_PORT, path: `/api/admin/commission-ledger?format=csv&search=${encodeURIComponent(`Lot ${uniqueId}`)}`, headers: { Authorization: `Bearer ${adminToken}` } }, (res) => {
+      let body = '';
+      res.on('data', (c) => body += c);
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    }).on('error', reject);
+  });
+  const [csvHeader, csvRow] = csvRes.body.split('\n');
+  const csvFields = csvRow ? parseCsvLine(csvRow) : [];
+  assert('Phase 11', 'CSV export keeps a title with quotes and a comma in one field',
+    csvRes.status === 200 && parseCsvLine(csvHeader).length === 8 && csvFields.length === 8 && csvFields[0] === `Fee "Rounding", Lot ${uniqueId}`,
+    `${csvFields.length} fields, first: ${csvFields[0]}`);
+
+  // 19. Wallet history with a page or limit that isn't a number: page 1, 20 per page (it was a 500)
+  const oddPaging = await request('GET', '/api/wallet/transactions?page=abc&limit=xyz', null, bidderToken);
+  assert('Phase 11', 'Wallet history with non-numeric page/limit falls back to page 1, 20 per page (not a 500)',
+    oddPaging.status === 200 && oddPaging.data.data.pagination.page === 1 && oddPaging.data.data.pagination.limit === 20,
+    `${oddPaging.status} ${JSON.stringify(oddPaging.data?.data?.pagination || oddPaging.data)}`);
+
+  // 21. Commission receipts: no debt = 400 and no image stored; an admin decides a PENDING receipt once
+  //     (approving lowers the debt; a second decision, or flipping the APPROVED record a wallet payment
+  //     wrote, is refused - it used to add the amount back to the debt although the money was paid)
+  const proofSeller = await request('POST', '/api/auth/register', { email: `proof_${uniqueId}@test.com`, password: 'Password@123', role: 'auctioneer' });
+  const proofToken = proofSeller.data.token;
+  const proofSellerId = proofSeller.data.user.id;
+  const uploadsBefore = (await pool.query('SELECT COUNT(*)::int AS c FROM uploads WHERE user_id = $1', [proofSellerId])).rows[0].c;
+  const proofNoDebt = await uploadMultipart(dummyPngBuffer, 'receipt.png', proofToken, { path: '/api/commissions/proof', field: 'proof', fields: { amount: '10.00' } });
+  const uploadsAfterNoDebt = (await pool.query('SELECT COUNT(*)::int AS c FROM uploads WHERE user_id = $1', [proofSellerId])).rows[0].c;
+  await pool.query('UPDATE users SET unpaid_commission = 30.00 WHERE id = $1', [proofSellerId]);
+  const proofSent = await uploadMultipart(dummyPngBuffer, 'receipt.png', proofToken, { path: '/api/commissions/proof', field: 'proof', fields: { amount: '10.00', comment: 'NEFT ref 123' } });
+  const proofId = proofSent.data?.proof?.id;
+  const approveProof = await request('PUT', `/api/admin/commission-proofs/${proofId}/status`, { status: 'APPROVED' }, adminToken);
+  const flipProof = await request('PUT', `/api/admin/commission-proofs/${proofId}/status`, { status: 'REJECTED' }, adminToken);
+  const debtAfterProof = (await pool.query('SELECT unpaid_commission FROM users WHERE id = $1', [proofSellerId])).rows[0].unpaid_commission;
+  const walletProof = (await pool.query(`SELECT id FROM commission_proofs WHERE user_id = $1 AND payment_method = 'WALLET' LIMIT 1`, [payer.data.user.id])).rows[0];
+  const flipWalletProof = await request('PUT', `/api/admin/commission-proofs/${walletProof?.id}/status`, { status: 'REJECTED' }, adminToken);
+  const payerDebt = (await pool.query('SELECT unpaid_commission FROM users WHERE id = $1', [payer.data.user.id])).rows[0].unpaid_commission;
+  assert('Phase 11', 'Commission receipt: no debt = 400 (no image kept); approve once lowers the debt; later flips refused (409)',
+    proofNoDebt.status === 400 && uploadsAfterNoDebt === uploadsBefore && proofSent.status === 201 &&
+    approveProof.status === 200 && !!approveProof.data.proof.reviewed_at && flipProof.status === 409 && debtAfterProof === '20.00' &&
+    !!walletProof && flipWalletProof.status === 409 && payerDebt === '0.00',
+    `no debt ${proofNoDebt.status} (uploads ${uploadsBefore}->${uploadsAfterNoDebt}), sent ${proofSent.status}, approve ${approveProof.status}, flip ${flipProof.status}, debt ${debtAfterProof}, wallet-record flip ${flipWalletProof.status}, payer debt ${payerDebt}`);
+
+  assert('Phase 11', 'Admin users table shows real totals (2 listings, 2 bids, 2 wins, $230 bid volume)',
+    fanRow && fanRow.listings_count === 2 && fanRow.total_bids === 2 && fanRow.auctions_won === 2 && fanRow.total_spent === 230,
+    fanRow ? `listings ${fanRow.listings_count}, bids ${fanRow.total_bids}, wins ${fanRow.auctions_won}, volume ${fanRow.total_spent}` : 'user not listed');
+
+  // 23. Role guards: "become a seller" never demotes an admin; an admin can't change their own role
+  //     (the last admin could lock everyone out), and the platform treasury keeps its role
+  const adminUpgrade = await request('POST', '/api/users/me/upgrade-seller', {}, adminToken);
+  const adminRoleNow = (await pool.query(`SELECT role FROM users WHERE id = '11111111-1111-1111-1111-111111111111'`)).rows[0].role;
+  const selfDemote = await request('PUT', '/api/admin/users/11111111-1111-1111-1111-111111111111/role', { role: 'bidder' }, adminToken);
+  const treasuryRole = await request('PUT', '/api/admin/users/00000000-0000-0000-0000-000000000000/role', { role: 'bidder' }, adminToken);
+  const adminRoleAfter = (await pool.query(`SELECT role FROM users WHERE id = '11111111-1111-1111-1111-111111111111'`)).rows[0].role;
+  assert('Phase 11', 'Role guards: upgrade-seller keeps an admin an admin; self role change and treasury role change refused (400)',
+    adminUpgrade.status === 200 && adminRoleNow === 'admin' && selfDemote.status === 400 && treasuryRole.status === 400 && adminRoleAfter === 'admin',
+    `upgrade ${adminUpgrade.status} -> ${adminRoleNow}, self ${selfDemote.status}, treasury ${treasuryRole.status}, role after ${adminRoleAfter}`);
+
+  // 24. No index only repeats the index a UNIQUE constraint already has
+  const dupIndexes = (await pool.query(
+    `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname IN ('idx_wallets_user_id', 'idx_wallet_tx_idempotency')`
+  )).rows.map((r) => r.indexname);
+  assert('Phase 11', 'No index repeats a UNIQUE constraint (wallets.user_id, wallet_transactions.idempotency_key)',
+    dupIndexes.length === 0, dupIndexes.join(', '));
+
+  // 25. Every time column stores its time zone (TIMESTAMPTZ), so a stored time means one moment everywhere
+  const plainTimes = (await pool.query(
+    `SELECT table_name || '.' || column_name AS col FROM information_schema.columns
+     WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'`
+  )).rows.map((r) => r.col);
+  assert('Phase 11', 'Every time column stores its time zone (no plain TIMESTAMP)', plainTimes.length === 0, plainTimes.join(', '));
+
+  // 22. Public auction pages check a token like protected routes do: after the seller changes the
+  //     password, the old token no longer shows the seller's private field (the winner email preview link).
+  //     Runs last: it retires sellerToken.
+  const asGuest = await request('GET', `/api/auctions/${feeLotId}`);
+  const asSeller = await request('GET', `/api/auctions/${feeLotId}`, null, sellerToken);
+  await new Promise((r) => setTimeout(r, 1100)); // tokens carry whole seconds: make the change a later second
+  const sellerPwChange = await request('PUT', '/api/auth/password', { currentPassword: 'Password@123', newPassword: 'Password@456' }, sellerToken);
+  const asStaleSeller = await request('GET', `/api/auctions/${feeLotId}`, null, sellerToken);
+  const asNewSeller = await request('GET', `/api/auctions/${feeLotId}`, null, sellerPwChange.data.token);
+  const hasPreview = (r) => r.status === 200 && Object.prototype.hasOwnProperty.call(r.data.auction, 'winner_email_preview_url');
+  assert('Phase 11', 'A token from before a password change gets the public view of an auction (no private fields)',
+    !hasPreview(asGuest) && hasPreview(asSeller) && sellerPwChange.status === 200 && asStaleSeller.status === 200 && !hasPreview(asStaleSeller) && hasPreview(asNewSeller),
+    `guest ${hasPreview(asGuest)}, seller ${hasPreview(asSeller)}, stale token ${hasPreview(asStaleSeller)}, new token ${hasPreview(asNewSeller)}`);
+
   console.log('\n===========================================================');
-  console.log('   🎉 ALL PHASES (1 TO 10) ARE 100% VERIFIED AND PASSING!  ');
+  console.log('   🎉 ALL PHASES (1 TO 11) PASSED  ');
   console.log('===========================================================');
   console.log(`Total assertions passed: ${results.length}/${results.length}`);
 }

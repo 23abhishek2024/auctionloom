@@ -30,6 +30,13 @@ export const AuthProvider = ({ children }) => {
     verifyToken();
   }, []);
 
+  // A request was refused with 401 (see api/client.js): the session is over, so log out here too
+  useEffect(() => {
+    const handleExpired = () => logout();
+    window.addEventListener('auth_expired', handleExpired);
+    return () => window.removeEventListener('auth_expired', handleExpired);
+  }, []);
+
   const login = async (email, password) => {
     const res = await authApi.login({ email, password });
     const { user: userData, token: tokenData } = res.data;
@@ -64,6 +71,22 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
+  // Changing the password logs out every other session; this one continues with the fresh token
+  const changePassword = async (currentPassword, newPassword) => {
+    const res = await authApi.changePassword({ currentPassword, newPassword });
+    const { user: userData, token: tokenData } = res.data;
+    if (tokenData) {
+      setToken(tokenData);
+      localStorage.setItem('token', tokenData);
+    }
+    if (userData) {
+      const merged = { ...user, ...userData };
+      setUser(merged);
+      localStorage.setItem('user', JSON.stringify(merged));
+    }
+    return res.data.message;
+  };
+
   const upgradeToSeller = async () => {
     const res = await userApi.upgradeToSeller();
     const { user: updatedUser, token: newToken } = res.data;
@@ -95,6 +118,7 @@ export const AuthProvider = ({ children }) => {
         login,
         register,
         updateName,
+        changePassword,
         upgradeToSeller,
         logout,
       }}

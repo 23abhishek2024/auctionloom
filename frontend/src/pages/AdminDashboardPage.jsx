@@ -7,7 +7,6 @@ import {
   DollarSign,
   Gavel,
   CheckCircle2,
-  XCircle,
   Clock,
   TrendingUp,
   RefreshCw,
@@ -16,15 +15,12 @@ import {
   Eye,
   Check,
   X,
-  ExternalLink,
-  Lock,
   Pause,
   Play,
   Download,
   ChevronLeft,
   ChevronRight,
   Zap,
-  Activity,
   ShieldCheck,
   AlertCircle,
 } from 'lucide-react';
@@ -36,6 +32,7 @@ export const AdminDashboardPage = () => {
 
   const [metrics, setMetrics] = useState(null);
   const [revenueChart, setRevenueChart] = useState([]);
+  const [revenueChartIsSample, setRevenueChartIsSample] = useState(false);
   const [users, setUsers] = useState([]);
   const [proofs, setProofs] = useState([]);
   const [auctions, setAuctions] = useState([]);
@@ -43,7 +40,6 @@ export const AdminDashboardPage = () => {
   const [activeTab, setActiveTab] = useState('commission'); // 'commission', 'proofs', 'users', 'auctions'
   const [proofStatusFilter, setProofStatusFilter] = useState('PENDING'); // 'PENDING', 'APPROVED', 'REJECTED', 'ALL'
   const [userSearch, setUserSearch] = useState('');
-  const [auctionSearch, setAuctionSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [selectedProofModal, setSelectedProofModal] = useState(null);
@@ -90,6 +86,7 @@ export const AdminDashboardPage = () => {
 
       setMetrics(mRes.data.metrics);
       setRevenueChart(rRes.data.chartData || []);
+      setRevenueChartIsSample(Boolean(rRes.data.isSample));
       setUsers(uRes.data.users || []);
       setProofs(pRes.data.proofs || []);
       setAuctions(aRes.data.auctions || []);
@@ -178,32 +175,31 @@ export const AdminDashboardPage = () => {
     }
   };
 
-  const handleCommExportCsv = () => {
-    const params = new URLSearchParams({
-      format: 'csv',
+  // Through the shared API client: same backend URL as every other call (the old hand-built URL fell
+  // back to localhost in a production build without VITE_API_URL), the token, and error handling
+  // (a failed request used to be saved as a .csv file holding the error JSON)
+  const handleCommExportCsv = async () => {
+    const params = {
       ...(commSearch ? { search: commSearch } : {}),
       ...(commFrom ? { from: commFrom } : {}),
       ...(commTo ? { to: commTo } : {}),
-    });
-    const token = localStorage.getItem('token');
-    const rawBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-    const base = rawBase.match(/https?:\/\/[^\s\r\n]+/)?.[0]?.replace(/\/+$/, '') || 'http://localhost:5000/api';
-    const endpoint = commTab === 'transactions' ? 'commission-transactions' : 'commission-ledger';
+    };
+    const report = commTab === 'transactions' ? 'commission-transactions' : 'commission-ledger';
     if (commTab === 'ledger') {
-      params.append('groupBySeller', commGrouped);
+      params.groupBySeller = commGrouped;
     } else if (commTxType !== 'ALL') {
-      params.append('type', commTxType);
+      params.type = commTxType;
     }
-    const url = `${base}/admin/${endpoint}?${params.toString()}`;
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.blob())
-      .then((blob) => {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = commTab === 'transactions' ? 'commission_transactions.csv' : (commGrouped ? 'commission_by_seller.csv' : 'commission_ledger.csv');
-        a.click();
-      })
-      .catch(() => alert('CSV export failed. Please try again.'));
+    try {
+      const res = await adminApi.exportCommissionCsv(report, params);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(res.data);
+      a.download = commTab === 'transactions' ? 'commission_transactions.csv' : (commGrouped ? 'commission_by_seller.csv' : 'commission_ledger.csv');
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch {
+      alert('CSV export failed. Please try again.');
+    }
   };
 
   // Handle Proof Approval / Rejection
@@ -458,7 +454,7 @@ export const AdminDashboardPage = () => {
           }`}
         >
           <TrendingUp className="w-4 h-4" />
-          Admin Commission &amp; Money Transitions
+          Admin Commission &amp; Money Transactions
         </button>
 
         <button
@@ -666,7 +662,7 @@ export const AdminDashboardPage = () => {
                   <th className="py-3 px-4 text-center">Listings</th>
                   <th className="py-3 px-4 text-center">Total Bids</th>
                   <th className="py-3 px-4 text-center">Wins</th>
-                  <th className="py-3 px-4 text-right">Spent Volume</th>
+                  <th className="py-3 px-4 text-right" title="Sum of every bid placed, including bids that were outbid">Bid Volume</th>
                   <th className="py-3 px-4 text-right">Unpaid Commission</th>
                   <th className="py-3 px-4 text-center">Modify Role</th>
                 </tr>
@@ -776,6 +772,7 @@ export const AdminDashboardPage = () => {
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {auc.status !== 'CLOSED' && (
                         <button
                           onClick={() => handleToggleAuctionStatus(auc.id, auc.status, auc.title)}
                           disabled={actionLoading}
@@ -788,6 +785,7 @@ export const AdminDashboardPage = () => {
                         >
                           {auc.status === 'RESTRICTED' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
                         </button>
+                        )}
                         <button
                           onClick={() => handleForceDeleteAuction(auc.id, auc.title)}
                           disabled={actionLoading}
@@ -937,7 +935,7 @@ export const AdminDashboardPage = () => {
               </p>
             </div>
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-              <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Commission Transitions</p>
+              <p className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 mb-1">Commission Transactions</p>
               <p className="text-2xl font-extrabold text-amber-600 font-mono">
                 {commTab === 'transactions' 
                   ? (commTxSummary?.totalTransactions || commTransactions.length) 
@@ -990,7 +988,11 @@ export const AdminDashboardPage = () => {
                   className="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-indigo-400" id="comm-to-date" />
               </div>
               <button 
-                onClick={() => { setCommPage(1); commTab === 'transactions' ? fetchCommissionTransactions({ page: 1 }) : fetchCommissionLedger({ page: 1 }); }}
+                onClick={() => {
+                  setCommPage(1);
+                  if (commTab === 'transactions') fetchCommissionTransactions({ page: 1 });
+                  else fetchCommissionLedger({ page: 1 });
+                }}
                 className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold shadow hover:bg-indigo-700 transition-all cursor-pointer" id="comm-apply-filter"
               >
                 Apply
@@ -1011,7 +1013,7 @@ export const AdminDashboardPage = () => {
                   Group by Seller
                 </label>
               ) : (
-                <span className="text-xs text-slate-400 font-mono">Real-time immutable double-entry platform commission transitions</span>
+                <span className="text-xs text-slate-400 font-mono">Platform commission entries from the wallet ledger</span>
               )}
               <button onClick={handleCommExportCsv}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-medium hover:bg-emerald-100 transition-all cursor-pointer" id="comm-export-csv">
@@ -1039,7 +1041,7 @@ export const AdminDashboardPage = () => {
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
                         <th className="py-3 px-4">Date &amp; Time</th>
-                        <th className="py-3 px-4">Money Transition</th>
+                        <th className="py-3 px-4">Money Transaction</th>
                         <th className="py-3 px-4">Auction / Reference</th>
                         <th className="py-3 px-4">From Whom (Seller)</th>
                         <th className="py-3 px-4">Winning Buyer</th>
@@ -1212,8 +1214,19 @@ export const AdminDashboardPage = () => {
           <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 mt-10">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Monthly Revenue &amp; Commission Ledger</h2>
-                <p className="text-xs text-slate-500">Gross settled marketplace volume vs. platform 5% fee collection</p>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  Monthly Revenue &amp; Commission Ledger
+                  {revenueChartIsSample && (
+                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300" title="No auction has sold yet, so the chart shows made-up example numbers">
+                      SAMPLE DATA
+                    </span>
+                  )}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  {revenueChartIsSample
+                    ? 'No sales yet: these bars are example numbers, replaced by real ones after the first sale.'
+                    : 'Volume of sold lots (by sale month, last 12 months with sales) vs. the platform 5% fee'}
+                </p>
               </div>
               <div className="flex items-center gap-4 text-xs font-mono">
                 <span className="flex items-center gap-1.5">
@@ -1280,7 +1293,7 @@ export const AdminDashboardPage = () => {
                     High-Concurrency Stress Benchmark
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Testing PostgreSQL 15 <code className="text-amber-300 font-mono">SELECT FOR UPDATE</code> with 100 collision writes
+                    100 bids on a temporary lot through the real bid code (<code className="text-amber-300 font-mono">SELECT ... FOR UPDATE</code>), up to 10 at a time, then the database is checked
                   </p>
                 </div>
               </div>
@@ -1301,10 +1314,10 @@ export const AdminDashboardPage = () => {
                     <Zap className="w-7 h-7 text-amber-400 absolute inset-0 m-auto animate-pulse" />
                   </div>
                   <h4 className="text-lg font-bold text-white mb-1">
-                    Simulating 100 Concurrent Collision Bids...
+                    Running 100 bids (in equal pairs)...
                   </h4>
                   <p className="text-xs text-slate-400 max-w-md font-mono">
-                    Dispatched 100 simultaneous transactions across test bidders. Waiting for PostgreSQL lock manager resolution...
+                    Each bid locks the lot row, so they run one after another; the second bid of each pair must be refused.
                   </p>
                 </div>
               ) : benchmarkError ? (
@@ -1343,7 +1356,7 @@ export const AdminDashboardPage = () => {
                       <div className="text-xl font-extrabold text-cyan-400 font-mono mt-0.5">
                         {benchmarkResult.elapsedMs} ms
                       </div>
-                      <div className="text-[10px] text-slate-500">for 100 requests</div>
+                      <div className="text-[10px] text-slate-500">for {benchmarkResult.totalRequests} requests ({benchmarkResult.maxInFlight} in flight)</div>
                     </div>
 
                     <div className="p-3.5 rounded-2xl bg-slate-800/60 border border-slate-700/60">
@@ -1355,11 +1368,11 @@ export const AdminDashboardPage = () => {
                     </div>
 
                     <div className="p-3.5 rounded-2xl bg-slate-800/60 border border-slate-700/60">
-                      <div className="text-[11px] font-mono text-slate-400 uppercase">Crashes / Errors</div>
-                      <div className="text-xl font-extrabold text-emerald-400 font-mono mt-0.5">
-                        0
+                      <div className="text-[11px] font-mono text-slate-400 uppercase">Server Errors</div>
+                      <div className={`text-xl font-extrabold font-mono mt-0.5 ${benchmarkResult.serverErrors === 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {benchmarkResult.serverErrors}
                       </div>
-                      <div className="text-[10px] text-emerald-500 font-medium">100% Zero-Crash SLA</div>
+                      <div className="text-[10px] text-slate-500 font-medium">unexpected failures in this run</div>
                     </div>
                   </div>
 
@@ -1369,8 +1382,8 @@ export const AdminDashboardPage = () => {
                       <span className="text-slate-300 flex items-center gap-1.5 font-semibold">
                         <ShieldCheck className="w-4 h-4 text-emerald-400" /> Concurrency Integrity
                       </span>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
-                        0 RACE CONDITIONS DETECTED
+                      <span className={`px-2 py-0.5 rounded-full font-bold border ${benchmarkResult.dbState.raceConditionsDetected === 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'}`}>
+                        {benchmarkResult.dbState.raceConditionsDetected} RACE CONDITIONS DETECTED
                       </span>
                     </div>
 
@@ -1378,13 +1391,13 @@ export const AdminDashboardPage = () => {
                       <div>
                         <div className="text-slate-400">Accepted Bids (HTTP 201):</div>
                         <div className="text-sm font-bold text-emerald-400 mt-0.5">
-                          {benchmarkResult.successfulBids} bids (Monotonic Price Increments)
+                          {benchmarkResult.successfulBids} bids (each higher than the last)
                         </div>
                       </div>
                       <div>
                         <div className="text-slate-400">Rejected Bids (HTTP 400):</div>
                         <div className="text-sm font-bold text-rose-400 mt-0.5">
-                          {benchmarkResult.rejectedBids} bids (Correctly blocked lower/equal bids)
+                          {benchmarkResult.rejectedBids} bids (lower or equal, refused)
                         </div>
                       </div>
                     </div>
@@ -1393,6 +1406,19 @@ export const AdminDashboardPage = () => {
                       <span>Final Price in DB: <strong className="text-white">${benchmarkResult.dbState.finalPrice.toFixed(2)}</strong></span>
                       <span>Total Bids Recorded: <strong className="text-white">{benchmarkResult.dbState.totalBidsInDb}</strong></span>
                     </div>
+
+                    {/* The checks the server ran on the database after the run */}
+                    <ul className="pt-2 border-t border-slate-700/60 text-[11px] font-mono space-y-1">
+                      {[
+                        ['everyAcceptedBidStored', 'Every accepted bid is stored, nothing else'],
+                        ['noDuplicateAcceptedAmounts', 'No two accepted bids share an amount'],
+                        ['finalPriceEqualsHighestAcceptedBid', 'Final price = highest accepted bid'],
+                      ].map(([key, label]) => (
+                        <li key={key} className={benchmarkResult.dbState.checks?.[key] ? 'text-emerald-400' : 'text-rose-400'}>
+                          {benchmarkResult.dbState.checks?.[key] ? '✓' : '✗'} {label}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
 
                   {/* Latency Percentiles Grid */}

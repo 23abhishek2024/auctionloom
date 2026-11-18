@@ -35,17 +35,19 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response Interceptor: Friendly error message handling
+// Response Interceptor: the server no longer accepts our login (it expired, or the password was
+// changed on another device). Tell AuthContext to log out, so the whole app stops acting logged in.
+// (Clearing localStorage alone left the page showing the user as logged in until a reload.)
+// Only when the refused request carried the CURRENT token: a late reply to an older request must not
+// log out a session that has just logged in again.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // If token expired or invalid, clear localStorage
-      const currentPath = window.location.pathname;
-      if (currentPath !== '/login' && currentPath !== '/register') {
-        // Only clear if on protected pages
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+      const currentToken = localStorage.getItem('token');
+      const sentAuth = error.config?.headers?.Authorization;
+      if (currentToken && sentAuth === `Bearer ${currentToken}`) {
+        window.dispatchEvent(new Event('auth_expired'));
       }
     }
     return Promise.reject(error);
@@ -58,6 +60,7 @@ export const authApi = {
   register: (userData) => api.post('/auth/register', userData),
   getMe: () => api.get('/auth/me'),
   updateProfile: (data) => api.put('/auth/profile', data),
+  changePassword: (data) => api.put('/auth/password', data),
 };
 
 export const auctionApi = {
@@ -98,6 +101,9 @@ export const adminApi = {
     api.put(`/admin/commission-proofs/${id}/status`, { status, admin_notes: notes }),
   getCommissionLedger: (params) => api.get('/admin/commission-ledger', { params }),
   getCommissionTransactions: (params) => api.get('/admin/commission-transactions', { params }),
+  // CSV download of either report ('commission-ledger' or 'commission-transactions') as a Blob
+  exportCommissionCsv: (report, params) =>
+    api.get(`/admin/${report}`, { params: { ...params, format: 'csv' }, responseType: 'blob' }),
   purgeAndResetDatabase: (data) => api.post('/admin/system/purge-and-reset', data),
   runBenchmark: (data) => api.post('/admin/system/run-benchmark', data),
 };

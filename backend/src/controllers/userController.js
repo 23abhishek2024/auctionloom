@@ -1,4 +1,6 @@
 const userService = require('../services/userService');
+const { requireUuid, optionalString, EMAIL_REGEX } = require('../utils/validators');
+const { AppError } = require('../utils/AppError');
 
 /**
  * GET /api/users/me/stats
@@ -111,24 +113,29 @@ const getPayoutMethods = async (req, res, next) => {
 
 /**
  * PUT /api/users/me/payout-methods
- * Accepts both snake_case and camelCase field names (bank_name or bankName, ...)
+ * Accepts both snake_case and camelCase field names (bank_name or bankName, ...).
+ * Every field is optional text of at most 100 characters; a PayPal email must look like an email.
  */
 const updatePayoutMethods = async (req, res, next) => {
   try {
-    const bank_name = req.body.bank_name || req.body.bankName || '';
-    const account_number = req.body.account_number || req.body.accountNumber || '';
-    const ifsc_swift = req.body.ifsc_swift || req.body.ifscCode || req.body.ifscSwift || '';
-    const upi_id = req.body.upi_id || req.body.upiId || '';
-    const paypal_email = req.body.paypal_email || req.body.paypalEmail || '';
+    // The first of the given names that has a value, checked as optional text
+    const field = (label, ...keys) => {
+      const value = keys.map((k) => req.body[k]).find((v) => v !== undefined && v !== null && v !== '');
+      // An account number may arrive as a number; anything else that isn't text is refused
+      return optionalString(typeof value === 'number' ? String(value) : value, label, 100) || '';
+    };
 
     const methods = {
-      bank_name: String(bank_name).trim(),
-      account_number: String(account_number).trim(),
-      ifsc_swift: String(ifsc_swift).trim(),
-      upi_id: String(upi_id).trim(),
-      paypal_email: String(paypal_email).trim(),
+      bank_name: field('Bank name', 'bank_name', 'bankName'),
+      account_number: field('Account number', 'account_number', 'accountNumber'),
+      ifsc_swift: field('IFSC / SWIFT', 'ifsc_swift', 'ifscCode', 'ifscSwift'),
+      upi_id: field('UPI ID', 'upi_id', 'upiId'),
+      paypal_email: field('PayPal email', 'paypal_email', 'paypalEmail'),
       updated_at: new Date().toISOString(),
     };
+    if (methods.paypal_email && !EMAIL_REGEX.test(methods.paypal_email)) {
+      throw new AppError(400, 'PayPal email must be a valid email address.');
+    }
 
     const payoutMethods = await userService.savePayoutMethods(req.user.id, methods);
     res.json({
@@ -146,7 +153,8 @@ const updatePayoutMethods = async (req, res, next) => {
  */
 const getSellerPayoutForWinner = async (req, res, next) => {
   try {
-    const payout = await userService.getSellerPayoutForAuction(req.params.auctionId, req.user);
+    const auctionId = requireUuid(req.params.auctionId, 'auction ID');
+    const payout = await userService.getSellerPayoutForAuction(auctionId, req.user);
     res.json(payout);
   } catch (err) {
     next(err);

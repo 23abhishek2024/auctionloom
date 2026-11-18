@@ -2,7 +2,8 @@ const bcrypt = require('bcrypt');
 const { performance } = require('perf_hooks');
 const pool = require('../db');
 const walletService = require('./walletService');
-const { getIO } = require('./socketService');
+const bidService = require('./bidService');
+const { AppError } = require('../utils/AppError');
 
 /**
  * System Service
@@ -13,7 +14,7 @@ const { getIO } = require('./socketService');
 /**
  * Wipe all tables, then create admin@gmail.com + test1..test5@gmail.com (password: test@123)
  * with $0.00 wallets. With runTestAuctions, also run 3 sold-and-paid test auctions through the
- * real double-entry settlement and add 2 live auctions to browse.
+ * real lot settlement (settleLotEscrow) and add 2 live auctions to browse.
  * Returns the created users and their final wallet balances.
  */
 async function purgeAndReset({ runTestAuctions }) {
@@ -194,188 +195,129 @@ async function seedTestAuctions(userMap) {
   `, [userMap['test1@gmail.com'].id, userMap['test2@gmail.com'].id]);
 }
 
+const BENCHMARK_MAX_IN_FLIGHT = 10; // leave the rest of the 20-connection pool for real users
+
 /**
- * Fire `count` bids at one live auction, at most 8 at a time, each in its own transaction with
- * SELECT ... FOR UPDATE, then report latency percentiles, throughput and the final database state.
- * Amounts come in equal pairs on purpose, so half the bids collide and must be rejected.
+ * Fire `count` bids at a throw-away lot through the real bidService.placeBid (the same code a
+ * user's bid runs: one transaction, SELECT ... FOR UPDATE, checks, insert, price update), up to
+ * 10 at a time, then CHECK the database instead of assuming it is right:
+ *   - every accepted bid is in the bids table, and nothing else is
+ *   - no two accepted bids have the same amount (amounts are sent in equal pairs on purpose)
+ *   - the final price equals the highest accepted bid
+ * raceConditionsDetected is the number of those checks that failed (0 when all hold).
+ * The lot and its bids are deleted afterwards, so the benchmark never clutters the marketplace.
  */
 async function runBidBenchmark(count) {
-  // 1. Find or create an active benchmark auction
-  let auctionRes = await pool.query(
-    `SELECT * FROM auctions WHERE status = 'ACTIVE' AND end_time > NOW() ORDER BY created_at DESC LIMIT 1`
+  // 1. A seller and up to 3 bidders that are not the seller. Anyone but an admin may bid
+  //    (auctioneers too: the seed script makes every test user an auctioneer), so plain bidder
+  //    accounts come first and auctioneers fill in.
+  const sellerRes = await pool.query(
+    `SELECT id FROM users
+     WHERE role IN ('auctioneer', 'admin') AND id <> '00000000-0000-0000-0000-000000000000'
+     ORDER BY created_at ASC LIMIT 1`
   );
-  let auctionId;
-  let startingPrice = 1000.00;
-
-  if (auctionRes.rows.length > 0) {
-    auctionId = auctionRes.rows[0].id;
-    startingPrice = parseFloat(auctionRes.rows[0].current_price || auctionRes.rows[0].starting_price);
-  } else {
-    const sellerRes = await pool.query(
-      `SELECT id FROM users WHERE role IN ('auctioneer', 'admin') LIMIT 1`
-    );
-    const sellerId = sellerRes.rows[0]?.id;
-    const newAuc = await pool.query(
-      `INSERT INTO auctions (seller_id, title, description, starting_price, current_price, end_time, status, category)
-       VALUES ($1, 'Live Stress Benchmark Lot — ' || TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS'), 'Auto-generated high-concurrency stress test lot.', 1000.00, 1000.00, NOW() + INTERVAL '1 day', 'ACTIVE', 'Watches')
-       RETURNING id, current_price`,
-      [sellerId]
-    );
-    auctionId = newAuc.rows[0].id;
-    startingPrice = 1000.00;
-  }
-
-  // 2. Fetch test bidder accounts
+  const sellerId = sellerRes.rows[0]?.id;
   const biddersRes = await pool.query(
-    `SELECT id, email, name FROM users WHERE role = 'bidder' LIMIT 3`
+    `SELECT id, email, name FROM users
+     WHERE role <> 'admin' AND id <> $1
+     ORDER BY (role = 'bidder') DESC, created_at ASC LIMIT 3`,
+    [sellerId || '00000000-0000-0000-0000-000000000000']
   );
-  let bidders = biddersRes.rows;
-  if (bidders.length === 0) {
-    const anyUsersRes = await pool.query(`SELECT id, email, name FROM users LIMIT 3`);
-    bidders = anyUsersRes.rows;
+  const bidders = biddersRes.rows;
+  if (!sellerId || bidders.length < 2) {
+    throw new AppError(400, 'The benchmark needs one seller (auctioneer or admin) and at least two other non-admin accounts to bid.');
   }
 
-  // 3. Construct and fire concurrent bid tasks using SELECT FOR UPDATE
-  const startPriceFloor = Math.floor(startingPrice);
-  const benchmarkStart = performance.now();
+  // 2. A fresh lot just for this run
+  const startingPrice = 1000;
+  const lotRes = await pool.query(
+    `INSERT INTO auctions (seller_id, title, description, starting_price, current_price, end_time, status, category)
+     VALUES ($1, 'Benchmark lot ' || TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS'), 'Temporary lot for the concurrency benchmark (deleted after the run).', $2, $2, NOW() + INTERVAL '1 hour', 'ACTIVE', 'Benchmark')
+     RETURNING id`,
+    [sellerId, startingPrice]
+  );
+  const auctionId = lotRes.rows[0].id;
 
-  const CONCURRENCY_LIMIT = 8; // Match DB pool capacity to eliminate pool exhaustion & timeouts
-  let currentIndex = 0;
-  const results = new Array(count);
-
-  const worker = async () => {
-    while (true) {
-      const i = currentIndex++;
-      if (i >= count) break;
-
-      const bidder = bidders[i % bidders.length];
-      const bidAmount = startPriceFloor + Math.floor(i / 2) * 10 + 5; // Intentional collision bids
-      const reqStart = performance.now();
-      let client;
-
-      try {
-        client = await pool.connect();
-        await client.query('BEGIN');
-        const lockRes = await client.query(
-          'SELECT * FROM auctions WHERE id = $1 FOR UPDATE',
-          [auctionId]
-        );
-        const currentPrice = parseFloat(lockRes.rows[0].current_price);
-
-        if (bidAmount <= currentPrice) {
-          await client.query('ROLLBACK');
+  try {
+    // 3. Fire the bids: amounts come in equal pairs, so the second of each pair must be refused
+    let nextIndex = 0;
+    const results = new Array(count);
+    const worker = async () => {
+      while (nextIndex < count) {
+        const i = nextIndex++;
+        const bidder = bidders[i % bidders.length];
+        const amount = startingPrice + Math.floor(i / 2) * 10 + 5;
+        const started = performance.now();
+        try {
+          await bidService.placeBid({ auctionId, bidder, amount });
+          results[i] = { status: 201, duration: performance.now() - started, amount };
+        } catch (err) {
+          const expected = err instanceof AppError;
+          if (!expected) console.error('[Benchmark] Unexpected bid error:', err.message);
           results[i] = {
-            status: 400,
-            duration: performance.now() - reqStart,
-            bidAmount,
-            bidder: bidder.email,
-            reason: 'Bid must be higher than current price',
+            status: expected ? err.statusCode : 500,
+            duration: performance.now() - started,
+            amount,
+            reason: expected ? err.message : 'Unexpected server error (see server log)',
           };
-        } else {
-          await client.query(
-            'INSERT INTO bids (auction_id, bidder_id, amount) VALUES ($1, $2, $3)',
-            [auctionId, bidder.id, bidAmount]
-          );
-          await client.query(
-            'UPDATE auctions SET current_price = $1 WHERE id = $2',
-            [bidAmount, auctionId]
-          );
-          await client.query('COMMIT');
-
-          results[i] = {
-            status: 201,
-            duration: performance.now() - reqStart,
-            bidAmount,
-            bidder: bidder.email,
-          };
-        }
-      } catch (err) {
-        if (client) {
-          await client.query('ROLLBACK').catch(() => {});
-        }
-        results[i] = {
-          status: 500,
-          duration: performance.now() - reqStart,
-          error: err.message,
-          bidAmount,
-        };
-      } finally {
-        if (client) {
-          client.release();
         }
       }
-    }
-  };
+    };
+    const benchmarkStart = performance.now();
+    await Promise.all(Array.from({ length: Math.min(BENCHMARK_MAX_IN_FLIGHT, count) }, () => worker()));
+    const totalDuration = performance.now() - benchmarkStart;
 
-  const workers = Array.from(
-    { length: Math.min(CONCURRENCY_LIMIT, count) },
-    () => worker()
-  );
-  await Promise.all(workers);
-  const totalDuration = performance.now() - benchmarkStart;
+    // 4. Latency percentiles and throughput
+    const durations = results.map((r) => r.duration).sort((a, b) => a - b);
+    const calcP = (p) => parseFloat((durations[Math.max(0, Math.ceil((p / 100) * durations.length) - 1)] || 0).toFixed(2));
+    const accepted = results.filter((r) => r.status === 201);
+    const rejectedBids = results.filter((r) => r.status === 400).length;
+    const serverErrors = results.filter((r) => r.status >= 500).length;
 
-  // 4. Calculate metrics & percentiles
-  const durations = results.map(r => r.duration).sort((a, b) => a - b);
-  const successfulBids = results.filter(r => r.status === 201).length;
-  const rejectedBids = results.filter(r => r.status === 400).length;
-  const serverErrors = results.filter(r => r.status >= 500).length;
+    // 5. Check the database
+    const finalPrice = parseFloat((await pool.query('SELECT current_price FROM auctions WHERE id = $1', [auctionId])).rows[0].current_price);
+    const storedAmounts = (await pool.query('SELECT amount FROM bids WHERE auction_id = $1', [auctionId])).rows.map((r) => parseFloat(r.amount));
+    const highestAccepted = accepted.length ? Math.max(...accepted.map((r) => r.amount)) : startingPrice;
+    const checks = {
+      everyAcceptedBidStored: storedAmounts.length === accepted.length,
+      noDuplicateAcceptedAmounts: new Set(storedAmounts).size === storedAmounts.length,
+      finalPriceEqualsHighestAcceptedBid: finalPrice === highestAccepted,
+    };
+    const raceConditionsDetected = Object.values(checks).filter((ok) => !ok).length;
 
-  const calcP = (p) => {
-    const idx = Math.ceil((p / 100) * durations.length) - 1;
-    return parseFloat((durations[Math.max(0, idx)] || 0).toFixed(2));
-  };
-
-  const throughput = parseFloat((count / (totalDuration / 1000)).toFixed(2));
-
-  // 5. Query final DB state to verify integrity
-  const finalAuctionRes = await pool.query(
-    'SELECT id, title, current_price FROM auctions WHERE id = $1',
-    [auctionId]
-  );
-  const totalBidsRes = await pool.query(
-    'SELECT COUNT(*)::int as count FROM bids WHERE auction_id = $1',
-    [auctionId]
-  );
-
-  const finalPrice = parseFloat(finalAuctionRes.rows[0].current_price);
-  const totalBidsInDb = totalBidsRes.rows[0].count;
-
-  // Emit live WebSocket update so any viewer in the room sees the final price
-  try {
-    const io = getIO();
-    io.to(auctionId).emit('PRICE_UPDATE', {
-      auction_id: auctionId,
-      new_price: finalPrice,
-      bidder_name: 'Benchmark Bot',
-      bid_id: 'benchmark-run',
-    });
-  } catch (_) {}
-
-  return {
-    totalRequests: count,
-    elapsedMs: parseFloat(totalDuration.toFixed(2)),
-    throughputReqSec: throughput,
-    successfulBids,
-    rejectedBids,
-    serverErrors,
-    latencies: {
-      min: parseFloat(durations[0].toFixed(2)),
-      mean: parseFloat((durations.reduce((a, b) => a + b, 0) / durations.length).toFixed(2)),
-      median: calcP(50),
-      p90: calcP(90),
-      p95: calcP(95),
-      p99: calcP(99),
-      max: parseFloat(durations[durations.length - 1].toFixed(2)),
-    },
-    dbState: {
-      auctionId,
-      auctionTitle: finalAuctionRes.rows[0].title,
-      finalPrice,
-      totalBidsInDb,
-      raceConditionsDetected: 0,
-      lockingMechanism: 'PostgreSQL 15 SELECT FOR UPDATE (Pessimistic Row Lock)',
-    },
-  };
+    return {
+      totalRequests: count,
+      maxInFlight: Math.min(BENCHMARK_MAX_IN_FLIGHT, count),
+      elapsedMs: parseFloat(totalDuration.toFixed(2)),
+      throughputReqSec: parseFloat((count / (totalDuration / 1000)).toFixed(2)),
+      successfulBids: accepted.length,
+      rejectedBids,
+      serverErrors,
+      latencies: {
+        min: parseFloat(durations[0].toFixed(2)),
+        mean: parseFloat((durations.reduce((a, b) => a + b, 0) / durations.length).toFixed(2)),
+        median: calcP(50),
+        p90: calcP(90),
+        p95: calcP(95),
+        p99: calcP(99),
+        max: parseFloat(durations[durations.length - 1].toFixed(2)),
+      },
+      dbState: {
+        auctionId,
+        finalPrice,
+        highestAcceptedBid: highestAccepted,
+        totalBidsInDb: storedAmounts.length,
+        checks,
+        raceConditionsDetected,
+        lockingMechanism: 'PostgreSQL SELECT ... FOR UPDATE (pessimistic row lock) via bidService.placeBid',
+        lotDeletedAfterRun: true,
+      },
+    };
+  } finally {
+    // 6. Remove the throw-away lot and its bids
+    await pool.query('DELETE FROM bids WHERE auction_id = $1', [auctionId]);
+    await pool.query('DELETE FROM auctions WHERE id = $1', [auctionId]);
+  }
 }
 
 module.exports = { purgeAndReset, runBidBenchmark };

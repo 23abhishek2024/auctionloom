@@ -10,18 +10,23 @@ export const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const { user, isAuthenticated, login } = useAuth();
+  const { isAuthenticated, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = location.state?.from?.pathname || '/';
+  // Where to go after logging in: ProtectedRoute passes a location object, the auction page
+  // passes a path string ("Log in to chat" / "Sign In to Bid")
+  const fromState = location.state?.from;
+  const from = (typeof fromState === 'string' ? fromState : fromState?.pathname) || '/';
 
-  // If already logged in, redirect to home marketplace
+  // Once logged in, go back to where the user came from. This effect also runs right after a
+  // successful login (React Router 7 applies navigations as transitions, so the user update
+  // renders first): sending it to '/' would override the navigate(from) below.
   useEffect(() => {
     if (isAuthenticated) {
-      navigate('/', { replace: true });
+      navigate(from, { replace: true });
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, from]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

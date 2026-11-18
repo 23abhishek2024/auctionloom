@@ -1,9 +1,14 @@
 const pool = require('../db');
+const { AppError } = require('../utils/AppError');
+const { toCents, splitSale } = require('../utils/validators');
 
 /**
- * Production-Grade Wallet Service
- * Enforces Double-Entry Accounting, ACID Row-Locking (SELECT FOR UPDATE),
- * Idempotency Key Deduping, and Zero-Overdraft Invariants.
+ * Wallet Service
+ * Every balance change runs under a row lock (SELECT ... FOR UPDATE) and writes one row to the
+ * append-only ledger (wallet_transactions, with balance_after), deduplicated by idempotency key;
+ * balances can't go below zero. A lot settlement moves money between wallets so that its entries
+ * sum to zero. (Top-ups and withdrawals are simulated: there is no outside account on the other
+ * side, so this is not full double-entry bookkeeping.)
  */
 
 class InsufficientFundsError extends Error {
@@ -48,9 +53,7 @@ async function getOrCreateWallet(userId, externalClient = null) {
     } else {
       const userCheck = await client.query('SELECT id FROM users WHERE id = $1', [userId]);
       if (userCheck.rows.length === 0) {
-        const err = new Error('User account not found or session expired.');
-        err.statusCode = 401;
-        throw err;
+        throw new AppError(401, 'User account not found or session expired.');
       }
     }
     res = await client.query(
@@ -98,7 +101,7 @@ async function withDeadlockRetry(fn, attempts = 3) {
 }
 
 /**
- * Credit user wallet with strict row-locking & double-entry ledger entry.
+ * Credit user wallet with strict row-locking & one ledger entry.
  */
 async function creditWallet({
   userId,
@@ -112,7 +115,7 @@ async function creditWallet({
 }) {
   const numericAmount = parseFloat(amount);
   if (isNaN(numericAmount) || numericAmount <= 0) {
-    throw new Error('Credit amount must be a positive number');
+    throw new AppError(400, 'Credit amount must be a positive number');
   }
 
   const client = passedClient || (await pool.connect());
@@ -163,7 +166,7 @@ async function creditWallet({
     );
     const updatedWallet = updatedWalletRes.rows[0];
 
-    // 5. Insert immutable double-entry transaction record
+    // 5. Append the ledger entry (never updated afterwards)
     const txRes = await client.query(
       `INSERT INTO wallet_transactions 
        (wallet_id, type, amount, balance_after, reference_type, reference_id, idempotency_key, status, metadata)
@@ -219,7 +222,7 @@ async function creditWallet({
 }
 
 /**
- * Debit user wallet with strict row-locking, overdraft checks & double-entry ledger entry.
+ * Debit user wallet with strict row-locking, overdraft checks & one ledger entry.
  */
 async function debitWallet({
   userId,
@@ -233,7 +236,7 @@ async function debitWallet({
 }) {
   const numericAmount = parseFloat(amount);
   if (isNaN(numericAmount) || numericAmount <= 0) {
-    throw new Error('Debit amount must be a positive number');
+    throw new AppError(400, 'Debit amount must be a positive number');
   }
 
   const client = passedClient || (await pool.connect());
@@ -294,7 +297,7 @@ async function debitWallet({
     );
     const updatedWallet = updatedWalletRes.rows[0];
 
-    // 6. Insert immutable double-entry transaction record
+    // 6. Append the ledger entry (never updated afterwards)
     const txRes = await client.query(
       `INSERT INTO wallet_transactions 
        (wallet_id, type, amount, balance_after, reference_type, reference_id, idempotency_key, status, metadata)
@@ -362,25 +365,38 @@ async function settleLotEscrow(args) {
 async function settleLotEscrowOnce({ auctionId, winnerId, sellerId, hammerPrice, idempotencyPrefix = '' }) {
   const numericPrice = parseFloat(hammerPrice);
   if (isNaN(numericPrice) || numericPrice <= 0) {
-    throw new Error('Valid hammer price required for settlement');
+    throw new AppError(400, 'Valid hammer price required for settlement');
   }
 
-  const commission = Math.round(numericPrice * 0.05 * 100) / 100;
-  const sellerPayout = Math.round((numericPrice - commission) * 100) / 100;
+  const { commission, sellerPayout } = splitSale(numericPrice); // 5% fee, in whole cents
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 1. Verify auction exists and is CLOSED
+    // 1. Lock the auction row, then check (under the lock) that it is still the lot the caller saw
     const auctionRes = await client.query(
       'SELECT * FROM auctions WHERE id = $1 FOR UPDATE',
       [auctionId]
     );
     if (auctionRes.rows.length === 0) {
-      throw new Error('Auction not found');
+      throw new AppError(404, 'Auction not found');
     }
     const auction = auctionRes.rows[0];
+
+    if (!auction.is_settled) {
+      // The callers read the auction before this lock. In between it may have been reopened by an admin
+      // or changed in some other way; then no money must move for the old winner and price.
+      if (auction.status !== 'CLOSED') {
+        throw new AppError(409, 'This lot is not closed any more, so it cannot be settled.');
+      }
+      if (auction.winner_id !== winnerId || auction.seller_id !== sellerId) {
+        throw new AppError(409, 'The winner or seller of this lot has changed. Please reload the page.');
+      }
+      if (toCents(auction.current_price) !== toCents(numericPrice)) {
+        throw new AppError(409, 'The hammer price of this lot has changed. Please reload the page.');
+      }
+    }
 
     if (auction.is_settled) {
       const [winnerWallet, sellerWallet] = await Promise.all([

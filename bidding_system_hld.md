@@ -5,38 +5,38 @@
 
 ## 1. System Overview & Executive Summary
 
-**AuctionLoom** is an enterprise-grade, distributed real-time auction and financial settlement platform engineered to withstand extreme write contention during auction lot climaxes, eliminate double-spending, process asynchronous lot lifecycle transitions, and guarantee sub-15ms client telemetry.
+**AuctionLoom** is a real-time auction and settlement platform built to stay correct under heavy write contention at the end of an auction: bids on one lot are serialized, money can't be spent twice, and ended auctions are closed in the background.
 
 ### Core Architectural Pillars
 1. **Pessimistic Row-Level Locking (`SELECT FOR UPDATE`)**: Eliminates race conditions and "Thundering Herd" retry storms during the closing seconds of high-value auctions.
-2. **Double-Entry Bookkeeping Ledger**: Implements zero-overdraft invariants (`CHECK (balance >= 0)`), immutable transaction logs, and mathematical conservation of balance across all wallet mutations.
-3. **Transactional Outbox Pattern (`SKIP LOCKED`)**: Couples state transitions with asynchronous job queues inside PostgreSQL 15, completely eliminating the Dual-Write Problem without external broker operational overhead.
-4. **Resilient AI Luxury Appraisal**: Integrates **Google Gemini 3.6 Flash** via structured JSON schema contracts with an autonomous, deterministic heuristic fallback engine (guaranteeing 0% runtime failure).
-5. **Multi-Core Cluster Supervision**: Native Node.js cluster management utilizing OS-level socket distribution (`SCM_RIGHTS`) with automatic zero-downtime worker resurrection.
+2. **Append-Only Wallet Ledger**: Zero-overdraft invariant (`CHECK (balance >= 0)`), a ledger row with `balance_after` for every change, and settlements whose entries sum to zero (buyer -P, seller +0.95P, platform +0.05P). Top-ups and withdrawals are simulated, so they have no counter-entry in an external account.
+3. **PostgreSQL Job Queue (`SKIP LOCKED`)**: A scheduler polls for ended auctions and queues close jobs; competing workers claim them with `FOR UPDATE SKIP LOCKED`. (This is a polling job queue, not a transactional outbox: the job is not written in the same transaction as the business change. Closing is idempotent, and the in-process sweep also closes ended auctions, so a missed job only delays closing.)
+4. **Resilient AI Luxury Appraisal**: Integrates **Google Gemini 3.6 Flash** in JSON mode (the server checks every field before using it), with OpenAI as an optional second choice and a built-in template as the last resort, so the endpoint always returns a draft.
+5. **Optional Cluster Mode**: `WEB_CONCURRENCY` > 1 forks Node.js cluster workers and restarts any that crash. Socket.IO rooms are per process, so this needs a shared adapter (e.g. Redis, not included); the live demo runs one process.
 
 ---
 
-## 2. System Requirements & SLA Guarantees
+## 2. System Requirements
 
 ### 2.1 Functional Requirements
 - **Real-Time Bidding**: Bidders can place bids on active lots. Bids must be strictly monotonic (greater than `current_price`), non-seller (anti-shill), and rejected if the lot is restricted or expired.
-- **Sub-15ms Telemetry**: All connected bidders in an auction room receive instant price updates via WebSocket broadcasts upon transaction commit.
+- **Live Price Updates**: All connected bidders in an auction room receive the new price via a WebSocket broadcast right after the transaction commits (latency is network-bound; not a measured guarantee).
 - **Asynchronous Lot Concurrency & Closure**: Lots automatically transition from `ACTIVE` to `CLOSED` upon expiration. The highest bidder is declared winner, and a 5% platform fee is calculated.
 - **1-Click Atomic Escrow Settlement**: The winning bidder settles the hammer price from their wallet. The seller is credited 95%, and the platform treasury receives 5% commission in a single atomic database transaction.
 - **Autonomous Top-Up & Payout Gateway Abstraction**: Gateway-agnostic payment requests supporting instant internal funding and future Razorpay/Stripe webhooks.
 - **AI Luxury Appraisal**: Sellers can auto-generate luxury auction titles, historical descriptions, and suggested opening bids by providing product keywords and categories.
 - **Administrative Governance**: Admins can inspect platform revenue metrics, review manual wire transfer commission proofs, and apply immediate restriction freezes on suspect lots.
 
-### 2.2 Non-Functional Requirements (NFRs) & Engineering SLAs
+### 2.2 Non-Functional Requirements: What Holds and What Was Measured
 
-| Metric | Target SLA | Implementation Mechanism |
+| Metric | What holds / what was measured | Mechanism |
 | :--- | :--- | :--- |
-| **Bid Processing Latency** | p95 < 25ms, p99 < 50ms | PostgreSQL index scans on `id`, row-level exclusive locks held for < 3ms. |
-| **WebSocket Telemetry** | p95 < 15ms | Socket.IO room partitioning (`io.to(auctionId)`), memory-buffered event loops. |
-| **Data Consistency** | Strict Serializability / ACID | PostgreSQL ACID transactions for bids, wallets, and lot closures. |
-| **Availability** | 99.99% Uptime | Node.js multi-worker clustering with automated worker respawn on crash. |
-| **Throughput** | 10,000+ bids/sec (partitioned) | Independent row locks per auction lot allow parallel writes across distinct lots. |
-| **Security & Rate Limiting** | Zero unauthorized access | Stateless JWT authentication, role-based access control (RBAC), token bucket (5,000 req/15m). |
+| **Bid latency** | A single bid takes a few milliseconds of database time. With `npm run benchmark` (100 bids fired at once at ONE lot, local machine) they finished in about 0.3 s, p95 about 0.3 s, because every bid waits for the same row lock. | `SELECT ... FOR UPDATE` on the auction row; short transactions. |
+| **WebSocket updates** | Sent right after the bid commits; latency is network-bound and was not measured. | Socket.IO rooms per auction (`io.to(auctionId)`). |
+| **Data consistency** | ACID transactions at PostgreSQL's default READ COMMITTED level, plus row locks on the auction / wallet rows, so no lost updates or double charges (checked by `npm run stress`). Not SERIALIZABLE isolation. | `FOR UPDATE` row locks, `CHECK (balance >= 0)`, idempotency keys, locked re-checks. |
+| **Availability** | Demo hosting: the free Render instance sleeps after 15 minutes idle (first request then takes about a minute). An always-on instance would be needed in production. | Health check `/health`; keep-alive workflow keeps the database from pausing. |
+| **Throughput** | Different lots lock different rows, so they don't wait for each other; bids on one lot are serialized. Not load-tested beyond the benchmark. | Independent row locks per auction. |
+| **Security & rate limiting** | JWT + role checks on every protected route; per-IP fixed-window limits (5,000 requests / 15 min), 10 failed logins / 15 min per account, 50 sign-ups / hour. | `authMiddleware`, `roleMiddleware`, `express-rate-limit`. |
 
 ---
 
@@ -45,19 +45,19 @@
 ```mermaid
 graph TD
     %% Clients
-    Clients[React 19 SPA Clients\nBrowser / Mobile Web] -->|HTTPS REST| LB(Node.js Primary Process / Load Balancer)
+    Clients[React 19 SPA Clients\nBrowser / Mobile Web] -->|HTTPS REST| LB(Node.js entry: one process by default\noptional cluster primary with WEB_CONCURRENCY)
     Clients <-->|WebSocket / Socket.IO| LB
 
     %% Node.js Application Layer (Clusterized)
     subgraph AppLayer["Express Application Layer (MVC Pattern)"]
         LB --> Worker1(Worker Process 1 - PID A)
-        LB --> Worker2(Worker Process 2 - PID B)
+        LB -.->|cluster mode only: needs a shared Socket.IO adapter| Worker2(Worker Process 2 - PID B)
         
         subgraph Middlewares
             Logger[Logger Middleware\nInjects crypto.randomUUID req.id]
-            RateLimiter[Rate Limiter\nToken Bucket 5,000 req / 15 min]
+            RateLimiter[Rate Limiter\nFixed window 5,000 req / 15 min per IP]
             Auth[JWT Auth & RBAC\nBidder / Auctioneer / Admin]
-            Multer[Multer Stream\n5MB Disk Storage & UUID Naming]
+            Multer[Multer Memory Storage\n5MB, byte check, stored in PostgreSQL]
         end
         
         Worker1 --> Logger
@@ -68,7 +68,7 @@ graph TD
         Multer --> Controllers[REST Controllers\nHTTP only: check input, send response]
         Controllers --> Services[Domain Services\nAuction, Bid, Wallet, Commission, User, Report]
         Worker1 --> Socket[Socket.IO Hub\nRoom-Based Partitioning]
-        Worker1 --> WalletService[Wallet & Escrow Service\nDouble-Entry Invariants]
+        Worker1 --> WalletService[Wallet & Escrow Service\nAppend-only ledger]
         Worker1 -.-> AIService[AI Appraisal Service\nGemini 3.6 Flash + Heuristic]
     end
 
@@ -91,10 +91,10 @@ graph TD
     %% Connections
     Services -->|ACID Tx: SELECT FOR UPDATE| DB
     Services --> WalletService
-    WalletService -->|Double-Entry Atomic Ledger| DB
-    Socket -->|Sub-15ms Broadcasts| Clients
+    WalletService -->|Locked debit/credit + ledger rows| DB
+    Socket -->|Live broadcasts| Clients
     AIService -.->|Structured JSON Prompt| Gemini
-    Scheduler -->|Poll ended auctions & Enqueue Outbox| DB
+    Scheduler -->|Poll ended auctions & enqueue close jobs| DB
     JobWorkers -->|Poll Jobs: SKIP LOCKED| DB
     JobWorkers -->|Dispatches Invoices| EmailService
     EmailService -.->|Preview URL / Delivery| SMTP
@@ -149,13 +149,13 @@ aution-bid/
 │   │   ├── middlewares/
 │   │   │   ├── logger.js         # Injects crypto.randomUUID() req.id and logs latency
 │   │   │   ├── auth.js           # JWT verification & RBAC roleMiddleware
-│   │   │   ├── rateLimiter.js    # Token bucket DDoS defense (5,000 req/15m)
-│   │   │   └── upload.js         # Multer diskStorage, 5MB limit, UUID sanitization
+│   │   │   ├── rateLimiter.js    # Per-IP limits: API, failed logins, sign-ups
+│   │   │   └── upload.js         # Multer memoryStorage, image type filter, 5MB limit
 │   │   ├── services/             # Business rules, transactions & SQL (never touch req/res)
 │   │   │   ├── socketService.js  # Socket.IO room isolation & broadcast dispatch
 │   │   │   ├── bidService.js     # Bid transaction: SELECT FOR UPDATE, checks, PRICE_UPDATE
 │   │   │   ├── auctionService.js # Catalog, create/delete/republish, admin moderation
-│   │   │   ├── walletService.js  # Double-entry ledger, zero-overdraft, settleLotEscrow, history
+│   │   │   ├── walletService.js  # Append-only ledger, zero-overdraft, settleLotEscrow, history
 │   │   │   ├── commissionService.js # Seller commission debt: wallet payment, receipts, review
 │   │   │   ├── userService.js    # Dashboards, leaderboard, payout details, roles
 │   │   │   ├── authService.js    # Bcrypt hashing & JWT signing
@@ -172,7 +172,8 @@ aution-bid/
 │   │       ├── scheduler.js      # Cron scanner (runs every 30s, enqueues jobs)
 │   │       └── jobWorker.js      # Distributed queue poller (SKIP LOCKED)
 │   ├── schema.sql                # Complete PostgreSQL 15 DDL with constraints & indexes
-│   ├── verify_phases.mjs         # 103-test automated E2E verification suite
+│   ├── verify_phases.mjs         # End-to-end test suite (11 phases, 115 checks)
+│   ├── stress_test.js            # 6 concurrency stress scenarios
 │   ├── clean_reset_and_verify.js # Automated database purge, seed & live auction simulation
 │   └── Dockerfile                # Production Node.js Alpine container
 ├── frontend/
@@ -192,7 +193,7 @@ aution-bid/
 │   │   │   ├── DashboardPage.jsx # Catalog with search, filters, and live cards
 │   │   │   ├── AuctionDetailPage.jsx # Real-time terminal (bids, chat, reactions, freeze)
 │   │   │   ├── CreateAuctionPage.jsx # Listing creation with AI appraisal & file drop
-│   │   │   ├── WalletPage.jsx    # Double-entry transaction history & balance cards
+│   │   │   ├── WalletPage.jsx    # Ledger history & balance cards
 │   │   │   ├── AdminDashboardPage.jsx # Platform metrics & audit ledger
 │   │   │   ├── UserHubPage.jsx   # Seller listings, active bids, and won lots
 │   │   │   ├── LeaderboardPage.jsx # Hall of Fame highest bidders & top sellers
@@ -202,11 +203,13 @@ aution-bid/
 │   │   │   ├── AboutPage.jsx     # Platform architectural overview
 │   │   │   └── HowItWorksPage.jsx# Interactive bidding & escrow walkthrough
 │   │   └── utils/
-│   │       └── formatters.js     # Currency, date, and countdown formatting utilities
+│   │       ├── formatters.js     # Currency, date, and countdown formatting utilities
+│   │       └── money.js          # Top-up amount that covers a shortfall (in cents)
 │   ├── nginx.conf                # Production SPA reverse proxy with gzip & caching
 │   └── Dockerfile                # Multi-stage production build (Node -> Nginx)
+├── e2e/browser_test.js           # Playwright browser test of the built frontend (33 checks)
 ├── docker-compose.yml            # Multi-service orchestration (db, backend, frontend, worker, scheduler)
-└── render.yaml                   # Cloud infrastructure deployment blueprint
+└── render.yaml                   # Render blueprint (free web service; workers need a paid plan)
 ```
 
 ---
@@ -221,7 +224,7 @@ erDiagram
     USERS ||--o{ COMMISSION_PROOFS : "submits"
     AUCTIONS ||--o{ BIDS : "receives"
     AUCTIONS ||--o| USERS : "won by (winner)"
-    AUCTIONS ||--o{ JOBS : "triggers outbox"
+    AUCTIONS ||--o{ JOBS : "close jobs"
     WALLETS ||--o{ WALLET_TRANSACTIONS : "records"
     WALLETS ||--o{ PAYMENT_REQUESTS : "funds"
 
@@ -370,14 +373,14 @@ sequenceDiagram
 
     %% Real-time broadcast strictly POST-COMMIT
     Svc->>WS: Broadcast 'PRICE_UPDATE' { auction_id, new_price: 2500, bidder_name, bidder_id }
-    WS-->>Room: Sub-15ms WebSocket push (UI price flashes)
+    WS-->>Room: WebSocket push after COMMIT (UI price flashes)
     Svc-->>Ctrl: new bid
     Ctrl-->>Bidder: HTTP 201 Created { bid }
 ```
 
 ---
 
-### 5.2 Asynchronous Lot Closure via Transactional Outbox & `SKIP LOCKED`
+### 5.2 Asynchronous Lot Closure via the Job Queue & `SKIP LOCKED`
 
 ```mermaid
 sequenceDiagram
@@ -390,14 +393,14 @@ sequenceDiagram
 
     Cron->>DB: SELECT * FROM auctions WHERE status = 'ACTIVE' AND end_time <= NOW()
     Cron->>DB: INSERT INTO jobs (type, payload) VALUES ('CLOSE_AUCTION', {auction_id}) ON CONFLICT DO NOTHING
-    Note over DB: Outbox Job created atomically.<br/>Deduplicated by unique constraint (type, payload).
+    Note over DB: One open job per auction:<br/>unique index on (type, payload) WHERE status IN ('PENDING', 'IN_PROGRESS').
 
     par Competing Consumer Polling
-        Worker1->>DB: SELECT * FROM jobs WHERE status = 'PENDING' FOR UPDATE SKIP LOCKED LIMIT 1
+        Worker1->>DB: SELECT * FROM jobs WHERE status = 'PENDING' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
         DB-->>Worker1: Returns Job A
         Worker1->>DB: UPDATE jobs SET status = 'IN_PROGRESS', locked_at = NOW(), locked_by = PID_1 WHERE id = Job A
     and
-        Worker2->>DB: SELECT * FROM jobs WHERE status = 'PENDING' FOR UPDATE SKIP LOCKED LIMIT 1
+        Worker2->>DB: SELECT * FROM jobs WHERE status = 'PENDING' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
         Note over DB: SKIP LOCKED skips Job A instantly,<br/>returns Job B to Worker 2 without blocking.
         DB-->>Worker2: Returns Job B
         Worker2->>DB: UPDATE jobs SET status = 'IN_PROGRESS', locked_at = NOW(), locked_by = PID_2 WHERE id = Job B
@@ -412,7 +415,7 @@ sequenceDiagram
 
 ---
 
-### 5.3 1-Click Atomic Escrow Settlement & Double-Entry Ledger
+### 5.3 1-Click Atomic Escrow Settlement & Ledger
 
 ```mermaid
 sequenceDiagram
@@ -474,11 +477,11 @@ sequenceDiagram
     
     alt Gemini API Key Configured
         AISvc->>Gemini: POST /v1beta/models/gemini-3.6-flash:generateContent (timeout: 18s)
-        Note over Gemini: Evaluates prompt with strict JSON schema contract
+        Note over Gemini: JSON mode, low thinking, up to 4096 output tokens
         alt Gemini Responds Successfully
             Gemini-->>AISvc: JSON { title, description, suggested_starting_price }
             AISvc-->>API: Returns Gemini Appraisal
-        else Gemini Times Out or Returns 429/500
+        else Gemini Times Out, Fails or Returns Unusable JSON (OpenAI is tried first if configured, 12s)
             AISvc->>Heuristic: Invoke generateFallbackCopy(keywords, category)
             Heuristic-->>AISvc: Returns Curated Appraisal Draft
             AISvc-->>API: Returns Fallback Appraisal (0% failure rate)
@@ -500,12 +503,12 @@ sequenceDiagram
 | :--- | :--- | :--- | :--- |
 | **Worker Process Crash during Bid** | Connection drops while holding `SELECT FOR UPDATE` | PostgreSQL detects TCP socket severance, automatically performs `ROLLBACK`, and releases the row lock immediately. | Zero deadlocks; subsequent bids on the lot proceed normally. |
 | **Thundering Herd at Expiry** | 500 bidders submit bids simultaneously in the final 2 seconds | `SELECT FOR UPDATE` serializes bids. The first valid bid updates `current_price`. Subsequent bids in the queue fail the `amount > current_price` invariant check and are cleanly rejected with HTTP 400. | Zero phantom bids; zero price inversion; zero race conditions. |
-| **Scheduler Runs Twice Simultaneously** | Two scheduler instances scan at the exact same second | `jobs` table enforces `UNIQUE (type, payload)`. The second insert triggers `ON CONFLICT DO NOTHING`. | Exactly one job is created; no duplicate processing. |
-| **Worker Crash Mid-Job** | Worker process dies while processing a lot closure | Job transaction is rolled back. `locked_at` timestamp allows watchdog to reset `IN_PROGRESS` jobs older than 5 minutes back to `PENDING`. | At-least-once delivery with idempotent execution. |
-| **Escrow Double-Spending** | Winner double-clicks "Settle Lot" button rapidly | Idempotency keys (`lot_debit_{auctionId}`) enforce uniqueness at the database constraint level. Second debit query violates unique index and is rejected. | Zero double debits; exactly one settlement transaction persisted. |
-| **Overdraft Attempt** | Winner attempts to settle lot with balance < hammer price | `CHECK (balance >= 0)` constraint at PostgreSQL table level immediately raises a check constraint violation error. | Invariant preserved; balance cannot go negative under any circumstance. |
-| **AI Rate Limit / Outage** | Google Gemini API exceeds quota or returns 503 | 18-second timeout triggers immediate graceful degradation to the deterministic heuristic engine. | 100% endpoint uptime; seller always receives a professional appraisal draft. |
-| **OOM Attack via File Upload** | Malicious actor uploads 500MB image | Multer streams directly to disk with a strict 5MB limit (`limits: { fileSize: 5 * 1024 * 1024 }`). | V8 heap memory remains constant; OOM crash prevented. |
+| **Scheduler Runs Twice Simultaneously** | Two scheduler instances scan at the exact same second | A partial unique index allows one open job per auction: `(type, payload) WHERE status IN ('PENDING', 'IN_PROGRESS')`. The second insert hits `ON CONFLICT DO NOTHING`. Finished jobs don't block a new one (e.g. after a republish). | Exactly one open job; no duplicate processing. |
+| **Worker Crash Mid-Job** | Worker process dies while processing a lot closure | The claim (`IN_PROGRESS`, `locked_at`, `attempts`) is committed before the work, so the job stays claimed; the scheduler's reaper hands jobs stuck for 5 minutes back to `PENDING`, and marks them `FAILED` after 3 claims. | At-least-once delivery; closing is idempotent (row lock + status re-check). |
+| **Escrow Double-Spending** | Winner double-clicks "Settle Lot" button rapidly | Settlement locks the auction row (`FOR UPDATE`) and checks `is_settled` first, so the second request waits and then returns "already settled"; idempotency keys (`lot_debit_{auctionId}`) are a second guard. Tested with 20 simultaneous requests. | Zero double debits; exactly one settlement persisted. |
+| **Overdraft Attempt** | Winner attempts to settle lot with balance < hammer price | The locked wallet balance is checked first (`InsufficientFundsError`, HTTP 400); `CHECK (balance >= 0)` is the database backstop. | Balance can't go negative. |
+| **AI Rate Limit / Outage** | Google Gemini API exceeds quota or returns 503 | After an 18-second timeout (or any error or unusable JSON) the service tries OpenAI if configured (12 seconds), then the built-in template; together they stay under the browser's 35-second wait. | 100% endpoint uptime; seller always receives a professional appraisal draft. |
+| **Oversized or Fake Upload** | Malicious actor uploads 500MB, or an HTML page named .png | Multer stops reading at 5MB (`limits.fileSize`); the first bytes must be a real JPEG/PNG/GIF/WEBP signature; the extension comes from that type; served with `nosniff`. | At most 5MB in memory per upload; no HTML served from our domain. |
 
 ---
 
@@ -515,14 +518,14 @@ sequenceDiagram
 | :--- | :--- | :--- | :--- |
 | **Frontend Framework** | **React 19 (Vite SPA)** | Next.js, Vue, Angular | React 19 provides fine-grained Virtual DOM reconciliation, fiber time-slicing, and zero SSR complexity for a pure real-time trading dashboard. |
 | **Backend Runtime** | **Node.js (Express 5)** | Java Spring Boot, Go, Python Django | Non-blocking event-driven I/O (`libuv` / `epoll`) handles 50,000+ idle WebSocket connections with minimal RAM (~2KB per socket). |
-| **Process Clustering**| **Node.js Cluster Module** | PM2, Single Process | Native multi-core utilization via OS socket handoff (`SCM_RIGHTS`) with automated worker resurrection on unhandled crashes. |
+| **Process Clustering**| **Single process; Node.js Cluster optional** | PM2, always-on cluster | One process by default. `WEB_CONCURRENCY` > 1 uses more cores and restarts crashed workers, but Socket.IO rooms are per process, so it needs a shared adapter (Redis) and sticky sessions, which this project doesn't include. |
 | **Database Engine** | **PostgreSQL 15** | MongoDB, MySQL, DynamoDB | True ACID transactions, engine-level row locking (`SELECT FOR UPDATE`), partial indexing, and `SKIP LOCKED` distributed queue support. |
 | **Concurrency Control**| **Pessimistic Locking** | Optimistic Locking (OCC), Redis Redlock | Eliminates Thundering Herd retry storms during the final seconds of hot auctions; immune to Redis split-brain and GC pause bugs. |
-| **Financial Ledger** | **Double-Entry Bookkeeping**| Single-Balance Mutex | Guarantees complete forensic auditability; prevents money creation or loss via mathematical conservation invariants ($\sum \Delta \text{Wallets} = 0$). |
-| **Background Queue** | **PostgreSQL Outbox (`SKIP LOCKED`)** | RabbitMQ, Kafka, BullMQ | Solves the Dual-Write Problem by persisting business state and job enqueues in the exact same ACID transaction; zero extra broker ops. |
-| **Real-Time Transport**| **Socket.IO (WebSockets)** | Server-Sent Events (SSE), HTTP Polling | Bi-directional, full-duplex communication over persistent TCP sockets with sub-15ms latency and room partitioning. |
-| **AI Appraisal** | **Google Gemini 3.6 Flash** | OpenAI GPT-4o, Claude 3.5 | Fast inference latency, structured JSON mode output schema, backed by deterministic heuristic fallback. |
-| **Media Ingestion** | **Multer (diskStorage)** | memoryStorage, PostgreSQL BLOB | Streams binary chunks to disk to protect V8 heap from OOM crashes; UUID sanitization eliminates path traversal attacks. |
+| **Financial Ledger** | **Append-only ledger + locked balance** | Balance column only | Every change is auditable (`balance_after`); a settlement's entries sum to zero (buyer -P = seller +0.95P + platform +0.05P). Simulated top-ups/withdrawals have no external counter-account, so this is not full double-entry bookkeeping. |
+| **Background Queue** | **PostgreSQL job queue (`SKIP LOCKED`)** | RabbitMQ, Kafka, BullMQ | No extra broker to run; jobs live next to the data they act on. It is a polling queue, not an outbox: if a job is missed, the in-process sweep or the lazy close still closes the auction (all paths are idempotent). |
+| **Real-Time Transport**| **Socket.IO (WebSockets)** | Server-Sent Events (SSE), HTTP Polling | Bi-directional, full-duplex communication over persistent TCP sockets with low latency and room partitioning. |
+| **AI Appraisal** | **Google Gemini 3.6 Flash** | OpenAI GPT-4o, Claude 3.5 | Fast inference, JSON-mode output checked on the server, backed by a built-in template fallback. |
+| **Media Ingestion** | **Multer memoryStorage + PostgreSQL BYTEA** | diskStorage, S3 / Supabase Storage | The free Render disk is wiped on every restart, so files on disk vanished. Images up to 5MB are held in memory and stored in an `uploads` table. Cost: up to 5MB of RAM per upload in flight and database space; a production setup would use object storage. |
 
 ---
 

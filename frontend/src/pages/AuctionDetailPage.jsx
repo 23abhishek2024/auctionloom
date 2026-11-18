@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { auctionApi, bidApi, userApi, adminApi, walletApi, resolveImageUrl } from '../api/client';
 import { TopupModal } from '../components/TopupModal';
+import { topupToCover } from '../utils/money';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import {
-  Clock,
-  DollarSign,
   TrendingUp,
   History,
   ShieldCheck,
@@ -20,9 +19,6 @@ import {
   MessageSquare,
   Send,
   Flame,
-  Sparkles,
-  Layers,
-  Image as ImageIcon,
   X,
   CreditCard,
   Copy,
@@ -71,12 +67,12 @@ export const AuctionDetailPage = () => {
     },
   ]);
   const [chatInput, setChatInput] = useState('');
+  const [chatError, setChatError] = useState(null);
   const [activeReactions, setActiveReactions] = useState([]);
   const [showReactions, setShowReactions] = useState(false);
   const [sellerPayout, setSellerPayout] = useState(null);
   const [copiedKey, setCopiedKey] = useState(null);
   const [lotPaid, setLotPaid] = useState(false);
-  const [lotPaymentData, setLotPaymentData] = useState(null);
   const chatBottomRef = useRef(null);
 
   // Wallet & Settlement States
@@ -115,7 +111,6 @@ export const AuctionDetailPage = () => {
       const res = await walletApi.settleLot({ auctionId: id });
       setSettleSuccess(res.data?.data || res.data?.message || 'Lot successfully settled from wallet!');
       setLotPaid(true);
-      setLotPaymentData(res.data?.data);
       // Immediately mark auction as settled in local state so UI locks into settled mode
       setAuction((prev) => (prev ? { ...prev, is_settled: true, settled_at: new Date().toISOString() } : prev));
       if (res.data?.data?.winnerWallet?.balance !== undefined) {
@@ -192,6 +187,51 @@ export const AuctionDetailPage = () => {
     fetchData();
   }, [id]);
 
+  // Re-load the auction and its bids without the loading spinner. Used when the live connection
+  // comes back, and when a price update doesn't fit what is on screen.
+  const refreshAuction = useCallback(async () => {
+    try {
+      const [auctionRes, bidsRes] = await Promise.all([
+        auctionApi.getById(id),
+        bidApi.getBidsForAuction(id),
+      ]);
+      const fresh = auctionRes.data.auction;
+      if (!fresh) return;
+      setAuction(fresh);
+      if (fresh.is_settled) setLotPaid(true);
+      setBids(bidsRes.data.bids || []);
+      const freshPrice = parseFloat(fresh.current_price);
+      setBidAmount((prev) => {
+        const prevNum = parseFloat(prev);
+        return isNaN(prevNum) || prevNum <= freshPrice ? (freshPrice + 10).toFixed(2) : prev;
+      });
+    } catch (err) {
+      console.warn('Could not refresh the auction:', err.message);
+    }
+  }, [id]);
+
+  // The price on screen, for the PRICE_UPDATE handler below (its closure would see an old copy)
+  const shownPriceRef = useRef(null);
+  useEffect(() => {
+    shownPriceRef.current = auction?.current_price ?? null;
+  }, [auction?.current_price]);
+
+  // After the live connection drops and comes back, re-load: Socket.IO doesn't replay the
+  // PRICE_UPDATEs the server sent while this browser was away (a sleeping laptop, a Wi-Fi drop)
+  const wasConnectedRef = useRef(false);
+  const missedUpdatesRef = useRef(false);
+  useEffect(() => {
+    if (isConnected) {
+      if (missedUpdatesRef.current) {
+        missedUpdatesRef.current = false;
+        refreshAuction();
+      }
+      wasConnectedRef.current = true;
+    } else if (wasConnectedRef.current) {
+      missedUpdatesRef.current = true;
+    }
+  }, [isConnected, refreshAuction]);
+
   // ── 2. Real-time WebSocket Room, Bids, Chat & Reactions (Node.js Video 33) ──
   useEffect(() => {
     if (!id) return;
@@ -203,6 +243,17 @@ export const AuctionDetailPage = () => {
     const handlePriceUpdate = (data) => {
       console.log('[Socket] Live PRICE_UPDATE received:', data);
       if (data.auction_id === id) {
+        // Every accepted bid is higher than the one before, so a price that isn't higher than the
+        // one on screen is a repeat (ignore it) or means this page is out of date, for example an
+        // old update arriving late or a lot republished at a lower price: ask the server instead
+        // of moving the price backwards.
+        const shownCents = Math.round(parseFloat(shownPriceRef.current) * 100);
+        const newCents = Math.round(parseFloat(data.new_price) * 100);
+        if (Number.isFinite(shownCents) && Number.isFinite(newCents) && newCents <= shownCents) {
+          if (newCents < shownCents) refreshAuction();
+          return;
+        }
+        shownPriceRef.current = data.new_price;
         setAuction((prev) => (prev ? { ...prev, current_price: data.new_price } : prev));
 
         const newBidEntry = {
@@ -230,12 +281,24 @@ export const AuctionDetailPage = () => {
 
     // Socket event handler for CHAT_MESSAGE
     const handleChatMessage = (msg) => {
-      console.log('[Socket] Live CHAT_MESSAGE received:', msg);
       if (msg.auctionId === id) {
         setChatMessages((prev) => {
           if (prev.some((m) => m.id === msg.id)) return prev;
+          // Our own message coming back from the server: replace the optimistic copy
+          if (msg.clientId && prev.some((m) => m.id === msg.clientId)) {
+            return prev.map((m) => (m.id === msg.clientId ? msg : m));
+          }
           return [...prev, msg];
         });
+      }
+    };
+
+    // The server refused a chat message (not logged in, or sending too fast)
+    const handleChatError = (data) => {
+      if (data.auctionId === id) {
+        setChatMessages((prev) => prev.filter((m) => !m.pending));
+        setChatError(data.error);
+        setTimeout(() => setChatError(null), 5000);
       }
     };
 
@@ -272,6 +335,7 @@ export const AuctionDetailPage = () => {
     if (socket) {
       socket.on('PRICE_UPDATE', handlePriceUpdate);
       socket.on('CHAT_MESSAGE', handleChatMessage);
+      socket.on('CHAT_ERROR', handleChatError);
       socket.on('REACTION', handleReaction);
       socket.on('AUCTION_STATUS_CHANGED', handleStatusChanged);
     }
@@ -280,12 +344,13 @@ export const AuctionDetailPage = () => {
       if (socket) {
         socket.off('PRICE_UPDATE', handlePriceUpdate);
         socket.off('CHAT_MESSAGE', handleChatMessage);
+        socket.off('CHAT_ERROR', handleChatError);
         socket.off('REACTION', handleReaction);
         socket.off('AUCTION_STATUS_CHANGED', handleStatusChanged);
       }
       leaveAuction(id);
     };
-  }, [id, socket, isConnected]);
+  }, [id, socket, isConnected, refreshAuction]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -349,6 +414,11 @@ export const AuctionDetailPage = () => {
       return;
     }
 
+    // Whole cents only (the server refuses 101.004, which would otherwise be saved as 101.00)
+    if (!/^\d+(\.\d{1,2})?$/.test(String(bidAmount).trim())) {
+      setError('Enter an amount with at most 2 decimal places, for example 1250.50');
+      return;
+    }
     const numAmount = parseFloat(bidAmount);
     if (isNaN(numAmount) || numAmount <= parseFloat(auction.current_price)) {
       setError(`Bid must be strictly higher than $${auction.current_price}`);
@@ -499,37 +569,54 @@ export const AuctionDetailPage = () => {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
+    if (!user) {
+      setChatError('Log in to chat in the auction room.');
+      return;
+    }
+
     const text = chatInput.trim();
     const msgId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    const senderName = formatDisplayName(user);
-    const messagePayload = {
-      id: msgId,
-      auctionId: id,
-      text,
-      senderName,
-      senderId: user?.id || null,
-      role: user?.role || 'bidder',
-      timestamp: new Date().toISOString(),
-    };
 
-    // Optimistically show message immediately in chat box for instant feedback
-    setChatMessages((prev) => [...prev, messagePayload]);
+    // Optimistically show the message at once; the server's copy (with the sender details it
+    // worked out from the login token) replaces it when it arrives
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: msgId,
+        auctionId: id,
+        text,
+        senderName: formatDisplayName(user),
+        senderId: user.id,
+        role: user.role,
+        timestamp: new Date().toISOString(),
+        pending: true,
+      },
+    ]);
 
-    sendMessage(messagePayload);
+    // Only the room and the text are sent: name, id and role are decided by the server
+    sendMessage({ auctionId: id, text, clientId: msgId });
     setChatInput('');
   };
 
   const handleTriggerReaction = (emoji) => {
-    sendReaction({
-      auctionId: id,
-      emoji,
-      senderName: formatDisplayName(user),
-      senderId: user?.id || null,
-    });
+    sendReaction({ auctionId: id, emoji }); // the server adds who reacted
     setShowReactions(false);
   };
 
   // Derived state (calculated unconditionally before early returns)
+  // Lowest bid the server accepts: one cent above the current price. Worked out in whole cents,
+  // because 20.3 + 0.01 is 20.310000000000002 in floating point, and as the input's min that
+  // made the browser refuse a bid of 20.31.
+  const minNextBid = ((Math.round(parseFloat(auction?.current_price || 0) * 100) + 1) / 100).toFixed(2);
+  // What the seller was credited: the hammer price minus the 5% fee saved when the lot closed (or the
+  // server's formula, in whole cents rounded half up). price × 0.95 in floating point was a cent off
+  // for prices such as $2.50: it showed 2.38 while the wallet got 2.37.
+  const sellerNetAmount = (() => {
+    const priceCents = Math.round(parseFloat(auction?.current_price || 0) * 100);
+    const savedFeeCents = Math.round(parseFloat(auction?.commission_amount || 0) * 100);
+    const feeCents = savedFeeCents > 0 ? savedFeeCents : Math.round((priceCents * 5) / 100);
+    return ((priceCents - feeCents) / 100).toFixed(2);
+  })();
   const isSeller = user?.id === auction?.seller_id;
   const isAdmin = user?.role === 'admin';
   const highestBid = bids && bids.length > 0 ? bids[0] : null;
@@ -604,6 +691,8 @@ export const AuctionDetailPage = () => {
         <div className="flex items-center gap-2.5">
           {isAdmin && (
             <div className="flex items-center gap-2">
+              {/* Only a running auction can be frozen, and only a frozen one resumed (closed ones can't change) */}
+              {auction?.status !== 'CLOSED' && (
               <button
                 type="button"
                 onClick={handleAdminToggleRestrict}
@@ -628,6 +717,7 @@ export const AuctionDetailPage = () => {
                   </>
                 )}
               </button>
+              )}
 
               <button
                 type="button"
@@ -853,7 +943,7 @@ export const AuctionDetailPage = () => {
               )}
             </div>
 
-            {/* ── 1-CLICK DOUBLE-ENTRY WALLET ESCROW SETTLEMENT CONSOLE ── */}
+            {/* ── 1-CLICK WALLET ESCROW SETTLEMENT CONSOLE ── */}
             {isWinnerMe && (
               <div className="rounded-3xl p-6 bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 text-white shadow-xl border border-indigo-700/50 relative overflow-hidden space-y-4">
                 <div className="flex items-center justify-between gap-3">
@@ -949,14 +1039,13 @@ export const AuctionDetailPage = () => {
                         <button
                           type="button"
                           onClick={() => {
-                            const diff = Math.ceil(parseFloat(auction.current_price) - walletBalance);
-                            setTopupDiffAmount(diff > 0 ? diff : 1000);
+                            setTopupDiffAmount(topupToCover(auction.current_price, walletBalance));
                             setIsTopupModalOpen(true);
                           }}
                           className="w-full py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm shadow-md transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
                         >
                           <Wallet className="w-4 h-4" />
-                          <span>Top Up Wallet Now (+${Math.max(1, Math.ceil(parseFloat(auction.current_price) - walletBalance)).toLocaleString()})</span>
+                          <span>Top Up Wallet Now (+${topupToCover(auction.current_price, walletBalance).toLocaleString()})</span>
                         </button>
                       </div>
                     )}
@@ -1222,7 +1311,7 @@ export const AuctionDetailPage = () => {
                 </div>
                 {auction.is_settled ? (
                   <p className="text-slate-600">
-                    This auction concluded with a winning bid of <strong>${parseFloat(auction.current_price).toFixed(2)}</strong> by <strong>{winnerName || 'Winner'}</strong> and was <strong>settled via platform escrow</strong>. Net proceeds of <strong>${(parseFloat(auction.current_price) * 0.95).toFixed(2)}</strong> (after 5% platform fee) have been credited directly to your platform wallet.
+                    This auction concluded with a winning bid of <strong>${parseFloat(auction.current_price).toFixed(2)}</strong> by <strong>{winnerName || 'Winner'}</strong> and was <strong>settled via platform escrow</strong>. Net proceeds of <strong>${sellerNetAmount}</strong> (after 5% platform fee) have been credited directly to your platform wallet.
                   </p>
                 ) : (
                   <p className="text-slate-600">
@@ -1324,13 +1413,13 @@ export const AuctionDetailPage = () => {
               <div className="space-y-4">
                 <div className="h-64 overflow-y-auto space-y-2.5 pr-2">
                   {chatMessages.map((msg) => {
-                    const isMe = Boolean(user && (msg.senderId ? msg.senderId === user.id : (user.name && msg.senderName === user.name)));
+                    const isMe = Boolean(user && msg.senderId === user.id);
                     const isSys = msg.role === 'system';
                     const senderDisplayName = formatDisplayName(msg.senderName);
                     return (
                       <div
                         key={msg.id}
-                        className={`p-3 rounded-xl text-xs ${
+                        className={`p-3 rounded-xl text-xs ${msg.pending ? 'opacity-60 ' : ''}${
                           isSys
                             ? 'bg-indigo-50 border border-indigo-200 text-indigo-900'
                             : isMe
@@ -1358,7 +1447,19 @@ export const AuctionDetailPage = () => {
                   <div ref={chatBottomRef} />
                 </div>
 
-                {/* Chat input form */}
+                {chatError && (
+                  <p className="text-[11px] text-rose-600 font-medium pt-1">{chatError}</p>
+                )}
+
+                {/* Chat input form (guests can read the chat; logging in lets them write) */}
+                {!user ? (
+                  <div className="pt-2 border-t border-slate-200 text-xs text-slate-500">
+                    <Link to="/login" state={{ from: `/auctions/${id}` }} className="font-semibold text-indigo-600 hover:underline">
+                      Log in
+                    </Link>{' '}
+                    to chat with bidders in this room.
+                  </div>
+                ) : (
                 <form onSubmit={handleSendChatMessage} className="flex gap-2 pt-2 border-t border-slate-200">
                   <input
                     id="live-chat-input-box"
@@ -1376,6 +1477,7 @@ export const AuctionDetailPage = () => {
                     <span>Send</span>
                   </button>
                 </form>
+                )}
               </div>
             )}
           </div>
@@ -1426,7 +1528,7 @@ export const AuctionDetailPage = () => {
               </div>
 
               <span className="text-[11px] text-slate-500 font-mono">
-                Min next bid: <span className="text-slate-800 font-semibold">${(parseFloat(auction.current_price) + 1).toFixed(2)}</span>
+                Min next bid: <span className="text-slate-800 font-semibold">${minNextBid}</span>
               </span>
             </div>
 
@@ -1625,7 +1727,7 @@ export const AuctionDetailPage = () => {
                     <input
                       type="number"
                       step="0.01"
-                      min={parseFloat(auction.current_price) + 0.01}
+                      min={minNextBid}
                       value={bidAmount}
                       onChange={(e) => setBidAmount(e.target.value)}
                       placeholder="Enter amount"

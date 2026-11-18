@@ -11,7 +11,7 @@ jobs:
   # Backend Verification & Automated Tests
   # ==========================================
   test-backend:
-    name: Backend Test Suite (Phases 1-8)
+    name: Backend Test Suite (11 phases + stress tests)
     runs-on: ubuntu-latest
 
     services:
@@ -66,6 +66,8 @@ jobs:
           DB_PASSWORD: password123
           JWT_SECRET: ci_jwt_secret_test_key_12345
           DISABLE_DB_SSL: 'true'
+          # Turn off the in-process closing sweep, so the Phase 6 test proves the scheduler + worker close auctions
+          SWEEP_INTERVAL_MS: '0'
         run: |
           node src/app.js &
           for i in {1..30}; do
@@ -89,6 +91,19 @@ jobs:
           JWT_SECRET: ci_jwt_secret_test_key_12345
           DISABLE_DB_SSL: 'true'
         run: npm test
+
+      - name: Run Concurrency Stress Tests
+        working-directory: ./backend
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: auctionloom
+          DB_USER: postgres
+          DB_PASSWORD: password123
+          JWT_SECRET: ci_jwt_secret_test_key_12345
+          DISABLE_DB_SSL: 'true'
+        # 100-bid race, double spend, double settlement, republish of a paid lot, cross settlement
+        run: npm run stress
 
   # ==========================================
   # Frontend Build & Typecheck Verification

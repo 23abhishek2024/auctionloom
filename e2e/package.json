@@ -1,0 +1,12 @@
+{
+  "name": "auctionloom-e2e",
+  "private": true,
+  "description": "Browser test of the built frontend against a running API (README: Browser test)",
+  "scripts": {
+    "test": "node browser_test.js"
+  },
+  "devDependencies": {
+    "pg": "^8.23.0",
+    "playwright": "^1.63.0"
+  }
+}
