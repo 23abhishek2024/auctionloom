@@ -707,7 +707,7 @@ SELECT * FROM jobs WHERE status = 'PENDING' ORDER BY created_at LIMIT 1 FOR UPDA
 
 Two suites run in GitHub Actions on every push and pull request to `main`, against a real PostgreSQL service and a running server:
 
-* `npm test` (`verify_phases.mjs`): 11 phases, 111 checks of real behaviour: auth and RBAC, bidding and locking, sockets and chat identity, the real scheduler and worker processes, uploads, wallet and settlement, CORS, input validation, rate limits and the audit regression checks (including the 5% fee in whole cents, reports that count each commission once, final commission-receipt decisions, role guards, tokens from before a password change, live rooms only for real auctions, and a schema with no duplicate indexes and every time column zone-aware).
+* `npm test` (`verify_phases.mjs`): 11 phases, 115 checks of real behaviour: auth and RBAC, bidding and locking, sockets and chat identity, the real scheduler and worker processes, uploads, wallet and settlement, CORS, input validation, rate limits and the audit regression checks (including the 5% fee in whole cents, reports that count each commission once, final commission-receipt decisions, role guards, tokens from before a password change, live rooms only for real auctions, and a schema with no duplicate indexes and every time column zone-aware).
 * `npm run stress` (`stress_test.js`): 6 concurrency scenarios fired at the same moment, each checked in the database afterwards.
 * `e2e/browser_test.js`: a real Chromium (Playwright) drives the built frontend, 33 checks (run locally, not in CI; see Browser test below).
 
