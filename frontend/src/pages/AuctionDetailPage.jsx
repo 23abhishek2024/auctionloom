@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { auctionApi, bidApi, userApi, adminApi, walletApi, resolveImageUrl } from '../api/client';
 import { TopupModal } from '../components/TopupModal';
@@ -186,6 +186,51 @@ export const AuctionDetailPage = () => {
     fetchData();
   }, [id]);
 
+  // Re-load the auction and its bids without the loading spinner. Used when the live connection
+  // comes back, and when a price update doesn't fit what is on screen.
+  const refreshAuction = useCallback(async () => {
+    try {
+      const [auctionRes, bidsRes] = await Promise.all([
+        auctionApi.getById(id),
+        bidApi.getBidsForAuction(id),
+      ]);
+      const fresh = auctionRes.data.auction;
+      if (!fresh) return;
+      setAuction(fresh);
+      if (fresh.is_settled) setLotPaid(true);
+      setBids(bidsRes.data.bids || []);
+      const freshPrice = parseFloat(fresh.current_price);
+      setBidAmount((prev) => {
+        const prevNum = parseFloat(prev);
+        return isNaN(prevNum) || prevNum <= freshPrice ? (freshPrice + 10).toFixed(2) : prev;
+      });
+    } catch (err) {
+      console.warn('Could not refresh the auction:', err.message);
+    }
+  }, [id]);
+
+  // The price on screen, for the PRICE_UPDATE handler below (its closure would see an old copy)
+  const shownPriceRef = useRef(null);
+  useEffect(() => {
+    shownPriceRef.current = auction?.current_price ?? null;
+  }, [auction?.current_price]);
+
+  // After the live connection drops and comes back, re-load: Socket.IO doesn't replay the
+  // PRICE_UPDATEs the server sent while this browser was away (a sleeping laptop, a Wi-Fi drop)
+  const wasConnectedRef = useRef(false);
+  const missedUpdatesRef = useRef(false);
+  useEffect(() => {
+    if (isConnected) {
+      if (missedUpdatesRef.current) {
+        missedUpdatesRef.current = false;
+        refreshAuction();
+      }
+      wasConnectedRef.current = true;
+    } else if (wasConnectedRef.current) {
+      missedUpdatesRef.current = true;
+    }
+  }, [isConnected, refreshAuction]);
+
   // ── 2. Real-time WebSocket Room, Bids, Chat & Reactions (Node.js Video 33) ──
   useEffect(() => {
     if (!id) return;
@@ -197,6 +242,17 @@ export const AuctionDetailPage = () => {
     const handlePriceUpdate = (data) => {
       console.log('[Socket] Live PRICE_UPDATE received:', data);
       if (data.auction_id === id) {
+        // Every accepted bid is higher than the one before, so a price that isn't higher than the
+        // one on screen is a repeat (ignore it) or means this page is out of date, for example an
+        // old update arriving late or a lot republished at a lower price: ask the server instead
+        // of moving the price backwards.
+        const shownCents = Math.round(parseFloat(shownPriceRef.current) * 100);
+        const newCents = Math.round(parseFloat(data.new_price) * 100);
+        if (Number.isFinite(shownCents) && Number.isFinite(newCents) && newCents <= shownCents) {
+          if (newCents < shownCents) refreshAuction();
+          return;
+        }
+        shownPriceRef.current = data.new_price;
         setAuction((prev) => (prev ? { ...prev, current_price: data.new_price } : prev));
 
         const newBidEntry = {
@@ -293,7 +349,7 @@ export const AuctionDetailPage = () => {
       }
       leaveAuction(id);
     };
-  }, [id, socket, isConnected]);
+  }, [id, socket, isConnected, refreshAuction]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
