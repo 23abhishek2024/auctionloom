@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { commissionApi, walletApi, resolveImageUrl } from '../api/client';
 import { TopupModal } from '../components/TopupModal';
+import { topupToCover } from '../utils/money';
 import {
   DollarSign,
   Upload,
@@ -259,14 +260,13 @@ export const SubmitCommissionPage = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    const diff = Math.ceil(unpaidCommission - walletBalance);
-                    setTopupDiffAmount(diff > 0 ? diff : 500);
+                    setTopupDiffAmount(topupToCover(unpaidCommission, walletBalance));
                     setIsTopupModalOpen(true);
                   }}
                   className="py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition-all active:scale-[0.99] flex items-center gap-2 cursor-pointer shrink-0"
                 >
                   <Wallet className="w-3.5 h-3.5" />
-                  <span>Top Up Wallet (+${Math.max(1, Math.ceil(unpaidCommission - walletBalance)).toLocaleString()})</span>
+                  <span>Top Up Wallet (+${topupToCover(unpaidCommission, walletBalance).toLocaleString()})</span>
                 </button>
               </div>
             )}

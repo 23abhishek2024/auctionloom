@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { auctionApi, bidApi, userApi, adminApi, walletApi, resolveImageUrl } from '../api/client';
 import { TopupModal } from '../components/TopupModal';
+import { topupToCover } from '../utils/money';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -1038,14 +1039,13 @@ export const AuctionDetailPage = () => {
                         <button
                           type="button"
                           onClick={() => {
-                            const diff = Math.ceil(parseFloat(auction.current_price) - walletBalance);
-                            setTopupDiffAmount(diff > 0 ? diff : 1000);
+                            setTopupDiffAmount(topupToCover(auction.current_price, walletBalance));
                             setIsTopupModalOpen(true);
                           }}
                           className="w-full py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm shadow-md transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
                         >
                           <Wallet className="w-4 h-4" />
-                          <span>Top Up Wallet Now (+${Math.max(1, Math.ceil(parseFloat(auction.current_price) - walletBalance)).toLocaleString()})</span>
+                          <span>Top Up Wallet Now (+${topupToCover(auction.current_price, walletBalance).toLocaleString()})</span>
                         </button>
                       </div>
                     )}
