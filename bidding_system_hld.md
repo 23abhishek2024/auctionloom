@@ -172,7 +172,7 @@ aution-bid/
 │   │       ├── scheduler.js      # Cron scanner (runs every 30s, enqueues jobs)
 │   │       └── jobWorker.js      # Distributed queue poller (SKIP LOCKED)
 │   ├── schema.sql                # Complete PostgreSQL 15 DDL with constraints & indexes
-│   ├── verify_phases.mjs         # End-to-end test suite (11 phases, 111 checks)
+│   ├── verify_phases.mjs         # End-to-end test suite (11 phases, 115 checks)
 │   ├── stress_test.js            # 6 concurrency stress scenarios
 │   ├── clean_reset_and_verify.js # Automated database purge, seed & live auction simulation
 │   └── Dockerfile                # Production Node.js Alpine container
@@ -203,9 +203,11 @@ aution-bid/
 │   │   │   ├── AboutPage.jsx     # Platform architectural overview
 │   │   │   └── HowItWorksPage.jsx# Interactive bidding & escrow walkthrough
 │   │   └── utils/
-│   │       └── formatters.js     # Currency, date, and countdown formatting utilities
+│   │       ├── formatters.js     # Currency, date, and countdown formatting utilities
+│   │       └── money.js          # Top-up amount that covers a shortfall (in cents)
 │   ├── nginx.conf                # Production SPA reverse proxy with gzip & caching
 │   └── Dockerfile                # Multi-stage production build (Node -> Nginx)
+├── e2e/browser_test.js           # Playwright browser test of the built frontend (33 checks)
 ├── docker-compose.yml            # Multi-service orchestration (db, backend, frontend, worker, scheduler)
 └── render.yaml                   # Render blueprint (free web service; workers need a paid plan)
 ```

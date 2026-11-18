@@ -283,7 +283,7 @@ auctionloom/
 │   │   ├── migrate.js               # Database schema initialization script
 │   │   └── reset_and_seed.js        # Database reset and test user seed script
 │   ├── clean_reset_and_verify.js    # Automated end-to-end database wipe & ledger test
-│   ├── verify_phases.mjs            # End-to-end test suite (11 phases, 111 checks), run in CI
+│   ├── verify_phases.mjs            # End-to-end test suite (11 phases, 115 checks), run in CI
 │   ├── stress_test.js               # Concurrency stress tests (6 scenarios), run in CI
 │   ├── benchmark_concurrency.js     # 100 simultaneous bids: latency + database checks
 │   ├── schema.sql                   # Authoritative PostgreSQL DDL schema definition
@@ -317,7 +317,9 @@ auctionloom/
     │   │   ├── UserHubPage.jsx      # Personal stats, active bids, won lots & payouts
     │   │   └── WalletPage.jsx       # Real-time ledger, top-up modal & transaction logs
     │   ├── utils/                   # Frontend Formatters & Helpers
-    │   │   └── formatters.js        # Currency, date, and countdown formatting utilities
+    │   │   ├── formatters.js        # Currency, date, and countdown formatting utilities
+    │   │   ├── idempotency.js       # Idempotency keys for top-ups and withdrawals
+    │   │   └── money.js             # Top-up amount that covers a shortfall (worked out in cents)
     │   ├── App.jsx                  # React Router configuration & layout scaffold
     │   ├── index.css                # Tailwind CSS directives & custom design tokens
     │   └── main.jsx                 # React DOM mount point
@@ -326,6 +328,10 @@ auctionloom/
     ├── nginx.conf                   # Nginx reverse proxy & SPA HTML5 routing fallback
     ├── package.json                 # Frontend dependencies and scripts
     └── vite.config.js               # Vite build and proxy configuration
+│
+└── e2e/                             # Browser test (Playwright) of the built frontend
+    ├── browser_test.js              # 33 checks: bidding, live updates, reconnects, chat, passwords, admin
+    └── package.json                 # Its own dependencies (playwright, pg)
 ```
 
 ---
@@ -461,7 +467,7 @@ The frontend will be available at [http://localhost:5173](http://localhost:5173)
 | `npm run migrate` | `node scripts/migrate.js` | Executes DDL schema migrations against configured database. |
 | `npm run clean-verify` | `node clean_reset_and_verify.js` | Full DB purge, 6-user reseed, live bid race, and ledger audit. |
 | `npm run benchmark` | `node benchmark_concurrency.js` | 100 simultaneous bids over HTTP: latency percentiles plus database checks (exit code 1 if a check fails). The Admin Dashboard has a similar 1-click benchmark. |
-| `npm test` | `node verify_phases.mjs` | End-to-end suite: 11 phases, 111 checks (server must be running). |
+| `npm test` | `node verify_phases.mjs` | End-to-end suite: 11 phases, 115 checks (server must be running). |
 | `npm run stress` | `node stress_test.js` | 6 concurrency scenarios: bid race, double spend, double settlement, republish of a paid lot, cross settlement, bid vs delete. |
 
 ### Frontend (`frontend/package.json`)
@@ -647,9 +653,9 @@ WebSocket connections are managed by Socket.IO attached to the main HTTP server.
 
 | Event Name | Expected Payload | Handling & Action |
 |---|---|---|
-| `JOIN_AUCTION` | `auctionId` (UUID string) | Joins the socket to the isolated channel `auctionId`. |
+| `JOIN_AUCTION` | `auctionId` (UUID string), optional acknowledgement callback | Joins the socket to the room `auctionId` if that auction exists; the acknowledgement receives `{ joined }`. |
 | `LEAVE_AUCTION` | `auctionId` (UUID string) | Removes the socket from channel `auctionId`. |
-| `SEND_MESSAGE` | `{ auctionId, text, clientId? }` | Logged-in users only (guests get `CHAT_ERROR`). Text trimmed to 500 chars; sender name, id and role come from the server; 5 per 10 s. |
+| `SEND_MESSAGE` | `{ auctionId, text, clientId? }` | Logged-in users only (guests get `CHAT_ERROR`), for an auction that exists. Text trimmed to 500 chars; sender name, id and role come from the server; 5 per 10 s. |
 | `SEND_REACTION` | `{ auctionId, emoji }` | Emoji from the allowlist (`🔥`, `🚀`, `💎`, `👏`, `❤️`, `⚡`, `🎉`); sender set by the server ("Guest" if not logged in). |
 
 ### Server-to-Client Outbound Broadcasts
@@ -658,7 +664,7 @@ WebSocket connections are managed by Socket.IO attached to the main HTTP server.
 |---|---|---|---|
 | `PRICE_UPDATE` | Room (`auctionId`) | `{ auction_id, new_price, bidder_name, bidder_id, bid_id }` | Dispatched immediately after a valid bid commits to PostgreSQL. |
 | `CHAT_MESSAGE` | Room (`auctionId`) | `{ id, clientId, auctionId, text, senderName, senderId, role, timestamp }` | Broadcasts new room chat messages (never an email). |
-| `CHAT_ERROR` | Sender only | `{ auctionId, error }` | Chat refused: not logged in, or sending too fast. |
+| `CHAT_ERROR` | Sender only | `{ auctionId, error }` | Chat refused: not logged in, sending too fast, or no such auction. |
 | `REACTION` | Room (`auctionId`) | `{ id, auctionId, emoji, senderName, timestamp }` | Broadcasts interactive floating emoji reaction to room observers. |
 | `AUCTION_STATUS_CHANGED` | Room (`auctionId`) | `{ auction_id, status: 'ACTIVE' \| 'RESTRICTED', reason, timestamp }` | Broadcast when an administrator freezes or unfreezes a listing. |
 
@@ -699,10 +705,11 @@ SELECT * FROM jobs WHERE status = 'PENDING' ORDER BY created_at LIMIT 1 FOR UPDA
 
 ## 15. Automated Verification & Testing Suite
 
-Two suites run in GitHub Actions on every push, against a real PostgreSQL service and a running server:
+Two suites run in GitHub Actions on every push and pull request to `main`, against a real PostgreSQL service and a running server:
 
-* `npm test` (`verify_phases.mjs`): 11 phases, 111 checks of real behaviour: auth and RBAC, bidding and locking, sockets and chat identity, the real scheduler and worker processes, uploads, wallet and settlement, CORS, input validation, rate limits and the audit regression checks (including the 5% fee in whole cents, reports that count each commission once, final commission-receipt decisions, role guards, and tokens from before a password change).
+* `npm test` (`verify_phases.mjs`): 11 phases, 111 checks of real behaviour: auth and RBAC, bidding and locking, sockets and chat identity, the real scheduler and worker processes, uploads, wallet and settlement, CORS, input validation, rate limits and the audit regression checks (including the 5% fee in whole cents, reports that count each commission once, final commission-receipt decisions, role guards, tokens from before a password change, live rooms only for real auctions, and a schema with no duplicate indexes and every time column zone-aware).
 * `npm run stress` (`stress_test.js`): 6 concurrency scenarios fired at the same moment, each checked in the database afterwards.
+* `e2e/browser_test.js`: a real Chromium (Playwright) drives the built frontend, 33 checks (run locally, not in CI; see Browser test below).
 
 ### Running the Test Suite
 Ensure the backend server is running on port 5000 (CI starts it with `SWEEP_INTERVAL_MS=0`), then execute:
@@ -720,7 +727,7 @@ Phase 1   Server up, API catalogue, JSON 404
 Phase 2   Database: all 9 tables, unique index on open jobs
 Phase 3   Auth, JWT, RBAC, rate-limit headers
 Phase 4   Auction CRUD, admin freeze, row locking (2 identical bids at once: 1 accepted)
-Phase 5   Socket.IO PRICE_UPDATE after commit, no emails in payloads
+Phase 5   Socket.IO PRICE_UPDATE after commit, no emails in payloads, rooms only for real auctions
 Phase 6   Real scheduler + worker processes close an ended auction; re-queue after republish
 Phase 7   CORS and Socket.IO origin allow-list
 Phase 8   AI assistant (RBAC, validation, generation)
@@ -728,11 +735,28 @@ Phase 9   Uploads (stored in PostgreSQL, byte check, nosniff) and chat identity
 Phase 10  Wallet: top-up, overdraft refusal, settlement 95/5, idempotent re-settlement
 Phase 11  Regression checks from the pre-interview audit (precision, fee rounding, errors,
           validation, chat, benchmark, fan-out, report totals, CSV, rate limits, paid-lot
-          delete, status changes, receipts, role guards, stale tokens, ...)
+          delete, status changes, receipts, role guards, stale tokens, indexes, time zones, ...)
 
-Total assertions passed: 111/111
+Total assertions passed: 115/115
 
 Stress tests passed: 6/6
+```
+
+### Browser test
+`e2e/browser_test.js` drives the production build in a real Chromium: guest view, bidding (including the lowest legal bid of a cent), a dropped live connection catching up on the bid it missed, a late price update that must not move the price back, chat between two users and a guest, password change logging out a second device, the AI draft, the admin dashboard, the CSV export and the benchmark. It needs a throwaway database seeded by `reset_and_seed.js` (it changes two test passwords).
+
+```bash
+# 1. API on :5000 against a fresh, seeded database; FRONTEND_URL lets the :4173 page call it (CORS)
+cd backend && npm run migrate && npm run seed && FRONTEND_URL=http://localhost:4173 npm start
+
+# 2. Production build of the frontend pointed at that API, served on :4173
+cd frontend
+VITE_API_URL=http://localhost:5000/api VITE_SOCKET_URL=http://localhost:5000 npm run build
+npx vite preview --port 4173
+
+# 3. The test (same DB_* or DATABASE_URL variables as the API)
+cd e2e && npm install && npx playwright install chromium
+npm test        # E2E_WEB_URL and E2E_API_URL override the two addresses
 ```
 
 ### Complete End-to-End Ledger Verification
