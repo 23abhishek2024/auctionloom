@@ -4,6 +4,7 @@ import { execFile } from 'child_process';
 import { io } from 'socket.io-client';
 import pg from 'pg';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 
 const { Pool } = pg;
 
@@ -326,7 +327,11 @@ async function runVerification() {
   await new Promise((resolve) => socketClient.on('connect', resolve));
   assert('Phase 5', 'Socket.IO client connected to backend server', socketClient.connected);
 
-  socketClient.emit('JOIN_AUCTION', auctionId);
+  // Joining is acknowledged with { joined }, and only a real auction has a live room
+  const joinAck = await socketClient.timeout(5000).emitWithAck('JOIN_AUCTION', auctionId);
+  assert('Phase 5', 'Joining the live room of a real auction is acknowledged', joinAck?.joined === true);
+  const ghostAck = await socketClient.timeout(5000).emitWithAck('JOIN_AUCTION', randomUUID());
+  assert('Phase 5', 'An auction id that does not exist gets no live room', ghostAck?.joined === false);
 
   // Wait for PRICE_UPDATE event
   const priceUpdatePromise = new Promise((resolve, reject) => {
@@ -731,7 +736,7 @@ async function runVerification() {
   const listener = io(SOCKET_URL, { transports: ['websocket'] });
   const guest = io(SOCKET_URL, { transports: ['websocket'] });
   await Promise.all([listener, guest].map((s) => new Promise((resolve) => s.on('connect', resolve))));
-  listener.emit('JOIN_AUCTION', chatRoomId);
+  await listener.timeout(5000).emitWithAck('JOIN_AUCTION', chatRoomId);
   const heard = [];
   listener.on('CHAT_MESSAGE', (m) => heard.push(m));
   const guestError = new Promise((resolve) => guest.on('CHAT_ERROR', resolve));

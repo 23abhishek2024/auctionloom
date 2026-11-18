@@ -94,6 +94,14 @@ const auctionModel = {
   },
 
   /**
+   * Whether an auction with this id exists (one primary-key lookup)
+   */
+  exists: async (id) => {
+    const result = await pool.query('SELECT EXISTS (SELECT 1 FROM auctions WHERE id = $1) AS found', [id]);
+    return result.rows[0].found;
+  },
+
+  /**
    * Get a single auction by ID with a row-level lock.
    * MUST be called inside an active transaction (BEGIN).
    * This is the core of concurrency control — blocks other

@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const { getAllowedOrigins } = require('../utils/allowedOrigins');
 const { isUUID } = require('../utils/validators');
 const { loadTokenUser } = require('../middlewares/auth');
+const auctionModel = require('../models/auctionModel');
 
 let io;
 
@@ -51,6 +52,32 @@ const identify = async (socket) => {
 };
 
 /**
+ * Live rooms exist only for real auctions: a made-up id is refused, so a client can't make the
+ * server keep rooms for ids that mean nothing. A socket already in the room skips the lookup.
+ */
+const canUseRoom = async (socket, auctionId) => {
+  if (!isUUID(auctionId)) return false;
+  if (socket.rooms.has(auctionId)) return true;
+  try {
+    return await auctionModel.exists(auctionId);
+  } catch (err) {
+    console.error('[Socket] Could not check the auction:', err.message);
+    return false;
+  }
+};
+
+/**
+ * Run a connection's room events one after another, in the order the client sent them. Joining
+ * checks the database, so without this a LEAVE (or a chat message) sent right after a JOIN could
+ * be handled before the JOIN finishes.
+ */
+const inOrder = (socket, task) => {
+  socket.data.queue = (socket.data.queue || Promise.resolve()).then(task).catch((err) => {
+    console.error('[Socket] Event failed:', err.message);
+  });
+};
+
+/**
  * Initialize Socket.IO and attach to the HTTP server.
  * Called once from app.js on startup.
  */
@@ -87,21 +114,25 @@ const initSocket = (server) => {
     const who = socket.data.user ? `${socket.data.user.name} (${socket.data.user.role})` : 'guest';
     console.log(`[Socket] Client connected: ${socket.id} as ${who}`);
 
-    // Client joins an auction room to receive live price updates and chat (guests too)
-    socket.on('JOIN_AUCTION', (auctionId) => {
-      if (!isUUID(auctionId)) return;
-      socket.join(auctionId);
-      console.log(`[Socket] ${socket.id} joined auction room: ${auctionId}`);
-    });
+    // Client joins an auction room to receive live price updates and chat (guests too).
+    // An optional acknowledgement callback receives { joined: true | false }.
+    socket.on('JOIN_AUCTION', (auctionId, ack) => inOrder(socket, async () => {
+      const joined = await canUseRoom(socket, auctionId);
+      if (joined) {
+        socket.join(auctionId);
+        console.log(`[Socket] ${socket.id} joined auction room: ${auctionId}`);
+      }
+      if (typeof ack === 'function') ack({ joined });
+    }));
 
-    socket.on('LEAVE_AUCTION', (auctionId) => {
+    socket.on('LEAVE_AUCTION', (auctionId) => inOrder(socket, () => {
       if (!isUUID(auctionId)) return;
       socket.leave(auctionId);
       console.log(`[Socket] ${socket.id} left auction room: ${auctionId}`);
-    });
+    }));
 
     // Real-Time Chat Message: logged-in users only; sender details come from the server
-    socket.on('SEND_MESSAGE', (data) => {
+    socket.on('SEND_MESSAGE', (data) => inOrder(socket, async () => {
       try {
         if (!data || !isUUID(data.auctionId)) return;
         const user = socket.data.user;
@@ -116,6 +147,10 @@ const initSocket = (server) => {
           return;
         }
 
+        if (!(await canUseRoom(socket, data.auctionId))) {
+          socket.emit('CHAT_ERROR', { auctionId: data.auctionId, error: 'This auction does not exist.' });
+          return;
+        }
         // Auto-join room to ensure sender receives room broadcasts
         socket.join(data.auctionId);
 
@@ -137,13 +172,14 @@ const initSocket = (server) => {
       } catch (err) {
         console.error('[Socket] SEND_MESSAGE error:', err.message);
       }
-    });
+    }));
 
     // Real-Time Reaction (Floating Emojis): guests may react too, as "Guest"
-    socket.on('SEND_REACTION', (data) => {
+    socket.on('SEND_REACTION', (data) => inOrder(socket, async () => {
       try {
         if (!data || !isUUID(data.auctionId)) return;
         if (isFlooding(socket, 'reaction')) return;
+        if (!(await canUseRoom(socket, data.auctionId))) return;
         socket.join(data.auctionId);
         const emoji = ALLOWED_REACTIONS.includes(data.emoji) ? data.emoji : '🔥';
         const user = socket.data.user;
@@ -161,7 +197,7 @@ const initSocket = (server) => {
       } catch (err) {
         console.error('[Socket] SEND_REACTION error:', err.message);
       }
-    });
+    }));
 
     socket.on('disconnect', () => {
       console.log(`[Socket] Client disconnected: ${socket.id}`);
