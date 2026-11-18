@@ -982,6 +982,13 @@ async function runVerification() {
   assert('Phase 11', 'No index repeats a UNIQUE constraint (wallets.user_id, wallet_transactions.idempotency_key)',
     dupIndexes.length === 0, dupIndexes.join(', '));
 
+  // 25. Every time column stores its time zone (TIMESTAMPTZ), so a stored time means one moment everywhere
+  const plainTimes = (await pool.query(
+    `SELECT table_name || '.' || column_name AS col FROM information_schema.columns
+     WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'`
+  )).rows.map((r) => r.col);
+  assert('Phase 11', 'Every time column stores its time zone (no plain TIMESTAMP)', plainTimes.length === 0, plainTimes.join(', '));
+
   // 22. Public auction pages check a token like protected routes do: after the seller changes the
   //     password, the old token no longer shows the seller's private field (the winner email preview link).
   //     Runs last: it retires sellerToken.

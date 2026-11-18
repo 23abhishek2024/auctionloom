@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS commission_proofs (
     status          VARCHAR(50) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
     admin_notes     TEXT,
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    reviewed_at     TIMESTAMP,
+    reviewed_at     TIMESTAMP WITH TIME ZONE,
     updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

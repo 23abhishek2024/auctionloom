@@ -61,9 +61,9 @@ async function upgradeSchema() {
       -- Changing the password logs out every other session: tokens issued before this time are refused
       ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP WITH TIME ZONE;
 
-      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS start_time TIMESTAMP;
+      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS start_time TIMESTAMP WITH TIME ZONE;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'General';
-      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS republished_at TIMESTAMP;
+      ALTER TABLE auctions ADD COLUMN IF NOT EXISTS republished_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS commission_amount NUMERIC(12,2) DEFAULT 0.00;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS commission_calculated BOOLEAN DEFAULT FALSE;
       ALTER TABLE auctions ADD COLUMN IF NOT EXISTS is_settled BOOLEAN DEFAULT FALSE;
@@ -108,7 +108,7 @@ async function upgradeSchema() {
       ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS notes TEXT;
       ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS comment TEXT;
       ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS proof_url TEXT;
-      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;
+      ALTER TABLE commission_proofs ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE commission_proofs ALTER COLUMN screenshot_url DROP NOT NULL;
       ALTER TABLE commission_proofs ALTER COLUMN proof_url DROP NOT NULL;
 
@@ -122,8 +122,8 @@ async function upgradeSchema() {
         notes TEXT,
         status VARCHAR(20) DEFAULT 'PENDING',
         admin_notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        reviewed_at TIMESTAMP
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        reviewed_at TIMESTAMP WITH TIME ZONE
       );
       CREATE INDEX IF NOT EXISTS idx_commission_proofs_user ON commission_proofs(user_id);
       CREATE INDEX IF NOT EXISTS idx_commission_proofs_status ON commission_proofs(status);
@@ -161,6 +161,24 @@ async function upgradeSchema() {
       );
       CREATE INDEX IF NOT EXISTS idx_wallet_tx_wallet_id ON wallet_transactions(wallet_id);
       CREATE INDEX IF NOT EXISTS idx_wallet_tx_created_at ON wallet_transactions(created_at DESC);
+      -- Every time column stores its time zone (TIMESTAMPTZ). Older databases can hold some as plain
+      -- TIMESTAMP (reviewed_at always was): convert them. A plain TIMESTAMP was written by NOW() in this
+      -- server's time zone, so it is read back in the same zone (current_setting('TimeZone')).
+      DO $$
+      DECLARE col RECORD;
+      BEGIN
+        FOR col IN
+          SELECT table_name, column_name FROM information_schema.columns
+          WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'
+            AND table_name IN ('users', 'auctions', 'bids', 'jobs', 'commission_proofs', 'wallets',
+                               'wallet_transactions', 'payment_requests', 'uploads')
+        LOOP
+          EXECUTE format(
+            'ALTER TABLE %I ALTER COLUMN %I TYPE TIMESTAMP WITH TIME ZONE USING %I AT TIME ZONE current_setting(''TimeZone'')',
+            col.table_name, col.column_name, col.column_name);
+        END LOOP;
+      END $$;
+
       -- wallets.user_id and wallet_transactions.idempotency_key are UNIQUE, and a UNIQUE constraint
       -- comes with its own index: the two extra indexes only cost space and time on every write.
       -- Each is dropped only where the unique index on that column is there to replace it.
