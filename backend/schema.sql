@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS wallets (
     updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets(user_id);
+-- No separate index on user_id: UNIQUE already creates one
 
 -- ============================================================
 -- 7. WALLET_TRANSACTIONS (append-only ledger: one row per balance change, with balance_after)
@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS wallet_transactions (
 
 CREATE INDEX IF NOT EXISTS idx_wallet_tx_wallet_id ON wallet_transactions(wallet_id);
 CREATE INDEX IF NOT EXISTS idx_wallet_tx_created_at ON wallet_transactions(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_wallet_tx_idempotency ON wallet_transactions(idempotency_key);
+-- idempotency_key is UNIQUE, which already indexes it
 
 -- ============================================================
 -- 8. PAYMENT_REQUESTS (Gateway-Ready Abstraction Layer)

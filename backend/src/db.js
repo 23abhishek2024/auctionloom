@@ -137,7 +137,6 @@ async function upgradeSchema() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets(user_id);
 
       INSERT INTO users (id, email, password_hash, role, name)
       VALUES ('00000000-0000-0000-0000-000000000000', 'treasury@auctionloom.internal', 'SYSTEM_ACCOUNT_DO_NOT_LOGIN', 'admin', 'AuctionLoom Treasury')
@@ -162,7 +161,28 @@ async function upgradeSchema() {
       );
       CREATE INDEX IF NOT EXISTS idx_wallet_tx_wallet_id ON wallet_transactions(wallet_id);
       CREATE INDEX IF NOT EXISTS idx_wallet_tx_created_at ON wallet_transactions(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_wallet_tx_idempotency ON wallet_transactions(idempotency_key);
+      -- wallets.user_id and wallet_transactions.idempotency_key are UNIQUE, and a UNIQUE constraint
+      -- comes with its own index: the two extra indexes only cost space and time on every write.
+      -- Each is dropped only where the unique index on that column is there to replace it.
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM pg_index i
+          JOIN pg_class t ON t.oid = i.indrelid
+          JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = i.indkey[0]
+          WHERE t.relname = 'wallets' AND a.attname = 'user_id' AND i.indisunique AND i.indnatts = 1
+        ) THEN
+          DROP INDEX IF EXISTS idx_wallets_user_id;
+        END IF;
+        IF EXISTS (
+          SELECT 1 FROM pg_index i
+          JOIN pg_class t ON t.oid = i.indrelid
+          JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = i.indkey[0]
+          WHERE t.relname = 'wallet_transactions' AND a.attname = 'idempotency_key' AND i.indisunique AND i.indnatts = 1
+        ) THEN
+          DROP INDEX IF EXISTS idx_wallet_tx_idempotency;
+        END IF;
+      END $$;
 
       CREATE TABLE IF NOT EXISTS payment_requests (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

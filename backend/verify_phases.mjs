@@ -975,6 +975,13 @@ async function runVerification() {
     adminUpgrade.status === 200 && adminRoleNow === 'admin' && selfDemote.status === 400 && treasuryRole.status === 400 && adminRoleAfter === 'admin',
     `upgrade ${adminUpgrade.status} -> ${adminRoleNow}, self ${selfDemote.status}, treasury ${treasuryRole.status}, role after ${adminRoleAfter}`);
 
+  // 24. No index only repeats the index a UNIQUE constraint already has
+  const dupIndexes = (await pool.query(
+    `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname IN ('idx_wallets_user_id', 'idx_wallet_tx_idempotency')`
+  )).rows.map((r) => r.indexname);
+  assert('Phase 11', 'No index repeats a UNIQUE constraint (wallets.user_id, wallet_transactions.idempotency_key)',
+    dupIndexes.length === 0, dupIndexes.join(', '));
+
   // 22. Public auction pages check a token like protected routes do: after the seller changes the
   //     password, the old token no longer shows the seller's private field (the winner email preview link).
   //     Runs last: it retires sellerToken.
